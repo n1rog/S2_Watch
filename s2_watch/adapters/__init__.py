@@ -1,0 +1,1 @@
+"""Source application adapters."""

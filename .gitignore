@@ -1,0 +1,11 @@
+# Build output
+build/
+dist/
+*.egg-info/
+
+# Python caches
+__pycache__/
+.pytest_cache/
+
+# Local S2 Watch data: settings, watch forms, captured messages
+*.db

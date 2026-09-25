@@ -1,0 +1,42 @@
+{
+  "format": "s2-watch-forms",
+  "version": 1,
+  "watch_forms": [
+    {
+      "application": "Commstat",
+      "name": "Weather",
+      "match_text": "\\b(?:thunder\\s*storms?|hail(?:storms?)?|tornado(?:es|s)?|flood(?:ing|s)?|flash\\s*flood(?:s|ing)?|lightning|severe\\s+weather|hazardous\\s+weather|hurricanes?|tropical\\s+storms?|typhoons?|cyclones?|blizzards?|snow\\s*storms?|ice\\s*storms?|freezing\\s+rain|sleet|heavy\\s+rain|high\\s+winds?|wind\\s+gusts?|straight[-\\s]line\\s+winds?|microbursts?|derechos?|dust\\s*storms?|sand\\s*storms?|extreme\\s+heat|heat\\s+waves?|extreme\\s+cold|cold\\s+snaps?|droughts?|dense\\s+fog|low\\s+visibility|(?:excessive|extreme|high|intense|dangerous|oppressive)\\s+heat|heat\\s*(?:warnings?|advisor(?:y|ies)|watch(?:es)?|index|indices|waves?|emergenc(?:y|ies)|domes?|exhaustion|strokes?|illness(?:es)?|related)|record\\s+(?:high|low|heat|cold)s?|triple[-\\s]digits?|(?:bitter(?:ly)?|extreme|dangerous|severe)\\s+cold|cold\\s+(?:waves?|fronts?|air|temps?|temperatures?|weather|advisor(?:y|ies)|warnings?|spells?)|wind\\s*chills?|(?:hard\\s+|killing\\s+)?freeze\\s+(?:warnings?|watch(?:es)?)|hard\\s+freeze|frost\\s+advisor(?:y|ies)|(?:sub|below)[-\\s]?(?:freezing|zero)|freezing\\s+temp(?:erature)?s?|arctic\\s+(?:blast|air|front|outbreak|cold)|polar\\s+vortex|hypotherm\\w*|frostbite|winter\\s+(?:storms?|weather)|snow\\s*(?:fall|ing|accumulations?|expected|emergenc(?:y|ies)|squalls?)|icy\\s+(?:roads?|conditions|streets?|highways?)|black\\s+ice|ice\\s+(?:accumulations?|covered))\\b|(?<![!#\\w.])(?:9\\d|1[0-2]\\d)(?:\\.\\d)?\\s*(?:\u00b0\\s*f?|deg(?:ree|ress)?s?(?:\\s*f)?|f)(?![a-z0-9!\\[/])|(?<![!#\\w.])(?:-\\d{1,2}|[0-2]?\\d|3[0-2])(?:\\.\\d)?\\s*(?:\u00b0\\s*f?|deg(?:ree|ress)?s?(?:\\s*f)?|f)(?![a-z0-9!\\[/])|(?<![!#\\w.])\\d+(?:-\\d+)?\\s*(?:\\\"|in(?:ch(?:es)?)?\\.?)\\s+(?:of\\s+)?snow\\b",
+      "enabled": true,
+      "use_regex": true,
+      "message_type": "",
+      "sender": ""
+    },
+    {
+      "application": "JS8Call",
+      "name": "Weather",
+      "match_text": "\\b(?:thunder\\s*storms?|hail(?:storms?)?|tornado(?:es|s)?|flood(?:ing|s)?|flash\\s*flood(?:s|ing)?|lightning|severe\\s+weather|hazardous\\s+weather|hurricanes?|tropical\\s+storms?|typhoons?|cyclones?|blizzards?|snow\\s*storms?|ice\\s*storms?|freezing\\s+rain|sleet|heavy\\s+rain|high\\s+winds?|wind\\s+gusts?|straight[-\\s]line\\s+winds?|microbursts?|derechos?|dust\\s*storms?|sand\\s*storms?|extreme\\s+heat|heat\\s+waves?|extreme\\s+cold|cold\\s+snaps?|droughts?|dense\\s+fog|low\\s+visibility|(?:excessive|extreme|high|intense|dangerous|oppressive)\\s+heat|heat\\s*(?:warnings?|advisor(?:y|ies)|watch(?:es)?|index|indices|waves?|emergenc(?:y|ies)|domes?|exhaustion|strokes?|illness(?:es)?|related)|record\\s+(?:high|low|heat|cold)s?|triple[-\\s]digits?|(?:bitter(?:ly)?|extreme|dangerous|severe)\\s+cold|cold\\s+(?:waves?|fronts?|air|temps?|temperatures?|weather|advisor(?:y|ies)|warnings?|spells?)|wind\\s*chills?|(?:hard\\s+|killing\\s+)?freeze\\s+(?:warnings?|watch(?:es)?)|hard\\s+freeze|frost\\s+advisor(?:y|ies)|(?:sub|below)[-\\s]?(?:freezing|zero)|freezing\\s+temp(?:erature)?s?|arctic\\s+(?:blast|air|front|outbreak|cold)|polar\\s+vortex|hypotherm\\w*|frostbite|winter\\s+(?:storms?|weather)|snow\\s*(?:fall|ing|accumulations?|expected|emergenc(?:y|ies)|squalls?)|icy\\s+(?:roads?|conditions|streets?|highways?)|black\\s+ice|ice\\s+(?:accumulations?|covered))\\b|(?<![!#\\w.])(?:9\\d|1[0-2]\\d)(?:\\.\\d)?\\s*(?:\u00b0\\s*f?|deg(?:ree|ress)?s?(?:\\s*f)?|f)(?![a-z0-9!\\[/])|(?<![!#\\w.])(?:-\\d{1,2}|[0-2]?\\d|3[0-2])(?:\\.\\d)?\\s*(?:\u00b0\\s*f?|deg(?:ree|ress)?s?(?:\\s*f)?|f)(?![a-z0-9!\\[/])|(?<![!#\\w.])\\d+(?:-\\d+)?\\s*(?:\\\"|in(?:ch(?:es)?)?\\.?)\\s+(?:of\\s+)?snow\\b",
+      "enabled": true,
+      "use_regex": true,
+      "message_type": "",
+      "sender": ""
+    },
+    {
+      "application": "JS8SuperSpotter",
+      "name": "Weather",
+      "match_text": "\\b(?:thunder\\s*storms?|hail(?:storms?)?|tornado(?:es|s)?|flood(?:ing|s)?|flash\\s*flood(?:s|ing)?|lightning|severe\\s+weather|hazardous\\s+weather|hurricanes?|tropical\\s+storms?|typhoons?|cyclones?|blizzards?|snow\\s*storms?|ice\\s*storms?|freezing\\s+rain|sleet|heavy\\s+rain|high\\s+winds?|wind\\s+gusts?|straight[-\\s]line\\s+winds?|microbursts?|derechos?|dust\\s*storms?|sand\\s*storms?|extreme\\s+heat|heat\\s+waves?|extreme\\s+cold|cold\\s+snaps?|droughts?|dense\\s+fog|low\\s+visibility|(?:excessive|extreme|high|intense|dangerous|oppressive)\\s+heat|heat\\s*(?:warnings?|advisor(?:y|ies)|watch(?:es)?|index|indices|waves?|emergenc(?:y|ies)|domes?|exhaustion|strokes?|illness(?:es)?|related)|record\\s+(?:high|low|heat|cold)s?|triple[-\\s]digits?|(?:bitter(?:ly)?|extreme|dangerous|severe)\\s+cold|cold\\s+(?:waves?|fronts?|air|temps?|temperatures?|weather|advisor(?:y|ies)|warnings?|spells?)|wind\\s*chills?|(?:hard\\s+|killing\\s+)?freeze\\s+(?:warnings?|watch(?:es)?)|hard\\s+freeze|frost\\s+advisor(?:y|ies)|(?:sub|below)[-\\s]?(?:freezing|zero)|freezing\\s+temp(?:erature)?s?|arctic\\s+(?:blast|air|front|outbreak|cold)|polar\\s+vortex|hypotherm\\w*|frostbite|winter\\s+(?:storms?|weather)|snow\\s*(?:fall|ing|accumulations?|expected|emergenc(?:y|ies)|squalls?)|icy\\s+(?:roads?|conditions|streets?|highways?)|black\\s+ice|ice\\s+(?:accumulations?|covered))\\b|(?<![!#\\w.])(?:9\\d|1[0-2]\\d)(?:\\.\\d)?\\s*(?:\u00b0\\s*f?|deg(?:ree|ress)?s?(?:\\s*f)?|f)(?![a-z0-9!\\[/])|(?<![!#\\w.])(?:-\\d{1,2}|[0-2]?\\d|3[0-2])(?:\\.\\d)?\\s*(?:\u00b0\\s*f?|deg(?:ree|ress)?s?(?:\\s*f)?|f)(?![a-z0-9!\\[/])|(?<![!#\\w.])\\d+(?:-\\d+)?\\s*(?:\\\"|in(?:ch(?:es)?)?\\.?)\\s+(?:of\\s+)?snow\\b",
+      "enabled": true,
+      "use_regex": true,
+      "message_type": "",
+      "sender": ""
+    },
+    {
+      "application": "MagCommstat",
+      "name": "Weather",
+      "match_text": "\\b(?:thunder\\s*storms?|hail(?:storms?)?|tornado(?:es|s)?|flood(?:ing|s)?|flash\\s*flood(?:s|ing)?|lightning|severe\\s+weather|hazardous\\s+weather|hurricanes?|tropical\\s+storms?|typhoons?|cyclones?|blizzards?|snow\\s*storms?|ice\\s*storms?|freezing\\s+rain|sleet|heavy\\s+rain|high\\s+winds?|wind\\s+gusts?|straight[-\\s]line\\s+winds?|microbursts?|derechos?|dust\\s*storms?|sand\\s*storms?|extreme\\s+heat|heat\\s+waves?|extreme\\s+cold|cold\\s+snaps?|droughts?|dense\\s+fog|low\\s+visibility|(?:excessive|extreme|high|intense|dangerous|oppressive)\\s+heat|heat\\s*(?:warnings?|advisor(?:y|ies)|watch(?:es)?|index|indices|waves?|emergenc(?:y|ies)|domes?|exhaustion|strokes?|illness(?:es)?|related)|record\\s+(?:high|low|heat|cold)s?|triple[-\\s]digits?|(?:bitter(?:ly)?|extreme|dangerous|severe)\\s+cold|cold\\s+(?:waves?|fronts?|air|temps?|temperatures?|weather|advisor(?:y|ies)|warnings?|spells?)|wind\\s*chills?|(?:hard\\s+|killing\\s+)?freeze\\s+(?:warnings?|watch(?:es)?)|hard\\s+freeze|frost\\s+advisor(?:y|ies)|(?:sub|below)[-\\s]?(?:freezing|zero)|freezing\\s+temp(?:erature)?s?|arctic\\s+(?:blast|air|front|outbreak|cold)|polar\\s+vortex|hypotherm\\w*|frostbite|winter\\s+(?:storms?|weather)|snow\\s*(?:fall|ing|accumulations?|expected|emergenc(?:y|ies)|squalls?)|icy\\s+(?:roads?|conditions|streets?|highways?)|black\\s+ice|ice\\s+(?:accumulations?|covered))\\b|(?<![!#\\w.])(?:9\\d|1[0-2]\\d)(?:\\.\\d)?\\s*(?:\u00b0\\s*f?|deg(?:ree|ress)?s?(?:\\s*f)?|f)(?![a-z0-9!\\[/])|(?<![!#\\w.])(?:-\\d{1,2}|[0-2]?\\d|3[0-2])(?:\\.\\d)?\\s*(?:\u00b0\\s*f?|deg(?:ree|ress)?s?(?:\\s*f)?|f)(?![a-z0-9!\\[/])|(?<![!#\\w.])\\d+(?:-\\d+)?\\s*(?:\\\"|in(?:ch(?:es)?)?\\.?)\\s+(?:of\\s+)?snow\\b",
+      "enabled": true,
+      "use_regex": true,
+      "message_type": "",
+      "sender": ""
+    }
+  ]
+}

@@ -1,0 +1,42 @@
+{
+  "format": "s2-watch-forms",
+  "version": 1,
+  "watch_forms": [
+    {
+      "application": "Commstat",
+      "name": "Civil Unrest",
+      "match_text": "\\b(?:riot(?:s|ing|ers?|ous)?|riot\\s+(?:police|gear)|protest(?:s|ers?|ors?|ing|ed)?|(?:counter|anti)[-\\s]?protest(?:s|ers?|ors?)?|protest\\s+march(?:es)?|demonstrat(?:ions|ors?)|marchers|unrest|civil\\s+(?:disorder|disturbances?|tensions?)|loot(?:ing|ers?|ed)|curfews?|tear\\s*gas(?:sed)?|rubber\\s+bullets?|pepper\\s*(?:spray(?:ed)?|balls?)|flash\\s*bangs?|less[-\\s]lethal|unlawful\\s+assembl(?:y|ies)|dispersal\\s+orders?|rall(?:y|ies)(?!\\s+points?)|sit[-\\s]ins?|mobs?|uprisings?|insurrection(?:s|ists?)?|no\\s+kings|may\\s+day\\s+(?:protests?|rallies|marches|actions?)|(?:angry|violent|large|hostile|unruly)\\s+crowds?|agitators?|national\\s+guard\\s+(?:deployed|deploying|activated|called\\s+(?:in|up|out)|mobiliz\\w+|troops)|blocking\\s+(?:roads?|streets?|highways?|traffic|intersections?|freeways?))\\b",
+      "enabled": true,
+      "use_regex": true,
+      "message_type": "",
+      "sender": ""
+    },
+    {
+      "application": "JS8Call",
+      "name": "Civil Unrest",
+      "match_text": "\\b(?:riot(?:s|ing|ers?|ous)?|riot\\s+(?:police|gear)|protest(?:s|ers?|ors?|ing|ed)?|(?:counter|anti)[-\\s]?protest(?:s|ers?|ors?)?|protest\\s+march(?:es)?|demonstrat(?:ions|ors?)|marchers|unrest|civil\\s+(?:disorder|disturbances?|tensions?)|loot(?:ing|ers?|ed)|curfews?|tear\\s*gas(?:sed)?|rubber\\s+bullets?|pepper\\s*(?:spray(?:ed)?|balls?)|flash\\s*bangs?|less[-\\s]lethal|unlawful\\s+assembl(?:y|ies)|dispersal\\s+orders?|rall(?:y|ies)(?!\\s+points?)|sit[-\\s]ins?|mobs?|uprisings?|insurrection(?:s|ists?)?|no\\s+kings|may\\s+day\\s+(?:protests?|rallies|marches|actions?)|(?:angry|violent|large|hostile|unruly)\\s+crowds?|agitators?|national\\s+guard\\s+(?:deployed|deploying|activated|called\\s+(?:in|up|out)|mobiliz\\w+|troops)|blocking\\s+(?:roads?|streets?|highways?|traffic|intersections?|freeways?))\\b",
+      "enabled": true,
+      "use_regex": true,
+      "message_type": "",
+      "sender": ""
+    },
+    {
+      "application": "JS8SuperSpotter",
+      "name": "Civil Unrest",
+      "match_text": "\\b(?:riot(?:s|ing|ers?|ous)?|riot\\s+(?:police|gear)|protest(?:s|ers?|ors?|ing|ed)?|(?:counter|anti)[-\\s]?protest(?:s|ers?|ors?)?|protest\\s+march(?:es)?|demonstrat(?:ions|ors?)|marchers|unrest|civil\\s+(?:disorder|disturbances?|tensions?)|loot(?:ing|ers?|ed)|curfews?|tear\\s*gas(?:sed)?|rubber\\s+bullets?|pepper\\s*(?:spray(?:ed)?|balls?)|flash\\s*bangs?|less[-\\s]lethal|unlawful\\s+assembl(?:y|ies)|dispersal\\s+orders?|rall(?:y|ies)(?!\\s+points?)|sit[-\\s]ins?|mobs?|uprisings?|insurrection(?:s|ists?)?|no\\s+kings|may\\s+day\\s+(?:protests?|rallies|marches|actions?)|(?:angry|violent|large|hostile|unruly)\\s+crowds?|agitators?|national\\s+guard\\s+(?:deployed|deploying|activated|called\\s+(?:in|up|out)|mobiliz\\w+|troops)|blocking\\s+(?:roads?|streets?|highways?|traffic|intersections?|freeways?))\\b",
+      "enabled": true,
+      "use_regex": true,
+      "message_type": "",
+      "sender": ""
+    },
+    {
+      "application": "MagCommstat",
+      "name": "Civil Unrest",
+      "match_text": "\\b(?:riot(?:s|ing|ers?|ous)?|riot\\s+(?:police|gear)|protest(?:s|ers?|ors?|ing|ed)?|(?:counter|anti)[-\\s]?protest(?:s|ers?|ors?)?|protest\\s+march(?:es)?|demonstrat(?:ions|ors?)|marchers|unrest|civil\\s+(?:disorder|disturbances?|tensions?)|loot(?:ing|ers?|ed)|curfews?|tear\\s*gas(?:sed)?|rubber\\s+bullets?|pepper\\s*(?:spray(?:ed)?|balls?)|flash\\s*bangs?|less[-\\s]lethal|unlawful\\s+assembl(?:y|ies)|dispersal\\s+orders?|rall(?:y|ies)(?!\\s+points?)|sit[-\\s]ins?|mobs?|uprisings?|insurrection(?:s|ists?)?|no\\s+kings|may\\s+day\\s+(?:protests?|rallies|marches|actions?)|(?:angry|violent|large|hostile|unruly)\\s+crowds?|agitators?|national\\s+guard\\s+(?:deployed|deploying|activated|called\\s+(?:in|up|out)|mobiliz\\w+|troops)|blocking\\s+(?:roads?|streets?|highways?|traffic|intersections?|freeways?))\\b",
+      "enabled": true,
+      "use_regex": true,
+      "message_type": "",
+      "sender": ""
+    }
+  ]
+}
