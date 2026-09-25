@@ -22,7 +22,7 @@ names are looked up in bundled gazetteers rather than spotted by capitalisation.
 import json
 import re
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 
@@ -57,6 +57,8 @@ class ResolvedLocation:
     lat: float
     lon: float
     label: str
+    state: str | None = None     # two-letter abbreviation, when known
+    region: int | None = None    # MARS region 1-10, when known
 
     @property
     def kind(self) -> str:
@@ -81,9 +83,35 @@ class Gazetteer:
     region_shapes: dict[int, list[list[list[tuple[float, float]]]]]
     counties: dict[str, list[dict]]                  # normalized name -> entries
     places: dict[str, list[dict]]                    # normalized name -> entries
+    _point_cache: dict = field(default_factory=dict)
 
     def in_region(self, region: int, lat: float, lon: float) -> bool:
         return any(_point_in_polygon(lat, lon, polygon) for polygon in self.region_shapes.get(region, []))
+
+    def locate_point(self, lat: float, lon: float) -> tuple[str | None, int | None]:
+        """State (nearest county centre, if close) and MARS region of a coordinate."""
+        key = (round(lat, 2), round(lon, 2))
+        if key not in self._point_cache:
+            nearest = min(
+                (county for entries in self.counties.values() for county in entries),
+                key=lambda county: (county["lat"] - lat) ** 2 + (county["lon"] - lon) ** 2,
+            )
+            close = (nearest["lat"] - lat) ** 2 + (nearest["lon"] - lon) ** 2 <= 1.5 ** 2
+            state = nearest["state"] if close else None
+            region = self.state_region.get(state) if state else None
+            if region is None:
+                region = next((r for r in self.region_shapes if self.in_region(r, lat, lon)), None)
+            self._point_cache[key] = (state, region)
+        return self._point_cache[key]
+
+    def with_area(self, location: "ResolvedLocation") -> "ResolvedLocation":
+        """Fill in a location's state and region where the level did not already give them."""
+        if location.state or location.region:
+            region = location.region or self.state_region.get(location.state or "")
+            return ResolvedLocation(location.level, location.lat, location.lon, location.label,
+                                    location.state, region)
+        state, region = self.locate_point(location.lat, location.lon)
+        return ResolvedLocation(location.level, location.lat, location.lon, location.label, state, region)
 
 
 def _point_in_polygon(lat: float, lon: float, rings: list[list[tuple[float, float]]]) -> bool:
@@ -157,7 +185,7 @@ class LocationResolver:
         for level in LEVELS:
             found = getattr(self, f"_{level}")(upper, text, fields, context, message)
             if found:
-                return list(dict.fromkeys(found))
+                return [self.gazetteer.with_area(location) for location in dict.fromkeys(found)]
         return []
 
     # -- context: states and regions named anywhere in the message ---------------------
@@ -290,7 +318,8 @@ class LocationResolver:
         return None
 
     def _place_location(self, place: dict) -> ResolvedLocation:
-        return ResolvedLocation("city", place["lat"], place["lon"], f"{place['name']}, {place['state']}")
+        return ResolvedLocation("city", place["lat"], place["lon"], f"{place['name']}, {place['state']}",
+                                place["state"])
 
     def _geocode(self, candidates, context) -> list[ResolvedLocation]:
         g = self.gazetteer
@@ -329,7 +358,7 @@ class LocationResolver:
                     county = counties[0]
                     found.append(ResolvedLocation(
                         "county", county["lat"], county["lon"],
-                        f"{county['name']} {county['kind']}, {county['state']}",
+                        f"{county['name']} {county['kind']}, {county['state']}", county["state"],
                     ))
                 break
         return found
@@ -337,7 +366,7 @@ class LocationResolver:
     def _state(self, upper, text, fields, context, message):
         g = self.gazetteer
         return [
-            ResolvedLocation("state", *g.state_anchor[state], f"{g.state_names[state]}")
+            ResolvedLocation("state", *g.state_anchor[state], f"{g.state_names[state]}", state)
             for state in dict.fromkeys(context["states"] + context["suffix_states"])
             if state in g.state_anchor
         ]
@@ -345,7 +374,8 @@ class LocationResolver:
     def _region(self, upper, text, fields, context, message):
         g = self.gazetteer
         return [
-            ResolvedLocation("region", *g.region_anchor[region], f"MARS Region {region} (MR{region:02d})")
+            ResolvedLocation("region", *g.region_anchor[region], f"MARS Region {region} (MR{region:02d})",
+                             None, region)
             for region in context["regions"] if region in g.region_anchor
         ]
 

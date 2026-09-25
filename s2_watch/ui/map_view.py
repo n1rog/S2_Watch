@@ -288,6 +288,9 @@ html,body,#map{{height:100%;margin:0}}
 .place-label{{background:none;border:none}}
 .place-label span{{display:block;transform:translate(-50%,-50%);white-space:nowrap;font:11px sans-serif;color:#37474f;text-shadow:0 0 2px #f2efe9,0 0 2px #f2efe9,0 0 2px #f2efe9}}
 .category-marker span{{display:flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:50%;color:white;font-weight:bold;font-size:15px;border:2px solid white;box-shadow:0 1px 4px #555}}
+.radar-stamp{{background:rgba(255,255,255,.88);color:#1b1b1b;padding:3px 8px;border-radius:4px;font:12px sans-serif;box-shadow:0 1px 3px rgba(0,0,0,.3)}}
+.radar-stamp span{{color:#52514e}}
+.radar-stamp .radar-step{{margin-left:4px;font-variant-numeric:tabular-nums}}
 .region-label{{background:none;border:none}}
 .region-label span{{display:block;transform:translate(-50%,-50%);white-space:nowrap;font:bold 13px sans-serif;color:#263238;text-shadow:0 0 3px white,0 0 3px white,0 0 3px white}}
 .stack-cluster span{{display:flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:50%;color:white;font:bold 13px sans-serif;border:3px solid white;box-shadow:0 0 0 2px rgba(0,0,0,.35),0 1px 5px #555}}
@@ -377,31 +380,109 @@ function setRegionsVisible(visible) {{
   if (visible && !map.hasLayer(regionLayer)) regionLayer.addTo(map);
   if (!visible && map.hasLayer(regionLayer)) map.removeLayer(regionLayer);
 }}
-// Weather radar: the latest RainViewer frame, refreshed every 10 minutes. The map used to
-// animate the last 3 hours of frames, but any animation keeps the embedded browser
-// decoding images: a new layer per step grew memory about 1 MB/s (the page was killed for
-// lack of memory within hours), and even cross-fading prebuilt layers grew steadily. A
-// still image of the latest frame keeps memory flat.
+// Weather radar: RainViewer's last 2 hours (13 frames, 10 minutes apart) as a loop.
+// Each frame's tile images are decoded once into ImageBitmaps and kept; the loop only
+// redraws the map's canvas tiles from them. Letting the browser swap image layers
+// instead (new layers per step, or fading prebuilt ones) re-decoded images endlessly and
+// grew memory until the map was killed. The frame list refreshes every 10 minutes.
+const RADAR_HISTORY_SECONDS = 2 * 60 * 60;
 let radarVisible = false;
-let radarLayer = null;
-let radarPath = null;
+let radarHost = '';
+let radarFrames = [];            // [{{path, time}}], oldest first
+let radarFrameIndex = 0;
+let radarAnimation = null;
 let radarRefresh = null;
-async function refreshRadar() {{
+const radarBitmaps = new Map();  // "path|z/x/y" -> Promise<ImageBitmap|null>
+const RadarLayer = L.GridLayer.extend({{
+  createTile(coords) {{
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = 256;
+    canvas.coords = coords;
+    drawRadarTile(canvas);
+    return canvas;
+  }},
+}});
+const radarLayer = new RadarLayer({{opacity:0.55, attribution:'Radar © RainViewer'}});
+radarLayer.on('tileunload', event => {{
+  const suffix = '|' + event.coords.z + '/' + event.coords.x + '/' + event.coords.y;
+  for (const [key, bitmap] of radarBitmaps) {{
+    if (key.endsWith(suffix)) {{
+      bitmap.then(image => image && image.close());
+      radarBitmaps.delete(key);
+    }}
+  }}
+}});
+function radarBitmap(path, coords) {{
+  const key = path + '|' + coords.z + '/' + coords.x + '/' + coords.y;
+  if (!radarBitmaps.has(key)) {{
+    const image = new Image();
+    image.crossOrigin = 'anonymous';
+    image.src = radarHost + path + '/256/' + coords.z + '/' + coords.x + '/' + coords.y + '/2/1_1.png';
+    radarBitmaps.set(key, image.decode().then(() => createImageBitmap(image)).catch(() => null));
+  }}
+  return radarBitmaps.get(key);
+}}
+function drawRadarTile(canvas) {{
+  const frame = radarFrames[radarFrameIndex];
+  if (!frame) return;
+  radarFrames.forEach(other => radarBitmap(other.path, canvas.coords));  // decode every frame once
+  radarBitmap(frame.path, canvas.coords).then(bitmap => {{
+    if (radarFrames[radarFrameIndex] !== frame) return;
+    const context = canvas.getContext('2d');
+    context.clearRect(0, 0, 256, 256);
+    if (bitmap) context.drawImage(bitmap, 0, 0);
+  }});
+}}
+function drawRadarFrame() {{
+  for (const tile of Object.values(radarLayer._tiles || {{}})) drawRadarTile(tile.el);
+  updateRadarStamp();
+}}
+const radarStamp = L.control({{position:'bottomleft'}});
+radarStamp.onAdd = () => {{
+  const element = L.DomUtil.create('div', 'radar-stamp');
+  L.DomEvent.disableClickPropagation(element);
+  return element;
+}};
+function updateRadarStamp() {{
+  const element = radarStamp.getContainer();
+  const frame = radarFrames[radarFrameIndex];
+  if (!element) return;
+  if (!frame) {{ element.textContent = 'Radar: loading…'; return; }}
+  const when = new Date(frame.time * 1000);
+  const minutes = Math.max(0, Math.round((Date.now() - when.getTime()) / 60000));
+  const stamp = when.toLocaleString([], {{weekday:'short', month:'short', day:'numeric', hour:'2-digit', minute:'2-digit', timeZoneName:'short'}});
+  const latest = radarFrameIndex === radarFrames.length - 1;
+  element.innerHTML = '<b>Radar</b> ' + escapeHtml(stamp) + ' <span>' +
+    (latest ? '(latest' + (minutes ? ', ' + minutes + ' min ago' : '') + ')' : '(' + minutes + ' min ago)') +
+    '</span> <span class="radar-step">' + (radarFrameIndex + 1) + '/' + radarFrames.length + '</span>';
+}}
+function stepRadar() {{
+  if (!radarFrames.length) return;
+  // Hold on the newest frame for three steps so "now" is readable.
+  stepRadar.hold = radarFrameIndex === radarFrames.length - 1 ? (stepRadar.hold || 0) + 1 : 0;
+  if (stepRadar.hold && stepRadar.hold < 3) return;
+  radarFrameIndex = (radarFrameIndex + 1) % radarFrames.length;
+  drawRadarFrame();
+}}
+async function refreshRadarFrames() {{
   try {{
     const response = await fetch('https://api.rainviewer.com/public/weather-maps.json');
     const data = await response.json();
-    const frames = data.radar && data.radar.past ? data.radar.past : [];
-    if (!radarVisible || !frames.length) return;
-    const latest = frames[frames.length - 1];
-    if (latest.path === radarPath) return;
-    const layer = L.tileLayer(data.host + latest.path + '/256/{{z}}/{{x}}/{{y}}/2/1_1.png', {{
-      opacity:0.55,
-      attribution:'Radar © RainViewer, ' + new Date(latest.time * 1000).toLocaleTimeString([], {{hour:'2-digit', minute:'2-digit'}}),
-    }}).addTo(map);
-    if (radarLayer) map.removeLayer(radarLayer);
-    radarLayer = layer;
-    radarPath = latest.path;
+    if (!radarVisible) return;
+    const cutoff = Math.floor(Date.now() / 1000) - RADAR_HISTORY_SECONDS;
+    const frames = (data.radar && data.radar.past ? data.radar.past : []).filter(frame => frame.time >= cutoff);
+    radarHost = data.host;
+    const keep = new Set(frames.map(frame => frame.path));
+    for (const [key, bitmap] of radarBitmaps) {{
+      if (!keep.has(key.split('|')[0])) {{ bitmap.then(image => image && image.close()); radarBitmaps.delete(key); }}
+    }}
+    const showingLatest = radarFrameIndex >= radarFrames.length - 1;
+    radarFrames = frames.map(frame => ({{path: frame.path, time: frame.time}}));
+    radarFrameIndex = showingLatest ? radarFrames.length - 1 : Math.min(radarFrameIndex, radarFrames.length - 1);
+    drawRadarFrame();
   }} catch (error) {{
+    const element = radarStamp.getContainer();
+    if (element) element.textContent = 'Radar unavailable (no network?)';
     console.error('Weather radar unavailable', error);
   }}
 }}
@@ -409,14 +490,21 @@ function setRadarVisible(visible) {{
   if (visible === radarVisible) return;
   radarVisible = visible;
   if (visible) {{
-    refreshRadar();
-    radarRefresh = setInterval(refreshRadar, 10 * 60 * 1000);
+    radarLayer.addTo(map);
+    radarStamp.addTo(map);
+    updateRadarStamp();
+    refreshRadarFrames();
+    radarAnimation = setInterval(stepRadar, 750);
+    radarRefresh = setInterval(refreshRadarFrames, 10 * 60 * 1000);
     return;
   }}
+  clearInterval(radarAnimation);
   clearInterval(radarRefresh);
-  if (radarLayer) map.removeLayer(radarLayer);
-  radarLayer = null;
-  radarPath = null;
+  map.removeLayer(radarLayer);
+  radarStamp.remove();
+  for (const bitmap of radarBitmaps.values()) bitmap.then(image => image && image.close());
+  radarBitmaps.clear();
+  radarFrames = [];
 }}
 const markersByKey = new Map();
 function clusterIcon(cluster) {{

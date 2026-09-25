@@ -332,10 +332,9 @@ def test_rescan_shows_messages_again_without_saving_duplicates(tmp_path: Path) -
             return [Message("FLMSG", "FLOODING ON MAIN ST", fields={"filename": "a.k2s"})]
 
     store = SQLiteStore(tmp_path / "s2.db")
-    saved_keys: set = set()
     shown = []
     form = WatchForm("FLMSG", "Weather", "flood")
-    for _ in range(2):  # the second pass is a re-scan with fresh adapters
-        Monitor([Source()], [form], store, shown.append, saved_keys=saved_keys).poll()
+    for _ in range(2):  # the second pass is a re-scan (or a restart) with fresh adapters
+        Monitor([Source()], [form], store, shown.append).poll()
     assert len(shown) == 2
     assert len(store.search_history(text="FLOODING")) == 1

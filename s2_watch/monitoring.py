@@ -1,3 +1,4 @@
+import hashlib
 from collections.abc import Callable, Iterable
 
 from s2_watch.adapters.base import ApplicationAdapter
@@ -6,13 +7,14 @@ from s2_watch.models import ANY_APPLICATION, Message, WatchForm
 from s2_watch.storage import SQLiteStore
 
 
-def message_key(message: Message) -> tuple:
-    """Identity of a source message across re-reads (FLMSG files have no timestamp)."""
+def message_key(message: Message) -> str:
+    """Identity of a source message across re-reads and restarts (FLMSG files have no timestamp)."""
     identity = (
         message.fields.get("message_id") or message.fields.get("filename")
         or message.received_at.isoformat()
     )
-    return (message.source_application, message.fields.get("type", ""), identity, message.raw_content)
+    parts = (message.source_application, message.fields.get("type", ""), identity, message.raw_content)
+    return hashlib.sha1("\x1f".join(parts).encode("utf-8")).hexdigest()
 
 
 class Monitor:
@@ -24,7 +26,7 @@ class Monitor:
         on_match: Callable[[Message], None],
         analyzer: NewsAnalyzer | None = None,
         on_analysis: Callable[[Message, AnalysisResult], None] | None = None,
-        saved_keys: set | None = None,
+        on_saved: Callable[[int, Message, AnalysisResult | None], None] | None = None,
     ) -> None:
         self.adapters = list(adapters)
         self.forms = list(forms)
@@ -34,9 +36,8 @@ class Monitor:
         self.on_analysis = on_analysis
         # Set from another thread to abandon a long poll (e.g. a large backlog) promptly.
         self.cancelled = False
-        # Messages already saved; a re-scan of the review window shows them again
-        # without saving duplicates.
-        self.saved_keys = saved_keys
+        # Called with each saved message's id, e.g. to link it to its report.
+        self.on_saved = on_saved
 
     def poll(self) -> None:
         active_applications = {
@@ -60,17 +61,14 @@ class Monitor:
                     form_name=matching_form.name,
                     fields=message.fields,
                 )
-                key = message_key(message)
-                if self.saved_keys is not None and key in self.saved_keys:
-                    message_id = None
-                else:
-                    message_id = self.store.save_message(matched)
-                    if self.saved_keys is not None:
-                        self.saved_keys.add(key)
+                # A message read again (a re-scan or a restart) keeps its original row.
+                message_id = self.store.save_message(matched, message_key(message))
                 self.on_match(matched)
+                result = None
                 if self.analyzer:
                     result = self.analyzer.analyze(matched)
-                    if message_id is not None:
-                        self.store.save_analysis(message_id, result)
-                    if self.on_analysis:
-                        self.on_analysis(matched, result)
+                    self.store.save_analysis(message_id, result)
+                if self.on_saved:
+                    self.on_saved(message_id, matched, result)
+                if result is not None and self.on_analysis:
+                    self.on_analysis(matched, result)

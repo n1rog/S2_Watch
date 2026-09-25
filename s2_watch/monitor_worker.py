@@ -15,7 +15,7 @@ from s2_watch.geocoding import NominatimGeocoder
 from s2_watch.locating import LocationResolver, ResolvedLocation
 from s2_watch.models import Message, WatchForm
 from s2_watch.monitoring import Monitor
-from s2_watch.storage import SQLiteStore
+from s2_watch.storage import ReportInfo, SQLiteStore
 
 BATCH_SIZE = 200
 
@@ -33,6 +33,7 @@ class ProcessedMessage:
     message: Message
     result: AnalysisResult | None
     locations: list[ResolvedLocation]
+    report: ReportInfo | None = None
 
 
 class MonitorWorker(QObject):
@@ -46,7 +47,6 @@ class MonitorWorker(QObject):
         self.adapters: list = []
         self.resolver = LocationResolver()
         self._batch: list[ProcessedMessage] = []
-        self._saved_keys: set = set()
         self._timer: QTimer | None = None
 
     @Slot()
@@ -68,7 +68,7 @@ class MonitorWorker(QObject):
         )
         self.monitor = Monitor(
             self.adapters, config.forms, self.store, self._matched, config.analyzer, self._analysed,
-            self._saved_keys,
+            self._saved,
         ) if self.adapters and self.store else None
 
     @Slot()
@@ -105,6 +105,18 @@ class MonitorWorker(QObject):
         self._batch.append(ProcessedMessage(message, None, self.resolver.resolve(message)))
         if self.monitor and self.monitor.analyzer is None and len(self._batch) >= BATCH_SIZE:
             self._flush()
+
+    def _saved(self, message_id: int, message: Message, result: AnalysisResult | None) -> None:
+        if not self._batch or self._batch[-1].message is not message:
+            return
+        processed = self._batch[-1]
+        # The report's area: the most specific location's state and MARS region.
+        area = next((location for location in processed.locations if location.state or location.region), None)
+        processed.report = self.store.assign_report(
+            message_id, message, result,
+            state=area.state or "" if area else "",
+            region=area.region if area else None,
+        )
 
     def _analysed(self, message: Message, result: AnalysisResult) -> None:
         if self._batch and self._batch[-1].message is message:

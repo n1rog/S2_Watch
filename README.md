@@ -111,11 +111,13 @@ Displayed timestamps use `MMM-DD-YY HH:MM` format. **Configuration â†’ Displayâ€
 choice between Local time and Zulu (UTC), and the choice applies to Live
 Monitor, Newsworthiness, and History displays.
 The Map tab includes persisted **Show weather radar** and **Show map filters**
-toggles. When enabled, weather radar shows the latest RainViewer radar image
-(its time is shown in the map attribution), refreshed every 10 minutes; this
-requires network access from the embedded map. Radar is off by default. It is a
-still image rather than a loop because animating radar in the embedded browser
-grew its memory without limit until the map was killed.
+toggles. When enabled, weather radar loops through RainViewer's last 2 hours of
+radar (frames 10 minutes apart, pausing on the newest), and a stamp in the map's
+lower-left corner shows the date and time of the frame on screen and how old it
+is. The frame list refreshes every 10 minutes; RainViewer currently provides no
+forecast frames. Radar needs network access and is off by default. Each frame's
+images are decoded once and redrawn onto the map, because letting the embedded
+browser swap radar image layers grew its memory until the map was killed.
 Live Monitor rows can be sorted by clicking a column header. Double-clicking a
 message opens a detail popup containing all of its displayed fields.
 Double-clicking a Newsworthiness row opens a formatted analysis popup with its
@@ -246,6 +248,10 @@ S2 Watch's icon (a radar scope with a highlighted contact) is in
 entry such as `~/.local/share/applications/s2-watch.desktop` should set
 `Icon=` to the SVG, `Path=` to the folder holding `s2_watch.db`, and
 `StartupWMClass=s2-watch`.
+
+Each matched message is saved to History once, identified by its source, even
+though the review window is re-read at every launch and whenever watch forms
+change.
 
 Closing the main window stops monitoring and exits S2 Watch completely. The
 system-tray icon carries desktop alerts; its menu can bring the window forward
