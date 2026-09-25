@@ -43,6 +43,7 @@ from s2_watch.storage import SQLiteStore
 from s2_watch.ui.icons import app_icon
 from s2_watch.ui.map_view import MapView
 from s2_watch.ui.metrics_view import MetricsView
+from s2_watch.overlays import NwsAlertsPoller
 from s2_watch.ui.watch_form_dialog import WatchFormDialog
 
 
@@ -232,6 +233,25 @@ class MainWindow(QMainWindow):
         )
         self.map_radar_filter.stateChanged.connect(self.map_radar_changed)
         map_filter_layout.addWidget(self.map_radar_filter)
+        # Optional overlays, each remembered: (map overlay, setting key, label, tooltip).
+        self.map_overlay_filters: dict[str, QCheckBox] = {}
+        for overlay, label, tooltip in (
+            ("nws", "Show NWS watches && warnings",
+             "Active National Weather Service alerts, coloured by severity (needs internet; refreshed every 5 minutes)."),
+            ("coverage", "Show station coverage",
+             "Shades each grid square by when a station there was last heard, so quiet areas stand out."),
+            ("greyline", "Show day / night (grey line)",
+             "Shades the night side of the Earth; HF propagation changes along the grey line."),
+        ):
+            checkbox = QCheckBox(label)
+            checkbox.setToolTip(tooltip)
+            checkbox.setChecked(self.store.get_setting(f"map.{overlay}.visible", "0") == "1")
+            checkbox.stateChanged.connect(lambda _state, overlay=overlay: self.map_overlay_changed(overlay))
+            self.map_overlay_filters[overlay] = checkbox
+            map_filter_layout.addWidget(checkbox)
+        self.nws_poller = NwsAlertsPoller(parent=self)
+        self.nws_poller.alerts_ready.connect(self.map_view.set_nws_alerts)
+        self.nws_poller.failed.connect(self.map_view.set_nws_error)
         self.map_online_tiles = QCheckBox("Use online map tiles (OpenStreetMap)")
         self.map_online_tiles.setToolTip(
             "When off, or when there is no network, the map uses its built-in offline base map."
@@ -354,7 +374,9 @@ class MainWindow(QMainWindow):
         map_layout.addWidget(self.map_filter_button)
         self.map_view.setMinimumHeight(500)
         map_layout.addWidget(self.map_view, 3)
-        map_layout.addWidget(QLabel("Newsworthiness"))
+        self.news_label = QLabel()
+        map_layout.addWidget(self.news_label)
+        self.update_news_label()
         map_layout.addWidget(self.analysis, 2)
 
         tabs = QTabWidget()
@@ -399,6 +421,7 @@ class MainWindow(QMainWindow):
         self._worker_thread.started.connect(self._worker.start)
         self.worker_config.connect(self._worker.configure)
         self._worker.batch_ready.connect(self.handle_batch)
+        self._worker.coverage_ready.connect(self.map_view.set_coverage)
         self._worker_thread.start()
         self.store.disable_all_watch_forms()
         self.refresh_forms()
@@ -407,6 +430,8 @@ class MainWindow(QMainWindow):
         self.map_filters_changed()
         self.map_legend_changed()
         self.map_radar_changed()
+        for overlay in self.map_overlay_filters:
+            self.map_overlay_changed(overlay)
         self.map_regions_changed()
         self.map_online_tiles_changed()
         self.connect_js8call()
@@ -496,6 +521,7 @@ class MainWindow(QMainWindow):
 
     def review_duration_changed(self) -> None:
         self.store.set_setting("review.hours", str(self.review_duration.currentData()))
+        self.update_news_label()
         self.messages.setRowCount(0)
         self.analysis.setRowCount(0)
         self._report_items.clear()
@@ -963,6 +989,20 @@ class MainWindow(QMainWindow):
         self.store.set_setting("map.regions.visible", "1" if visible else "0")
         self.map_view.set_regions_visible(visible)
 
+    def map_overlay_changed(self, overlay: str) -> None:
+        visible = self.map_overlay_filters[overlay].isChecked()
+        self.store.set_setting(f"map.{overlay}.visible", "1" if visible else "0")
+        self.map_view.set_overlay_visible(overlay, visible)
+        if overlay == "nws":
+            self.nws_poller.set_enabled(visible)
+
+    def update_news_label(self) -> None:
+        # The table holds reports from the review window read at startup plus new traffic.
+        self.news_label.setText(
+            f"<b>Newsworthiness</b> — reports from the last {self.review_duration.currentText()} "
+            f"<span style='color:gray'>(review window; change under Configuration → Sources…)</span>"
+        )
+
     def map_radar_changed(self) -> None:
         visible = self.map_radar_filter.isChecked()
         self.store.set_setting("map.radar.visible", "1" if visible else "0")
@@ -1084,6 +1124,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         self.timer.stop()
+        self.nws_poller.set_enabled(False)
         # The polling thread owns the adapters and its own database connection.
         self._worker.request_stop()
         QMetaObject.invokeMethod(self._worker, "stop", Qt.ConnectionType.BlockingQueuedConnection)

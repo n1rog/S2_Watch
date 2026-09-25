@@ -27,6 +27,7 @@ class Monitor:
         analyzer: NewsAnalyzer | None = None,
         on_analysis: Callable[[Message, AnalysisResult], None] | None = None,
         on_saved: Callable[[int, Message, AnalysisResult | None], None] | None = None,
+        on_read: Callable[[Message], None] | None = None,
     ) -> None:
         self.adapters = list(adapters)
         self.forms = list(forms)
@@ -38,6 +39,8 @@ class Monitor:
         self.cancelled = False
         # Called with each saved message's id, e.g. to link it to its report.
         self.on_saved = on_saved
+        # Called with every message read, matched or not (e.g. for station coverage).
+        self.on_read = on_read
 
     def poll(self) -> None:
         active_applications = {
@@ -51,6 +54,8 @@ class Monitor:
             for message in adapter.read_messages():
                 if self.cancelled:
                     return
+                if self.on_read:
+                    self.on_read(message)
                 matching_form = next((form for form in self.forms if form.matches(message)), None)
                 if matching_form is None:
                     continue

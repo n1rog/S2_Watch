@@ -9,7 +9,8 @@ geojson-counties-fips.json). Needs shapely at build time only:
 
 Writes:
   data/web/basemap.js     land, lakes, borders and city labels drawn under the map
-  data/web/counties.js    US county outlines, drawn when zoomed in
+  data/web/counties.js    US county outlines with FIPS codes, drawn when zoomed in and
+                          used to draw NWS alerts issued for whole counties
   data/us_counties.json   county name, state and centre point, for locating messages
   data/places.json        cities and towns with population, for offline city lookup
 """
@@ -105,7 +106,8 @@ def main():
         counties.append({"name": p["NAME"], "kind": p.get("LSAD") or "County", "state": state,
                          "lat": round(centre.y, 4), "lon": round(centre.x, 4)})
         simplified = geometry.simplify(0.005, preserve_topology=True)
-        counties_geo.append({"type": "Feature", "properties": {},
+        # FIPS code: NWS alerts name their counties by it (SAME codes).
+        counties_geo.append({"type": "Feature", "properties": {"fips": p["STATE"] + p["COUNTY"]},
                              "geometry": rounded(json.loads(json.dumps(mapping(simplified), default=list)))})
     write_js(DATA / "web" / "counties.js", "S2_COUNTIES",
              {"type": "FeatureCollection", "features": counties_geo})

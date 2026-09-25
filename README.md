@@ -206,6 +206,30 @@ Place-name geocoding is opt-in. When enabled, only extracted place names—not
 complete message text—are sent to OpenStreetMap Nominatim, and results are
 cached locally in SQLite. It is disabled by default and uses a short timeout;
 map markers from coordinates and grids do not require geocoding.
+Three optional overlays are in the map filters (each remembered, off by default),
+with a legend in the map's top-right corner for whichever are on:
+
+- **NWS watches & warnings**: active National Weather Service alerts from
+  api.weather.gov, refreshed every 5 minutes (needs internet). Alerts issued for
+  whole counties are drawn from the bundled county outlines. Severity uses fixed
+  status colours (Minor yellow, Moderate orange, Severe red, Extreme red with a heavy
+  outline) and is always named in the legend and popup; click an area for the alert
+  text. Marine and offshore alerts have no county outline and are counted but not
+  drawn.
+- **Station coverage**: each 4-character grid square shaded by when a station there
+  was last heard (under 1 hour, 1–6 hours, 6–24 hours, or silent for more than 24
+  hours), from every message read, not only those a watch form matches; hover for the
+  stations and message count. It shows where the network is reporting and where it
+  has gone quiet.
+- **Day / night (grey line)**: the night side of the Earth, recalculated every 5
+  minutes; HF propagation changes along it.
+
+Overlay shapes are kept and updated in place rather than rebuilt on each refresh,
+which had grown the embedded browser's memory by about 10 MB per refresh.
+
+The Newsworthiness label on the Map tab shows the review window being viewed, for
+example "reports from the last 1 month".
+
 The map outlines and labels the MARS regions, which follow FEMA Regions 1–10
 (50 states; DC falls inside Region 3's outline). **Show MARS regions** in the map
 filters turns the layer on or off, and the choice is saved. Region outlines ship

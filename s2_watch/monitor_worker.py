@@ -15,6 +15,7 @@ from s2_watch.geocoding import NominatimGeocoder
 from s2_watch.locating import LocationResolver, ResolvedLocation
 from s2_watch.models import Message, WatchForm
 from s2_watch.monitoring import Monitor
+from s2_watch.overlays import CoverageTracker
 from s2_watch.storage import ReportInfo, SQLiteStore
 
 BATCH_SIZE = 200
@@ -38,6 +39,7 @@ class ProcessedMessage:
 
 class MonitorWorker(QObject):
     batch_ready = Signal(object)  # list[ProcessedMessage]
+    coverage_ready = Signal(object)  # list[dict] from CoverageTracker.snapshot()
 
     def __init__(self, database_path: str) -> None:
         super().__init__()
@@ -47,6 +49,7 @@ class MonitorWorker(QObject):
         self.adapters: list = []
         self.resolver = LocationResolver()
         self._batch: list[ProcessedMessage] = []
+        self.coverage = CoverageTracker()
         self._timer: QTimer | None = None
 
     @Slot()
@@ -55,6 +58,9 @@ class MonitorWorker(QObject):
         self._timer = QTimer(self)
         self._timer.timeout.connect(self.poll)
         self._timer.start(1000)
+        self._coverage_timer = QTimer(self)
+        self._coverage_timer.timeout.connect(self._emit_coverage)
+        self._coverage_timer.start(30_000)
 
     @Slot(object)
     def configure(self, config: MonitorConfig) -> None:
@@ -68,7 +74,7 @@ class MonitorWorker(QObject):
         )
         self.monitor = Monitor(
             self.adapters, config.forms, self.store, self._matched, config.analyzer, self._analysed,
-            self._saved,
+            self._saved, self.coverage.add,
         ) if self.adapters and self.store else None
 
     @Slot()
@@ -79,6 +85,13 @@ class MonitorWorker(QObject):
             self.monitor.poll()
         finally:
             self._flush()
+            if self.coverage.changed and self.coverage.cells and not getattr(self, "_coverage_sent", False):
+                self._emit_coverage()  # show the first coverage right after the backlog, not 30 s later
+
+    def _emit_coverage(self) -> None:
+        if self.coverage.changed:
+            self._coverage_sent = True
+            self.coverage_ready.emit(self.coverage.snapshot())
 
     def request_stop(self) -> None:
         """Called from the window's thread so a poll in progress ends at the next message.
@@ -93,6 +106,7 @@ class MonitorWorker(QObject):
     def stop(self) -> None:
         if self._timer:
             self._timer.stop()
+            self._coverage_timer.stop()
         for adapter in self.adapters:
             adapter.close()
         self.adapters = []

@@ -88,6 +88,9 @@ class MapView(QWidget):
         self._radar_visible = False
         self._regions_visible = False
         self._online_tiles = True
+        self._overlays = {"nws": False, "coverage": False, "greyline": False}
+        self._nws_alerts: list[dict] | None = None
+        self._coverage: list[dict] | None = None
         self._message_locations: dict[int, list[dict[str, object]]] = {}
         self._location_keys = itertools.count()
         self._page_ready = False
@@ -145,6 +148,27 @@ class MapView(QWidget):
     def set_regions_visible(self, visible: bool) -> None:
         self._regions_visible = visible
         self._render()
+
+    def set_overlay_visible(self, overlay: str, visible: bool) -> None:
+        """Show or hide the "nws", "coverage", or "greyline" overlay."""
+        self._overlays[overlay] = visible
+        self._render()
+
+    def set_nws_alerts(self, alerts: list[dict]) -> None:
+        self._nws_alerts = alerts
+        self._run(f"setNwsAlerts({json.dumps(alerts)})")
+
+    def set_nws_error(self, message: str) -> None:
+        self._run(f"setNwsAlerts(null, {json.dumps(message[:120])})")
+
+    def set_coverage(self, cells: list[dict]) -> None:
+        self._coverage = cells
+        self._run(f"setCoverage({json.dumps(cells)})")
+
+    def _run(self, script: str) -> None:
+        # Data that arrives before the page has loaded is sent by _page_loaded.
+        if self._web_view and self._page_ready:
+            self._web_view.page().runJavaScript(script)
 
     def set_online_tiles(self, enabled: bool) -> None:
         self._online_tiles = enabled
@@ -263,6 +287,10 @@ class MapView(QWidget):
     def _page_loaded(self, ok: bool) -> None:
         self._page_ready = ok
         if ok:
+            if self._nws_alerts is not None:
+                self._run(f"setNwsAlerts({json.dumps(self._nws_alerts)})")
+            if self._coverage is not None:
+                self._run(f"setCoverage({json.dumps(self._coverage)})")
             self._push_to_page()
 
     def _push_to_page(self) -> None:
@@ -272,9 +300,14 @@ class MapView(QWidget):
         radar = str(self._radar_visible).lower()
         regions = str(self._regions_visible).lower()
         tiles = str(self._online_tiles).lower()
+        overlays = " ".join(
+            f"{function}({str(self._overlays[name]).lower()});"
+            for name, function in (("nws", "setNwsVisible"), ("coverage", "setCoverageVisible"),
+                                   ("greyline", "setGreylineVisible"))
+        )
         self._web_view.page().runJavaScript(
             f"setLocations({locations}); setRadarVisible({radar}); "
-            f"setRegionsVisible({regions}); setOnlineTiles({tiles});"
+            f"setRegionsVisible({regions}); setOnlineTiles({tiles}); {overlays}"
         )
 
     def _load_page(self) -> None:
@@ -288,6 +321,12 @@ html,body,#map{{height:100%;margin:0}}
 .place-label{{background:none;border:none}}
 .place-label span{{display:block;transform:translate(-50%,-50%);white-space:nowrap;font:11px sans-serif;color:#37474f;text-shadow:0 0 2px #f2efe9,0 0 2px #f2efe9,0 0 2px #f2efe9}}
 .category-marker span{{display:flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:50%;color:white;font-weight:bold;font-size:15px;border:2px solid white;box-shadow:0 1px 4px #555}}
+.overlay-legend{{background:rgba(255,255,255,.92);color:#1b1b1b;padding:6px 9px;border-radius:4px;font:12px sans-serif;box-shadow:0 1px 3px rgba(0,0,0,.3);max-width:230px}}
+.overlay-legend b{{display:block;margin-top:4px}}
+.overlay-legend b:first-child{{margin-top:0}}
+.overlay-legend i{{display:inline-block;width:12px;height:12px;border-radius:2px;margin-right:6px;vertical-align:-2px}}
+.overlay-legend span,.overlay-legend .note{{color:#52514e}}
+.overlay-legend .note{{font-size:11px}}
 .radar-stamp{{background:rgba(255,255,255,.88);color:#1b1b1b;padding:3px 8px;border-radius:4px;font:12px sans-serif;box-shadow:0 1px 3px rgba(0,0,0,.3)}}
 .radar-stamp span{{color:#52514e}}
 .radar-stamp .radar-step{{margin-left:4px;font-variant-numeric:tabular-nums}}
@@ -505,6 +544,220 @@ function setRadarVisible(visible) {{
   for (const bitmap of radarBitmaps.values()) bitmap.then(image => image && image.close());
   radarBitmaps.clear();
   radarFrames = [];
+}}
+// ---- Optional overlays: NWS alerts, station coverage, day/night (grey line) ----
+map.createPane('greyline').style.zIndex = 320;
+map.createPane('coverage').style.zIndex = 330;
+map.createPane('nws').style.zIndex = 340;
+map.getPane('greyline').style.pointerEvents = 'none';
+const overlayState = {{nws: false, coverage: false, greyline: false}};
+const overlayTimers = {{}};
+
+// NWS severity uses the fixed status colours; the severity is always written in the
+// legend and popup too, so colour never carries it alone.
+const NWS_SEVERITY = [
+  ['Extreme', '#d03b3b', 'Extreme'], ['Severe', '#d03b3b', 'Severe'],
+  ['Moderate', '#ec835a', 'Moderate'], ['Minor', '#fab219', 'Minor'], ['Unknown', '#8a8a8a', 'Unknown'],
+];
+const nwsColor = severity => (NWS_SEVERITY.find(entry => entry[0] === severity) || NWS_SEVERITY[4])[1];
+const nwsRenderer = L.canvas({{pane: 'nws'}});
+const nwsLayer = L.layerGroup();
+let nwsAlerts = [];
+let nwsDrawn = {{}};      // severity -> alerts drawn
+let nwsOffshore = 0;     // marine/offshore zones: no county outline to draw
+let nwsUpdated = null;
+let nwsError = '';
+const countyByFips = new Map(((window.S2_COUNTIES || {{}}).features || []).map(f => [f.properties.fips, f]));
+function formatTime(value) {{
+  if (!value) return '';
+  const date = new Date(value);
+  return isNaN(date) ? value : date.toLocaleString([], {{weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZoneName: 'short'}});
+}}
+function nwsPopup(alert) {{
+  return '<div style="max-width:340px"><b>' + escapeHtml(alert.event) + '</b> · ' + escapeHtml(alert.severity) +
+    '<br>' + escapeHtml(alert.area) +
+    '<br><span style="color:#555">' + escapeHtml(formatTime(alert.onset)) + ' → ' + escapeHtml(formatTime(alert.ends)) +
+    (alert.sender ? '<br>' + escapeHtml(alert.sender) : '') + '</span>' +
+    (alert.description ? '<div style="white-space:pre-wrap;margin-top:6px;max-height:180px;overflow:auto">' + escapeHtml(alert.description) + '</div>' : '') +
+    '</div>';
+}}
+// Alert shapes are kept and only added or removed as alerts change: rebuilding every
+// shape (and a popup per shape) on each refresh grew the page's memory ~10 MB a time.
+const nwsShapes = new Map();   // alert key -> layer
+const nwsPopupWindow = L.popup({{maxWidth: 360}});
+const nwsKey = alert => alert.id + '|' + alert.severity + '|' + alert.ends;
+function drawNwsAlerts() {{
+  const wanted = new Map(nwsAlerts.map(alert => [nwsKey(alert), alert]));
+  for (const [key, layer] of nwsShapes) {{
+    if (!wanted.has(key)) {{ nwsLayer.removeLayer(layer); nwsShapes.delete(key); }}
+  }}
+  nwsDrawn = {{}};
+  nwsOffshore = 0;
+  for (const [key, alert] of wanted) {{  // lowest severity first
+    let layer = nwsShapes.get(key);
+    if (!layer) {{
+      const shape = alert.geometry || {{type: 'FeatureCollection',
+        features: alert.counties.map(code => countyByFips.get(code)).filter(Boolean)}};
+      if (!alert.geometry && !shape.features.length) {{ nwsOffshore += 1; continue; }}
+      const extreme = alert.severity === 'Extreme';
+      layer = L.geoJSON(shape, {{
+        renderer: nwsRenderer, pane: 'nws',
+        style: {{color: nwsColor(alert.severity), weight: extreme ? 3 : 1.5, opacity: 0.9,
+                fillColor: nwsColor(alert.severity), fillOpacity: extreme ? 0.32 : 0.18}},
+      }});
+      layer.alert = alert;
+      layer.on('click', event => nwsPopupWindow.setLatLng(event.latlng).setContent(nwsPopup(layer.alert)).openOn(map));
+      nwsLayer.addLayer(layer);
+      nwsShapes.set(key, layer);
+      if (alert.severity === 'Severe' || alert.severity === 'Extreme') layer.bringToFront();  // worst on top
+    }}
+    layer.alert = alert;
+    nwsDrawn[alert.severity] = (nwsDrawn[alert.severity] || 0) + 1;
+  }}
+  updateOverlayLegend();
+}}
+function setNwsAlerts(alerts, error) {{
+  if (error) {{ nwsError = error; updateOverlayLegend(); return; }}
+  nwsAlerts = alerts; nwsUpdated = new Date(); nwsError = '';
+  if (overlayState.nws) drawNwsAlerts();
+}}
+function setNwsVisible(visible) {{
+  if (visible === overlayState.nws) return;
+  overlayState.nws = visible;
+  if (visible) {{ nwsLayer.addTo(map); drawNwsAlerts(); }} else {{ map.removeLayer(nwsLayer); updateOverlayLegend(); }}
+}}
+
+// Station coverage: last time each grid square was heard from. Recency is ordinal, so
+// it is one hue in validated steps (dark = recent) plus gray for silent; each cell is
+// outlined in a darker step so it still reads over water.
+const COVERAGE_STEPS = [
+  [60, '#104281', '#0d366b', 'Heard < 1 h ago'], [360, '#256abf', '#104281', '1 – 6 h'],
+  [1440, '#5598e7', '#256abf', '6 – 24 h'], [Infinity, '#9e9e9e', '#6f6f6f', 'Silent > 24 h'],
+];
+const coverageLayer = L.layerGroup();
+const coverageRenderer = L.canvas({{pane: 'coverage'}});
+let coverageCells = [];
+function coverageStep(lastIso) {{
+  const minutes = (Date.now() - new Date(lastIso).getTime()) / 60000;
+  return COVERAGE_STEPS.find(step => minutes <= step[0]);
+}}
+function ago(lastIso) {{
+  const minutes = Math.max(0, Math.round((Date.now() - new Date(lastIso).getTime()) / 60000));
+  if (minutes < 60) return minutes + ' min ago';
+  if (minutes < 2880) return Math.round(minutes / 60) + ' h ago';
+  return Math.round(minutes / 1440) + ' days ago';
+}}
+// One square per grid, kept and restyled as it ages (not rebuilt each refresh).
+const coverageSquares = new Map();   // grid -> rectangle
+function coverageTooltip(cell) {{
+  return '<b>' + escapeHtml(cell.grid) + '</b> · last heard ' + escapeHtml(ago(cell.last)) +
+    '<br>' + escapeHtml(formatTime(cell.last)) + '<br>' + cell.messages + ' message' + (cell.messages === 1 ? '' : 's') +
+    (cell.stations.length ? '<br>' + escapeHtml(cell.stations.join(', ')) : '');
+}}
+function drawCoverage() {{
+  const grids = new Set(coverageCells.map(cell => cell.grid));
+  for (const [grid, square] of coverageSquares) {{
+    if (!grids.has(grid)) {{ coverageLayer.removeLayer(square); coverageSquares.delete(grid); }}
+  }}
+  for (const cell of coverageCells) {{
+    let square = coverageSquares.get(cell.grid);
+    if (!square) {{
+      square = L.rectangle([[cell.south, cell.west], [cell.south + 1, cell.west + 2]],
+                           {{renderer: coverageRenderer, pane: 'coverage', weight: 1, opacity: 0.8, fillOpacity: 0.3}});
+      square.bindTooltip(layer => coverageTooltip(layer.cell), {{sticky: true}});
+      coverageLayer.addLayer(square);
+      coverageSquares.set(cell.grid, square);
+    }}
+    const step = coverageStep(cell.last);
+    if (!square.cell || square.cell.last !== cell.last || square.step !== step) {{
+      square.setStyle({{color: step[2], fillColor: step[1]}});
+      square.step = step;
+    }}
+    square.cell = cell;
+  }}
+  updateOverlayLegend();
+}}
+function setCoverage(cells) {{ coverageCells = cells; if (overlayState.coverage) drawCoverage(); }}
+function setCoverageVisible(visible) {{
+  if (visible === overlayState.coverage) return;
+  overlayState.coverage = visible;
+  if (visible) {{
+    coverageLayer.addTo(map); drawCoverage();
+    overlayTimers.coverage = setInterval(drawCoverage, 5 * 60 * 1000);  // cells age as time passes
+  }} else {{
+    clearInterval(overlayTimers.coverage); map.removeLayer(coverageLayer); updateOverlayLegend();
+  }}
+}}
+
+// Day/night terminator (grey line), from the sun's position (NOAA approximation).
+const greyline = L.layerGroup();
+let greylineTime = null;
+function subsolarPoint(date) {{
+  const start = Date.UTC(date.getUTCFullYear(), 0, 1);
+  const day = (date.getTime() - start) / 86400000;
+  const hours = date.getUTCHours() + date.getUTCMinutes() / 60 + date.getUTCSeconds() / 3600;
+  const g = 2 * Math.PI / 365 * (day + (hours - 12) / 24);
+  const declination = 0.006918 - 0.399912 * Math.cos(g) + 0.070257 * Math.sin(g) - 0.006758 * Math.cos(2 * g)
+    + 0.000907 * Math.sin(2 * g) - 0.002697 * Math.cos(3 * g) + 0.00148 * Math.sin(3 * g);
+  const equationOfTime = 229.18 * (0.000075 + 0.001868 * Math.cos(g) - 0.032077 * Math.sin(g)
+    - 0.014615 * Math.cos(2 * g) - 0.040849 * Math.sin(2 * g));
+  return {{lat: declination * 180 / Math.PI, lon: -15 * (hours - 12 + equationOfTime / 60)}};
+}}
+let nightShape = null;
+function drawGreyline() {{
+  greylineTime = new Date();
+  const sun = subsolarPoint(greylineTime);
+  const tanDec = Math.tan(Math.max(Math.abs(sun.lat), 0.01) * Math.PI / 180) * (sun.lat < 0 ? -1 : 1);
+  const line = [];
+  for (let lon = -180; lon <= 180; lon += 1) {{
+    const hourAngle = (lon - sun.lon) * Math.PI / 180;
+    line.push([Math.atan(-Math.cos(hourAngle) / tanDec) * 180 / Math.PI, lon]);
+  }}
+  // Night lies on the side of the pole the sun is not over.
+  const pole = sun.lat >= 0 ? -90 : 90;
+  const night = [[pole, -180], ...line, [pole, 180]];
+  if (nightShape) nightShape.setLatLngs(night);
+  else nightShape = L.polygon(night, {{pane: 'greyline', interactive: false, stroke: true, color: '#0b1a2a', weight: 1,
+                                      opacity: 0.45, fillColor: '#0b1a2a', fillOpacity: 0.22}}).addTo(greyline);
+  updateOverlayLegend();
+}}
+function setGreylineVisible(visible) {{
+  if (visible === overlayState.greyline) return;
+  overlayState.greyline = visible;
+  if (visible) {{
+    greyline.addTo(map); drawGreyline();
+    overlayTimers.greyline = setInterval(drawGreyline, 5 * 60 * 1000);
+  }} else {{
+    clearInterval(overlayTimers.greyline); map.removeLayer(greyline); updateOverlayLegend();
+  }}
+}}
+
+// One legend for whichever overlays are on.
+const overlayLegend = L.control({{position: 'topright'}});
+overlayLegend.onAdd = () => {{ const element = L.DomUtil.create('div', 'overlay-legend'); L.DomEvent.disableClickPropagation(element); return element; }};
+const swatch = (fill, border) => '<i style="background:' + fill + ';border:1px solid ' + (border || fill) + '"></i>';
+function updateOverlayLegend() {{
+  const parts = [];
+  if (overlayState.nws) {{
+    const counts = nwsDrawn;
+    parts.push('<b>NWS watches &amp; warnings</b>' + (nwsError ? '<div class="note">Unavailable: ' + escapeHtml(nwsError) + '</div>' : ''));
+    NWS_SEVERITY.filter(entry => counts[entry[0]] || entry[0] !== 'Unknown').forEach(entry =>
+      parts.push('<div>' + swatch(entry[1] + (entry[0] === 'Extreme' ? '' : '66'), entry[1]) +
+                 (entry[0] === 'Extreme' ? '<u>' + entry[2] + '</u>' : entry[2]) + ' <span>' + (counts[entry[0]] || 0) + '</span></div>'));
+    if (nwsOffshore) parts.push('<div class="note">' + nwsOffshore + ' marine/offshore alert' + (nwsOffshore === 1 ? '' : 's') + ' not drawn</div>');
+    if (nwsUpdated) parts.push('<div class="note">Updated ' + escapeHtml(nwsUpdated.toLocaleTimeString([], {{hour: '2-digit', minute: '2-digit'}})) + ' · click an area for details</div>');
+  }}
+  if (overlayState.coverage) {{
+    parts.push('<b>Station coverage</b> <span>(' + coverageCells.length + ' grid squares)</span>');
+    COVERAGE_STEPS.forEach(step => parts.push('<div>' + swatch(step[1] + '4d', step[2]) + step[3] + '</div>'));
+  }}
+  if (overlayState.greyline) {{
+    parts.push('<b>Day / night</b><div>' + swatch('rgba(11,26,42,.22)', 'rgba(11,26,42,.45)') + 'Night side' +
+               (greylineTime ? ' <span>at ' + escapeHtml(greylineTime.toLocaleTimeString([], {{hour: '2-digit', minute: '2-digit'}})) + '</span>' : '') + '</div>');
+  }}
+  if (parts.length && !overlayLegend.getContainer()) overlayLegend.addTo(map);
+  if (!parts.length && overlayLegend.getContainer()) overlayLegend.remove();
+  if (parts.length) overlayLegend.getContainer().innerHTML = parts.join('');
 }}
 const markersByKey = new Map();
 function clusterIcon(cluster) {{
