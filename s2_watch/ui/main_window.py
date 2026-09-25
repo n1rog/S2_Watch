@@ -42,6 +42,7 @@ from s2_watch.monitor_worker import MonitorConfig, MonitorWorker, ProcessedMessa
 from s2_watch.storage import SQLiteStore
 from s2_watch.ui.icons import app_icon
 from s2_watch.ui.map_view import MapView
+from s2_watch.ui.metrics_view import MetricsView
 from s2_watch.ui.watch_form_dialog import WatchFormDialog
 
 
@@ -50,6 +51,12 @@ class MainWindow(QMainWindow):
     # On-screen tables keep only the newest rows; everything stays searchable in History.
     LIVE_ROWS_LIMIT = 2000
     ANALYSIS_ROWS_LIMIT = 1000
+    ANALYSIS_COLUMNS = (
+        "Time", "Application", "Watch form", "Result", "Category", "Urgency",
+        "Confidence", "Seen", "Summary", "Message",
+    )
+    SEEN_COLUMN = ANALYSIS_COLUMNS.index("Seen")
+    REPORT_ROLE = Qt.ItemDataRole.UserRole + 2
     DEFAULT_WATCH_FORMS = {
         "JS8Call": "All JS8Call messages",
         "MagCommstat": "All MagCommstat messages",
@@ -181,20 +188,10 @@ class MainWindow(QMainWindow):
         self.messages.horizontalHeader().setStretchLastSection(True)
         self.messages.setSortingEnabled(True)
         self.messages.cellDoubleClicked.connect(self.show_message_details)
-        self.analysis = QTableWidget(0, 9)
-        self.analysis.setHorizontalHeaderLabels(
-            (
-                "Time",
-                "Application",
-                "Watch form",
-                "Result",
-                "Category",
-                "Urgency",
-                "Confidence",
-                "Summary",
-                "Message",
-            )
-        )
+        # Newsworthiness shows one row per report; "Seen" counts its copies and sources.
+        self.analysis = QTableWidget(0, len(self.ANALYSIS_COLUMNS))
+        self.analysis.setHorizontalHeaderLabels(self.ANALYSIS_COLUMNS)
+        self._report_items: dict[int, QTableWidgetItem] = {}
         self.analysis.setWordWrap(False)
         self.analysis.setAlternatingRowColors(True)
         self.analysis.horizontalHeader().setStretchLastSection(True)
@@ -369,6 +366,8 @@ class MainWindow(QMainWindow):
             tab = QWidget()
             tab.setLayout(tab_layout)
             tabs.addTab(tab, title)
+        self.metrics_view = MetricsView(self.store)
+        tabs.addTab(self.metrics_view, "Metrics")
         tabs.setCurrentIndex(0)
         container = QWidget()
         container_layout = QVBoxLayout(container)
@@ -490,6 +489,7 @@ class MainWindow(QMainWindow):
         self._worker.request_stop()
         self.messages.setRowCount(0)
         self.analysis.setRowCount(0)
+        self._report_items.clear()
         self.map_view.clear_locations()
         self.create_adapters()
         self.rebuild_monitor()
@@ -498,6 +498,7 @@ class MainWindow(QMainWindow):
         self.store.set_setting("review.hours", str(self.review_duration.currentData()))
         self.messages.setRowCount(0)
         self.analysis.setRowCount(0)
+        self._report_items.clear()
         self.map_view.clear_locations()
         self.connect_js8call()
 
@@ -794,31 +795,61 @@ class MainWindow(QMainWindow):
         self.analysis.setSortingEnabled(False)
         for processed in batch:
             self.insert_live_row(processed.message)
+            report = processed.report
+            shown = self.shown_report_item(report.report_id) if report else None
+            if shown is not None:
+                # Another copy of a report already on screen: count it, don't repeat it.
+                self.analysis.item(shown.row(), self.SEEN_COLUMN).setText(self.seen_text(report))
+                continue
             self.map_view.add_message(processed.message, processed.locations)
             if processed.result:
-                self.insert_analysis_row(processed.message, processed.result)
-                if self.should_alert(processed.result):
+                item = self.insert_analysis_row(processed.message, processed.result, report)
+                if report:
+                    self._report_items[report.report_id] = item
+                # Alert once per report, and not again for reports re-read by a re-scan.
+                if (report is None or report.new_report) and self.should_alert(processed.result):
                     alerts.append(processed.result)
         self.trim_oldest_rows(self.messages, self.LIVE_ROWS_LIMIT)
-        self.trim_oldest_rows(self.analysis, self.ANALYSIS_ROWS_LIMIT)
+        if self.trim_oldest_rows(self.analysis, self.ANALYSIS_ROWS_LIMIT):
+            self._report_items = {
+                int(item.data(self.REPORT_ROLE)): item
+                for row in range(self.analysis.rowCount())
+                if (item := self.analysis.item(row, 0)) is not None and item.data(self.REPORT_ROLE) is not None
+            }
         self.messages.setSortingEnabled(live_sorting)
         self.analysis.setSortingEnabled(analysis_sorting)
         if any(processed.result for processed in batch):
             self.analysis.sortItems(0, Qt.SortOrder.DescendingOrder)
             self.apply_news_rows_limit()
         self.show_alerts(alerts)
+        if any(processed.report for processed in batch):
+            self.metrics_view.data_changed()
+
+    def shown_report_item(self, report_id: int) -> QTableWidgetItem | None:
+        item = self._report_items.get(report_id)
+        if item is not None and item.tableWidget() is self.analysis:
+            return item
+        self._report_items.pop(report_id, None)
+        return None
 
     @staticmethod
-    def trim_oldest_rows(table: QTableWidget, limit: int) -> None:
+    def seen_text(report) -> str:
+        if report is None or report.copies <= 1:
+            return "1×"
+        return f"{report.copies}× · {', '.join(report.sources)}"
+
+    @staticmethod
+    def trim_oldest_rows(table: QTableWidget, limit: int) -> bool:
         excess = table.rowCount() - limit
         if excess <= 0:
-            return
+            return False
         rows = sorted(
             range(table.rowCount()),
             key=lambda row: str(table.item(row, 0).data(Qt.ItemDataRole.UserRole)) if table.item(row, 0) else "",
         )
         for row in sorted(rows[:excess], reverse=True):
             table.removeRow(row)
+        return True
 
     def show_match(self, message: Message, locations=None) -> None:
         sorting_enabled = self.messages.isSortingEnabled()
@@ -864,17 +895,7 @@ class MainWindow(QMainWindow):
         )
 
     def show_analysis_details(self, row: int, _column: int) -> None:
-        headers = (
-            "Time",
-            "Application",
-            "Watch form",
-            "Result",
-            "Category",
-            "Urgency",
-            "Confidence",
-            "Summary",
-            "Message",
-        )
+        headers = self.ANALYSIS_COLUMNS
         details = []
         for column, header in enumerate(headers):
             item = self.analysis.item(row, column)
@@ -957,7 +978,7 @@ class MainWindow(QMainWindow):
         self.apply_news_rows_limit()
         self.show_alerts([result] if self.should_alert(result) else [])
 
-    def insert_analysis_row(self, message: Message, result: AnalysisResult) -> None:
+    def insert_analysis_row(self, message: Message, result: AnalysisResult, report=None) -> QTableWidgetItem:
         label = "NEWSWORTHY" if result.newsworthy else "routine"
         row = self.analysis.rowCount()
         self.analysis.insertRow(row)
@@ -969,16 +990,22 @@ class MainWindow(QMainWindow):
             result.category,
             result.urgency,
             f"{result.confidence:.0%}",
+            self.seen_text(report),
             result.summary,
             message.raw_content,
         )
+        first = None
         for column, value in enumerate(values):
             item = QTableWidgetItem(value)
             if column == 0:
                 item.setData(Qt.ItemDataRole.UserRole, message.received_at.isoformat())
                 item.setData(Qt.ItemDataRole.UserRole + 1, message)
+                if report is not None:
+                    item.setData(self.REPORT_ROLE, report.report_id)
+                first = item
             self.analysis.setItem(row, column, item)
         self.map_view.set_message_category(message, result.category if result.newsworthy else "routine")
+        return first
 
     def should_alert(self, result: AnalysisResult) -> bool:
         if not result.newsworthy or not self.alerts_enabled.isChecked():

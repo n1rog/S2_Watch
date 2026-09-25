@@ -249,6 +249,21 @@ entry such as `~/.local/share/applications/s2-watch.desktop` should set
 `Icon=` to the SVG, `Path=` to the folder holding `s2_watch.db`, and
 `StartupWMClass=s2-watch`.
 
+One report often arrives several times: MagCommstat and JS8SuperSpotter both store
+the same StatRep, JS8SuperSpotter also stores the raw JS8 frame, and other stations
+relay it. S2 Watch links these copies to a single report by comparing the report
+text with the radio "envelope" removed (sender, relay path, @groups, MSG, *DE*,
+CommStat's CSV header, checksums), for copies up to 24 hours apart. Live Monitor
+and History keep every copy; Newsworthiness, the map, and alerts show each report
+once, and the **Seen** column shows how many copies arrived and through which
+applications (for example "3× · MagCommstat, JS8SuperSpotter").
+
+The **Metrics** tab counts reports, not copies, for the last 24 hours, 7 days, or
+30 days: the share of newsworthy reports in each category (for example "Supply
+Chain 8% · 3"), a per-category trend, shares by MARS region and state, which
+application reported each report first and how many duplicate copies each added,
+and the stations that sent reports first. Hover over a bar for exact numbers.
+
 Each matched message is saved to History once, identified by its source, even
 though the review window is re-read at every launch and whenever watch forms
 change.

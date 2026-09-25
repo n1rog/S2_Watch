@@ -217,6 +217,32 @@ class SQLiteStore:
         self.connection.commit()
         return self._report_info(report_id, new_report)
 
+    def report_totals(self, since: str) -> tuple[int, int, int]:
+        """(reports, newsworthy reports, copies received) for reports first seen since ``since``."""
+        reports, newsworthy, copies = self.connection.execute(
+            "SELECT COUNT(*), COALESCE(SUM(newsworthy), 0), COALESCE(SUM(copies), 0) FROM reports WHERE first_seen >= ?",
+            (since,),
+        ).fetchone()
+        return int(reports), int(newsworthy), int(copies)
+
+    def newsworthy_reports(self, since: str) -> list[dict]:
+        rows = self.connection.execute(
+            """SELECT id, first_seen, category, urgency, state, region, first_source, sender, copies
+               FROM reports WHERE newsworthy = 1 AND first_seen >= ? ORDER BY first_seen""",
+            (since,),
+        ).fetchall()
+        keys = ("id", "first_seen", "category", "urgency", "state", "region", "first_source", "sender", "copies")
+        return [dict(zip(keys, row)) for row in rows]
+
+    def copies_by_source(self, since: str) -> dict[str, int]:
+        """Copies of newsworthy reports received from each source application."""
+        rows = self.connection.execute(
+            """SELECT m.source_application, COUNT(*) FROM messages m JOIN reports r ON r.id = m.report_id
+               WHERE r.newsworthy = 1 AND r.first_seen >= ? GROUP BY m.source_application""",
+            (since,),
+        ).fetchall()
+        return {source: int(count) for source, count in rows}
+
     def _report_info(self, report_id: int, new_report: bool) -> ReportInfo:
         copies, sources = self.connection.execute(
             "SELECT copies, sources FROM reports WHERE id = ?", (report_id,)
