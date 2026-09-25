@@ -240,6 +240,13 @@ keeps the newest 2,000 rows and Newsworthiness the newest 1,000 on screen; every
 matched message is still saved and searchable in History. When a backlog produces
 more than three newsworthy messages at once, a single summary alert is shown.
 
+S2 Watch's icon (a radar scope with a highlighted contact) is in
+`s2_watch/data/icons/`: `s2-watch.svg` for larger sizes and a simplified
+`s2-watch-small.svg` used at tray and taskbar sizes (16–32 px). On Linux, a menu
+entry such as `~/.local/share/applications/s2-watch.desktop` should set
+`Icon=` to the SVG, `Path=` to the folder holding `s2_watch.db`, and
+`StartupWMClass=s2-watch`.
+
 Closing the main window stops monitoring and exits S2 Watch completely. The
 system-tray icon carries desktop alerts; its menu can bring the window forward
 or quit. Only one copy of S2 Watch runs per user: launching it again while it

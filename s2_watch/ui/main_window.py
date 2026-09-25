@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QLabel, QLineEdit, QListWidget,
     QListWidgetItem, QMainWindow, QMessageBox, QPushButton, QSpinBox,
     QTableWidget, QTableWidgetItem,
-    QFileDialog, QStyle, QSystemTrayIcon, QTabWidget, QVBoxLayout,
+    QFileDialog, QSystemTrayIcon, QTabWidget, QVBoxLayout,
     QWidget, QMenu, QToolButton, QWidgetAction,
 )
 
@@ -40,6 +40,7 @@ from s2_watch.analysis.category_patterns import CATEGORY_PATTERNS
 from s2_watch.forms_io import forms_from_json, forms_to_json
 from s2_watch.monitor_worker import MonitorConfig, MonitorWorker, ProcessedMessage
 from s2_watch.storage import SQLiteStore
+from s2_watch.ui.icons import app_icon
 from s2_watch.ui.map_view import MapView
 from s2_watch.ui.watch_form_dialog import WatchFormDialog
 
@@ -375,7 +376,7 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(container)
         self.tray = QSystemTrayIcon(self)
         self.tray.setToolTip("S2 Watch")
-        self.tray.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MessageBoxInformation))
+        self.tray.setIcon(app_icon())
         tray_menu = QMenu(self)
         show_action = tray_menu.addAction("Show S2 Watch")
         show_action.triggered.connect(self.show_from_tray)

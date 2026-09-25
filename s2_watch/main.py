@@ -4,11 +4,14 @@ import sys
 from PySide6.QtWidgets import QApplication
 
 from s2_watch.single_instance import SingleInstance
+from s2_watch.ui.icons import app_icon
 from s2_watch.ui.main_window import MainWindow
 
 
 def main() -> int:
     app = QApplication(sys.argv)
+    app.setWindowIcon(app_icon())
+    app.setDesktopFileName("s2-watch")
     instance = SingleInstance()
     if instance.notify_running_instance():
         return 0

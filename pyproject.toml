@@ -26,4 +26,4 @@ testpaths = ["tests"]
 include = ["s2_watch*"]
 
 [tool.setuptools.package-data]
-s2_watch = ["data/*.geojson", "data/*.json", "data/web/*"]
+s2_watch = ["data/*.geojson", "data/*.json", "data/web/*", "data/icons/*"]
