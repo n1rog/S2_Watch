@@ -19,6 +19,8 @@ _CALL = r"[A-Z0-9]{1,3}[0-9][A-Z0-9]{0,4}(?:/[A-Z0-9]+)?"
 # Leading parts of the envelope, removed repeatedly because relays stack them.
 _LEADING = [
     re.compile(rf"^\s*{_CALL}\s*:\s*"),                       # "W8UFO: "  (JS8 sender)
+    # JS8SuperSpotter's CommStat line: "COMMSTAT W3DOF FM28FH YELLOW ID:B54 "
+    re.compile(rf"^\s*COMMSTAT\s+{_CALL}\s+[A-R]{{2}}[0-9]{{2}}(?:[A-X]{{2}})?\s+(?:[A-Z]+\s+)?ID:\s*[A-Z0-9]+\s*"),
     re.compile(rf"^(?:\s*{_CALL}\s*>\s*)+"),                   # "N1MAG> K7RIE> " relay path
     re.compile(r"^\s*(?:@[A-Z0-9]+\s*)+"),                     # "@MAGNET @MR05 "
     re.compile(rf"^\s*(?:{_CALL}\s+)?MSG\b\s*"),              # "MSG " / "KG5RKW MSG " (directed)
@@ -38,21 +40,35 @@ _ANYWHERE = [
 ]
 
 
-def report_text(text: str) -> str:
-    """The report with its radio envelope removed, upper-cased, punctuation-free."""
-    core = text.upper().strip()
+_ANYWHERE_ANY_CASE = [re.compile(pattern.pattern, re.IGNORECASE) for pattern in _ANYWHERE]
+
+
+def strip_envelope(text: str) -> str:
+    """The report with its radio envelope removed, keeping the original capitalisation."""
+    # Match on an upper-cased copy (same length) and cut the original at the same places.
+    start, end = 0, len(text)
     # A relayed message can carry the envelope more than once ("W5TTA: N1MAG> K7RIE ...").
     for _ in range(4):
-        before = core
+        before = (start, end)
         for pattern in _LEADING:
-            core = pattern.sub("", core).strip()
+            match = pattern.match(text[start:end].upper())
+            if match:
+                start += match.end()
         for pattern in _TRAILING:
-            core = pattern.sub("", core).strip()
-        if core == before:
+            match = pattern.search(text[start:end].upper())
+            if match:
+                end = start + match.start()
+        if (start, end) == before:
             break
-    for pattern in _ANYWHERE:
+    core = text[start:end]
+    for pattern in _ANYWHERE_ANY_CASE:
         core = pattern.sub(" ", core)
-    core = re.sub(r"[^A-Z0-9 ]", " ", core)
+    return " ".join(core.split())
+
+
+def report_text(text: str) -> str:
+    """The report with its radio envelope removed, upper-cased, punctuation-free."""
+    core = re.sub(r"[^A-Z0-9 ]", " ", strip_envelope(text).upper())
     return " ".join(core.split())
 
 

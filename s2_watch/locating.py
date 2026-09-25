@@ -32,6 +32,7 @@ from s2_watch.geo import (
     grids_in_text,
     maidenhead_to_coordinates,
 )
+from s2_watch.dedup import strip_envelope
 from s2_watch.geocoding import GeocodingError
 from s2_watch.models import Message
 
@@ -47,6 +48,14 @@ _LOCATIVE = re.compile(
 )
 _COUNTY = re.compile(rf"\b({_WORD}(?:\s+{_WORD}){{0,2}})\s+(?:COUNTY|CNTY|CO\.|PARISH|BOROUGH)(?![A-Z])")
 _COUNTY_SUFFIX = re.compile(r"\s(?:COUNTY|CNTY|CO\.?|PARISH|BOROUGH)$")
+# Status lines usually open with the state: "MO - FLOOD WATCH", "AZ: Dust engulfs ...".
+_STATE_PREFIX = re.compile(r"^\s*([A-Z]{2})\s*[-–:]")
+# In StatReps and CommStat status lines (",EM12JV,1,X23,+,TX USUAL RIG") the state
+# opens the text even without punctuation.
+_STATE_WORD_PREFIX = re.compile(r"^\s*([A-Z]{2})\s+[A-Z]")
+_STATUS_LINE = re.compile(r",[A-R]{2}[0-9]{2}(?:[A-X]{2})?,\d+,[A-Z0-9]{3},", re.IGNORECASE)
+# Words that continue a longer (often Spanish) place name after a US town's name.
+_NAME_CONTINUATIONS = {"DEL", "DE", "LA", "LAS", "LOS", "EL", "DA", "DO", "DI"}
 _URL = re.compile(r"(?:https?://|www\.)\S+", re.IGNORECASE)
 _PREPOSITIONS = re.compile(r"\b(?:IN|NEAR|AT|AROUND|OUTSIDE|OF|FROM|TO|ACROSS|THROUGH|AND)\b")
 
@@ -204,6 +213,13 @@ class LocationResolver:
                 states.append(state)
         for match in self._state_pattern.finditer(upper):
             states.append(g.state_by_name[match.group(1)])
+        body = normalize_text(strip_envelope(text))
+        prefix = _STATE_PREFIX.match(body)
+        status_line = "STATREP" in fields.get("type", "").upper() or _STATUS_LINE.search(text)
+        if not prefix and status_line:
+            prefix = _STATE_WORD_PREFIX.match(body)
+        if prefix and prefix.group(1) in g.state_names:
+            states.append(prefix.group(1))
         field_state = fields.get("state", "").strip().upper()
         if field_state in g.state_names:
             states.append(field_state)
@@ -292,7 +308,17 @@ class LocationResolver:
             elif phrase.strip():
                 unresolved.append((phrase, state))
         # Bare names: large cities anywhere, or any listed town inside a named state/region.
-        for name in dict.fromkeys(self._town_pattern.findall(normalize(upper))):
+        plain = normalize(upper)
+        for match in self._town_pattern.finditer(plain):
+            name = match.group(1)
+            following = plain[match.end():].split()
+            if following and following[0] in _NAME_CONTINUATIONS:
+                continue
+            # "ENID OK": a town followed by its own state's code, with no comma.
+            own_state = [e for e in g.places[name] if following and following[0] == e["state"]]
+            if len(own_state) == 1:
+                found.append(self._place_location(own_state[0]))
+                continue
             candidates = [e for e in g.places[name] if self._allowed(context, e["state"])]
             if len(candidates) == 1 and (self._constrained(context) or candidates[0]["rank"] <= 3):
                 found.append(self._place_location(candidates[0]))
@@ -308,6 +334,8 @@ class LocationResolver:
             entries = self.gazetteer.places.get(name)
             if not entries or (name in self.gazetteer.state_by_name and not state):
                 continue
+            if length < len(words) and words[length] in _NAME_CONTINUATIONS:
+                return None  # "San Jose del Palmar" is not San Jose
             if state:
                 entries = [e for e in entries if e["state"] == state]
             else:

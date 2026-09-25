@@ -104,3 +104,14 @@ def test_bundled_towns_are_found_without_the_geocoder() -> None:
 def test_links_are_ignored() -> None:
     found = resolve("Asteroid watch: https://example.org/track?pos=12.5,45.25&g=FN20ab", group="@MR05")
     assert levels(found) == {"region"}
+
+
+def test_state_prefix_of_status_lines() -> None:
+    assert [l.label for l in resolve("MO - FLOOD WATCH DUE TO EXCESIVE RAINFALL")] == ["Missouri"]
+    assert [l.label for l in resolve("AZ: Dust engulfs metro area")] == ["Arizona"]
+    # A 6-character grid in the status line is more precise than the state, so it wins.
+    found = resolve("K6UDA: @MAGNET  ,DN22RN,1,L55,212111111111,ID EXTREME DROUGHT CONDITIONS,{&%} ♢ ")
+    assert [(l.level, l.state) for l in found] == [("precise", "ID")]
+    # Without a separator, a leading two-letter word is only a state in status lines.
+    assert "state" not in {l.level for l in resolve("IN THE NEWS TODAY")}
+    assert [l.label for l in resolve("ID EXTREME DROUGHT", type="STATREP")] == ["Idaho"]

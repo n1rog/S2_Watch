@@ -6,11 +6,12 @@ where each message is on the map (including any network geocoding). Results reac
 the window in batches through the ``batch_ready`` signal.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from PySide6.QtCore import QObject, QTimer, Signal, Slot
 
 from s2_watch.analysis.base import AnalysisResult, NewsAnalyzer
+from s2_watch.analysis.summary import is_placeholder_summary, summarize
 from s2_watch.geocoding import NominatimGeocoder
 from s2_watch.locating import LocationResolver, ResolvedLocation
 from s2_watch.models import Message, WatchForm
@@ -124,6 +125,12 @@ class MonitorWorker(QObject):
         if not self._batch or self._batch[-1].message is not message:
             return
         processed = self._batch[-1]
+        if result is not None and is_placeholder_summary(message, result.summary):
+            # The offline analyzer's summary repeats the message; write a headline instead
+            # (an AI analyzer's own summary is kept).
+            result = replace(result, summary=summarize(message, result, processed.locations))
+            self.store.save_analysis(message_id, result)
+        processed.result = result
         # The report's area: the most specific location's state and MARS region.
         area = next((location for location in processed.locations if location.state or location.region), None)
         processed.report = self.store.assign_report(
@@ -133,7 +140,8 @@ class MonitorWorker(QObject):
         )
 
     def _analysed(self, message: Message, result: AnalysisResult) -> None:
-        if self._batch and self._batch[-1].message is message:
+        # _saved has already stored the result, with its headline summary.
+        if self._batch and self._batch[-1].message is message and self._batch[-1].result is None:
             self._batch[-1].result = result
         if len(self._batch) >= BATCH_SIZE:
             self._flush()

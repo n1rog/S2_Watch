@@ -135,6 +135,16 @@ rig, and message ID fields.
 It also monitors MagCommstat `alerts` and `statrep` rows, exposing their table
 type and structured fields to watch-form matching and analysis.
 
+The Newsworthiness **Summary** is a one-line headline rather than a copy of the
+message: the event (the matched phrase, or a named fire or storm such as "Black
+Canyon Fire" or "Hurricane Lala"), the most specific location found, and key facts
+from the text: casualties, acreage and containment, earthquake magnitude, heat index
+and temperatures, snowfall, wind, and "until/through" times. For example, "MO -
+EXCESSIVE HEAT WARNING THRU TUES HEAT INDEX 105-110f" becomes "Excessive heat warning
+— Missouri · heat index 105–110°F · through Tues". Routine messages get a short gist.
+Summaries written by the Ollama analyzer are kept as they are. A state code opening a
+status line ("MO -", "AZ:", or "ID ..." in a StatRep) counts as that state's location.
+
 The offline rules analyzer matches its terms at the start of a word ("flood"
 matches "flooding", but "riot" does not match "patriot"). Its Climate / Environment
 rules cover severe weather including heat and cold: excessive or extreme heat, heat
