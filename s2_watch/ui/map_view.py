@@ -188,7 +188,7 @@ class MapView(QWidget):
         self._enabled_categories = set(categories)
         self._render()
 
-    def add_message(self, message: Message, locations=None) -> None:
+    def add_message(self, message: Message, locations=None, dimmed: bool = False) -> None:
         """Add a message's markers; ``locations`` may be precomputed off the UI thread."""
         message_locations: list[dict[str, object]] = []
         grid = message.fields.get("grid") or message.fields.get("gridsquare")
@@ -224,6 +224,7 @@ class MapView(QWidget):
                     "label": label,
                     "message": message.raw_content,
                     "message_id": str(id(message)),
+                    "dimmed": dimmed,
                 }
             )
         for location in message_locations:
@@ -244,6 +245,14 @@ class MapView(QWidget):
         self._locations.clear()
         self._message_locations.clear()
         self._render()
+
+    def set_message_dimmed(self, message: Message, dimmed: bool) -> None:
+        """Fade the markers of a report the operator marked as ignored."""
+        locations = self._message_locations.get(id(message), [])
+        for location in locations:
+            location["dimmed"] = dimmed
+        if locations:
+            self._render()
 
     def set_message_category(self, message: Message, category: str) -> None:
         locations = self._message_locations.get(id(message), [])
@@ -783,7 +792,7 @@ function summaryPopup(p) {{
   return '<b>'+escapeHtml(p.category)+'</b><br>'+escapeHtml(p.kind)+'<br>'+escapeHtml(p.application)+'<br>'+escapeHtml(p.label);
 }}
 function addMarker(p) {{
-  const marker = L.marker([p.lat,p.lon],{{icon:markerIcon(p.category)}}).bindPopup(summaryPopup(p));
+  const marker = L.marker([p.lat,p.lon],{{icon:markerIcon(p.category), opacity: p.dimmed ? 0.4 : 1}}).bindPopup(summaryPopup(p));
   marker.location = p;
   marker.on('click', function() {{
     flashMarker(marker);
@@ -819,9 +828,13 @@ function setLocations(locations) {{
       marker = addMarker(p);
       markersByKey.set(p.key, marker);
       added.push(marker);
+    }} else if (marker.location.dimmed !== p.dimmed && marker.location.category === p.category) {{
+      marker.location = p;
+      marker.setOpacity(p.dimmed ? 0.4 : 1);
     }} else if (marker.location.category !== p.category) {{
       marker.location = p;
       marker.setIcon(markerIcon(p.category));
+      marker.setOpacity(p.dimmed ? 0.4 : 1);
       if (!marker.isPopupOpen()) marker.setPopupContent(summaryPopup(p));
       recoloured.push(marker);
     }}

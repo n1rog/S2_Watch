@@ -292,6 +292,15 @@ and History keep every copy; Newsworthiness, the map, and alerts show each repor
 once, and the **Seen** column shows how many copies arrived and through which
 applications (for example "3× · MagCommstat, JS8SuperSpotter").
 
+Reports in Newsworthiness can be labelled for triage. Select one or more rows
+(Ctrl- or Shift-click), then right-click → **Mark as**, or press a key:
+**I** ★ Of interest, **F** ↪ Follow-up created (asks for an optional note, such as
+your follow-up report number), **X** ⊘ Ignored, **C** clear the label, **N** edit the
+note. Each report has one status, shown in the **Status** column, kept across restarts,
+and applied to later copies of the same report. Ignored reports stay visible but are
+greyed out, their map markers are faded, they raise no alerts, and Metrics leaves
+them out (the Newsworthy reports tile says how many were ignored).
+
 The **Metrics** tab counts reports, not copies, for the last 24 hours, 7 days, or
 30 days: the share of newsworthy reports in each category (for example "Supply
 Chain 8% · 3"), a per-category trend, shares by MARS region and state, which

@@ -8,6 +8,8 @@ from s2_watch.dedup import DUPLICATE_WINDOW, report_text, same_report
 from s2_watch.models import Message, WatchForm
 
 URGENCY_RANK = {"low": 0, "medium": 1, "high": 2}
+# Report triage status, set by the operator: one per report ("" = not yet reviewed).
+REPORT_STATUSES = ("", "interest", "followup", "ignored")
 
 
 @dataclass(frozen=True)
@@ -18,6 +20,8 @@ class ReportInfo:
     new_report: bool          # this message is the report's first copy
     copies: int
     sources: tuple[str, ...]
+    status: str = ""          # see REPORT_STATUSES
+    note: str = ""
 
 
 def utc_iso(value: datetime) -> str:
@@ -94,6 +98,10 @@ class SQLiteStore:
                 region INTEGER
             )"""
         )
+        report_columns = {row[1] for row in self.connection.execute("PRAGMA table_info(reports)")}
+        for column in ("status", "status_note", "status_changed"):
+            if column not in report_columns:
+                self.connection.execute(f"ALTER TABLE reports ADD COLUMN {column} TEXT NOT NULL DEFAULT ''")
         self.connection.execute("CREATE INDEX IF NOT EXISTS reports_first_seen ON reports(first_seen)")
         message_columns = {row[1] for row in self.connection.execute("PRAGMA table_info(messages)")}
         if "source_key" not in message_columns:
@@ -220,7 +228,8 @@ class SQLiteStore:
     def report_totals(self, since: str) -> tuple[int, int, int]:
         """(reports, newsworthy reports, copies received) for reports first seen since ``since``."""
         reports, newsworthy, copies = self.connection.execute(
-            "SELECT COUNT(*), COALESCE(SUM(newsworthy), 0), COALESCE(SUM(copies), 0) FROM reports WHERE first_seen >= ?",
+            "SELECT COUNT(*), COALESCE(SUM(newsworthy), 0), COALESCE(SUM(copies), 0) FROM reports"
+            " WHERE first_seen >= ? AND status != 'ignored'",
             (since,),
         ).fetchone()
         return int(reports), int(newsworthy), int(copies)
@@ -228,7 +237,8 @@ class SQLiteStore:
     def newsworthy_reports(self, since: str) -> list[dict]:
         rows = self.connection.execute(
             """SELECT id, first_seen, category, urgency, state, region, first_source, sender, copies
-               FROM reports WHERE newsworthy = 1 AND first_seen >= ? ORDER BY first_seen""",
+               FROM reports WHERE newsworthy = 1 AND first_seen >= ? AND status != 'ignored'
+               ORDER BY first_seen""",
             (since,),
         ).fetchall()
         keys = ("id", "first_seen", "category", "urgency", "state", "region", "first_source", "sender", "copies")
@@ -238,16 +248,44 @@ class SQLiteStore:
         """Copies of newsworthy reports received from each source application."""
         rows = self.connection.execute(
             """SELECT m.source_application, COUNT(*) FROM messages m JOIN reports r ON r.id = m.report_id
-               WHERE r.newsworthy = 1 AND r.first_seen >= ? GROUP BY m.source_application""",
+               WHERE r.newsworthy = 1 AND r.first_seen >= ? AND r.status != 'ignored'
+               GROUP BY m.source_application""",
             (since,),
         ).fetchall()
         return {source: int(count) for source, count in rows}
 
     def _report_info(self, report_id: int, new_report: bool) -> ReportInfo:
-        copies, sources = self.connection.execute(
-            "SELECT copies, sources FROM reports WHERE id = ?", (report_id,)
+        copies, sources, status, note = self.connection.execute(
+            "SELECT copies, sources, status, status_note FROM reports WHERE id = ?", (report_id,)
         ).fetchone()
-        return ReportInfo(report_id, new_report, int(copies), tuple(sources.split(",")))
+        return ReportInfo(report_id, new_report, int(copies), tuple(sources.split(",")), status, note)
+
+    def report_status(self, report_id: int) -> tuple[str, str]:
+        row = self.connection.execute(
+            "SELECT status, status_note FROM reports WHERE id = ?", (report_id,)
+        ).fetchone()
+        return (row[0], row[1]) if row else ("", "")
+
+    def set_report_status(self, report_ids, status: str, note: str | None = None) -> None:
+        """Label reports; ``note`` None keeps each report's existing note."""
+        if status not in REPORT_STATUSES:
+            raise ValueError(f"Unknown report status {status!r}")
+        changed = utc_iso(datetime.now(timezone.utc))
+        for report_id in report_ids:
+            if note is None:
+                self.connection.execute(
+                    "UPDATE reports SET status = ?, status_changed = ? WHERE id = ?", (status, changed, report_id))
+            else:
+                self.connection.execute(
+                    "UPDATE reports SET status = ?, status_note = ?, status_changed = ? WHERE id = ?",
+                    (status, note, changed, report_id))
+        self.connection.commit()
+
+    def ignored_reports(self, since: str) -> int:
+        row = self.connection.execute(
+            "SELECT COUNT(*) FROM reports WHERE status = 'ignored' AND newsworthy = 1 AND first_seen >= ?", (since,)
+        ).fetchone()
+        return int(row[0])
 
     def save_analysis(self, message_id: int, result: AnalysisResult) -> None:
         self.connection.execute(

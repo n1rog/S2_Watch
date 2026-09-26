@@ -4,13 +4,13 @@ from pathlib import Path
 from datetime import datetime, timedelta, timezone
 
 from PySide6.QtCore import QMetaObject, QThread, QTimer, Qt, Signal
-from PySide6.QtGui import QActionGroup, QColor, QPalette
+from PySide6.QtGui import QAction, QActionGroup, QBrush, QColor, QFont, QKeySequence, QPalette
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QLabel, QLineEdit, QListWidget,
     QListWidgetItem, QMainWindow, QMessageBox, QPushButton, QSpinBox,
     QTableWidget, QTableWidgetItem,
     QFileDialog, QSystemTrayIcon, QTabWidget, QVBoxLayout,
-    QWidget, QMenu, QToolButton, QWidgetAction,
+    QWidget, QMenu, QToolButton, QWidgetAction, QAbstractItemView, QInputDialog,
 )
 
 APP_VERSION = "0.1.0"
@@ -53,10 +53,19 @@ class MainWindow(QMainWindow):
     LIVE_ROWS_LIMIT = 2000
     ANALYSIS_ROWS_LIMIT = 1000
     ANALYSIS_COLUMNS = (
-        "Time", "Application", "Watch form", "Result", "Category", "Urgency",
+        "Time", "Application", "Watch form", "Result", "Status", "Category", "Urgency",
         "Confidence", "Seen", "Summary", "Message",
     )
     SEEN_COLUMN = ANALYSIS_COLUMNS.index("Seen")
+    STATUS_COLUMN = ANALYSIS_COLUMNS.index("Status")
+    # Report triage: (status, label with icon so it never relies on colour, shortcut).
+    STATUS_ACTIONS = (
+        ("interest", "★ Of interest", "I"),
+        ("followup", "↪ Follow-up created", "F"),
+        ("ignored", "⊘ Ignored", "X"),
+        ("", "Clear label", "C"),
+    )
+    STATUS_LABELS = {status: label for status, label, _key in STATUS_ACTIONS if status}
     REPORT_ROLE = Qt.ItemDataRole.UserRole + 2
     DEFAULT_WATCH_FORMS = {
         "JS8Call": "All JS8Call messages",
@@ -200,6 +209,24 @@ class MainWindow(QMainWindow):
         self.analysis.sortItems(0, Qt.SortOrder.DescendingOrder)
         self.analysis.cellClicked.connect(self.focus_analysis_message)
         self.analysis.cellDoubleClicked.connect(self.show_analysis_details)
+        # Label one or many reports: select rows, then right-click or use the shortcuts.
+        self.analysis.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.analysis.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self.analysis.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.analysis.customContextMenuRequested.connect(self.show_report_menu)
+        self.report_actions: list[QAction] = []
+        for status, label, key in self.STATUS_ACTIONS:
+            action = QAction(label, self.analysis)
+            action.setShortcut(QKeySequence(key))
+            action.setShortcutContext(Qt.ShortcutContext.WidgetShortcut)
+            action.triggered.connect(lambda _checked=False, status=status: self.mark_selected_reports(status))
+            self.analysis.addAction(action)
+            self.report_actions.append(action)
+        self.edit_note_action = QAction("Edit note…", self.analysis)
+        self.edit_note_action.setShortcut(QKeySequence("N"))
+        self.edit_note_action.setShortcutContext(Qt.ShortcutContext.WidgetShortcut)
+        self.edit_note_action.triggered.connect(self.edit_selected_note)
+        self.analysis.addAction(self.edit_note_action)
         self.history_search = QLineEdit()
         self.history_search.setPlaceholderText("Search message text or form name")
         self.history_category = QComboBox()
@@ -827,13 +854,15 @@ class MainWindow(QMainWindow):
                 # Another copy of a report already on screen: count it, don't repeat it.
                 self.analysis.item(shown.row(), self.SEEN_COLUMN).setText(self.seen_text(report))
                 continue
-            self.map_view.add_message(processed.message, processed.locations)
+            self.map_view.add_message(processed.message, processed.locations,
+                                      dimmed=bool(report and report.status == "ignored"))
             if processed.result:
                 item = self.insert_analysis_row(processed.message, processed.result, report)
                 if report:
                     self._report_items[report.report_id] = item
                 # Alert once per report, and not again for reports re-read by a re-scan.
-                if (report is None or report.new_report) and self.should_alert(processed.result):
+                ignored = report is not None and report.status == "ignored"
+                if (report is None or report.new_report) and not ignored and self.should_alert(processed.result):
                     alerts.append(processed.result)
         self.trim_oldest_rows(self.messages, self.LIVE_ROWS_LIMIT)
         if self.trim_oldest_rows(self.analysis, self.ANALYSIS_ROWS_LIMIT):
@@ -1027,6 +1056,7 @@ class MainWindow(QMainWindow):
             message.source_application,
             message.form_name or "",
             label,
+            self.status_text(report.status, report.note) if report else "",
             result.category,
             result.urgency,
             f"{result.confidence:.0%}",
@@ -1044,8 +1074,103 @@ class MainWindow(QMainWindow):
                     item.setData(self.REPORT_ROLE, report.report_id)
                 first = item
             self.analysis.setItem(row, column, item)
+        self.style_report_row(row, report.status if report else "")
         self.map_view.set_message_category(message, result.category if result.newsworthy else "routine")
         return first
+
+    # -- report labels (triage) -------------------------------------------------------
+
+    def status_text(self, status: str, note: str = "") -> str:
+        label = self.STATUS_LABELS.get(status, "")
+        return f"{label} · {note}" if label and note else label
+
+    def style_report_row(self, row: int, status: str) -> None:
+        """Ignored reports stay visible but greyed out; labelled ones show their status in bold."""
+        muted = self.analysis.palette().color(QPalette.ColorRole.PlaceholderText)
+        for column in range(self.analysis.columnCount()):
+            item = self.analysis.item(row, column)
+            if item is None:
+                continue
+            item.setForeground(QBrush(muted) if status == "ignored" else QBrush())
+            font = QFont(item.font())
+            font.setItalic(status == "ignored")
+            font.setBold(column == self.STATUS_COLUMN and status in ("interest", "followup"))
+            item.setFont(font)
+
+    def selected_report_rows(self) -> list[tuple[int, int]]:
+        """(row, report id) for each selected Newsworthiness row that belongs to a report."""
+        rows = []
+        for index in self.analysis.selectionModel().selectedRows():
+            item = self.analysis.item(index.row(), 0)
+            report_id = item.data(self.REPORT_ROLE) if item else None
+            if report_id is not None:
+                rows.append((index.row(), int(report_id)))
+        return rows
+
+    def show_report_menu(self, position) -> None:
+        rows = self.selected_report_rows()
+        if not rows:
+            return
+        menu = QMenu(self)
+        heading = menu.addAction(f"{len(rows)} report{'s' if len(rows) != 1 else ''} selected")
+        heading.setEnabled(False)
+        mark = menu.addMenu("Mark as")
+        for action in self.report_actions:
+            mark.addAction(action)
+        menu.addAction(self.edit_note_action)
+        menu.exec(self.analysis.viewport().mapToGlobal(position))
+
+    def mark_selected_reports(self, status: str) -> None:
+        rows = self.selected_report_rows()
+        if not rows:
+            return
+        note = None  # keep existing notes
+        if status == "followup":
+            existing = self.store.report_status(rows[0][1])[1] if len(rows) == 1 else ""
+            text, accepted = QInputDialog.getText(
+                self, "Follow-up created",
+                f"Optional note for {len(rows)} report{'s' if len(rows) != 1 else ''} "
+                "(e.g. your follow-up report number):", text=existing,
+            )
+            if not accepted:
+                return
+            note = text.strip()
+        elif status == "":
+            note = ""
+        self.apply_report_status([report_id for _row, report_id in rows], status, note)
+
+    def edit_selected_note(self) -> None:
+        rows = self.selected_report_rows()
+        if not rows:
+            return
+        existing = self.store.report_status(rows[0][1])[1] if len(rows) == 1 else ""
+        text, accepted = QInputDialog.getText(self, "Report note", "Note:", text=existing)
+        if not accepted:
+            return
+        for _row, report_id in rows:
+            status = self.store.report_status(report_id)[0]
+            self.store.set_report_status([report_id], status, text.strip())
+        self.refresh_report_rows({report_id for _row, report_id in rows})
+        self.analysis.resizeColumnToContents(self.STATUS_COLUMN)
+
+    def apply_report_status(self, report_ids: list[int], status: str, note: str | None) -> None:
+        self.store.set_report_status(report_ids, status, note)
+        self.refresh_report_rows(set(report_ids))
+        self.analysis.resizeColumnToContents(self.STATUS_COLUMN)
+        self.metrics_view.data_changed()
+
+    def refresh_report_rows(self, report_ids: set[int]) -> None:
+        for row in range(self.analysis.rowCount()):
+            item = self.analysis.item(row, 0)
+            report_id = item.data(self.REPORT_ROLE) if item else None
+            if report_id is None or int(report_id) not in report_ids:
+                continue
+            status, note = self.store.report_status(int(report_id))
+            self.analysis.item(row, self.STATUS_COLUMN).setText(self.status_text(status, note))
+            self.style_report_row(row, status)
+            message = item.data(Qt.ItemDataRole.UserRole + 1)
+            if isinstance(message, Message):
+                self.map_view.set_message_dimmed(message, status == "ignored")
 
     def should_alert(self, result: AnalysisResult) -> bool:
         if not result.newsworthy or not self.alerts_enabled.isChecked():

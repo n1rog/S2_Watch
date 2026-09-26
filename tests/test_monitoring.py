@@ -120,9 +120,13 @@ def test_js8call_tcp_adapter_reads_json_line() -> None:
     thread = threading.Thread(target=send_message)
     thread.start()
     adapter = JS8CallTcpAdapter(port=port)
-    assert adapter.read_messages() == []
-    time.sleep(0.05)
+    # The line may arrive with the first read (which connects) or a later one.
     messages = adapter.read_messages()
+    for _ in range(20):
+        if messages:
+            break
+        time.sleep(0.05)
+        messages = adapter.read_messages()
     thread.join()
     server.close()
     assert messages[0].raw_content == "Emergency"

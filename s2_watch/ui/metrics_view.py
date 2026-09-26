@@ -356,7 +356,11 @@ class MetricsView(QScrollArea):
         self.updated.setText(f"Updated {datetime.now():%H:%M:%S}")
 
         merged = copies - total
-        self.reports_tile.set(str(newsworthy), f"of {total} reports captured")
+        ignored = self.store.ignored_reports(since)
+        self.reports_tile.set(
+            str(newsworthy),
+            f"of {total} reports captured" + (f" · {ignored} ignored, not counted" if ignored else ""),
+        )
         self.duplicates_tile.set(
             str(merged), f"{percent(merged, copies)} of {copies} copies received were repeats" if copies else "no copies yet")
         categories = Counter(report["category"] for report in reports)
