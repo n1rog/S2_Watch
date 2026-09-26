@@ -311,6 +311,10 @@ Each matched message is saved to History once, identified by its source, even
 though the review window is re-read at every launch and whenever watch forms
 change.
 
+The version is set once, as `__version__` in `s2_watch/__init__.py`, and shown in the
+window title and **Help → About**. S2 Watch uses semantic versioning: 0.x.0 adds
+features, 0.x.y only fixes things. Each release is tagged in git (`v0.2.0`).
+
 Closing the main window stops monitoring and exits S2 Watch completely. The
 system-tray icon carries desktop alerts; its menu can bring the window forward
 or quit. Only one copy of S2 Watch runs per user: launching it again while it

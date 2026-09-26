@@ -3,6 +3,8 @@ import re
 import urllib.parse
 import urllib.request
 
+from s2_watch import __version__
+
 
 class GeocodingError(RuntimeError):
     pass
@@ -90,7 +92,7 @@ def extract_place_candidates(text: str, fields: dict[str, str]) -> list[str]:
 class NominatimGeocoder:
     """Opt-in geocoder using OpenStreetMap Nominatim with caller-provided caching."""
 
-    def __init__(self, cache_get, cache_set, user_agent: str = "S2-Watch/0.1") -> None:
+    def __init__(self, cache_get, cache_set, user_agent: str = f"S2-Watch/{__version__}") -> None:
         self.cache_get = cache_get
         self.cache_set = cache_set
         self.user_agent = user_agent

@@ -18,12 +18,13 @@ from datetime import timezone
 
 from PySide6.QtCore import QObject, QTimer, Signal
 
+from s2_watch import __version__
 from s2_watch.geo import maidenhead_to_coordinates
 from s2_watch.models import Message
 
 NWS_ALERTS_URL = "https://api.weather.gov/alerts/active?status=actual"
 # api.weather.gov asks every client to identify itself.
-USER_AGENT = "S2-Watch (https://github.com/n1rog/S2_Watch)"
+USER_AGENT = f"S2-Watch/{__version__} (https://github.com/n1rog/S2_Watch)"
 SEVERITY_ORDER = {"Unknown": 0, "Minor": 1, "Moderate": 2, "Severe": 3, "Extreme": 4}
 DESCRIPTION_LIMIT = 900
 

@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
     QWidget, QMenu, QToolButton, QWidgetAction, QAbstractItemView, QInputDialog,
 )
 
-APP_VERSION = "0.1.0"
+from s2_watch import __version__ as APP_VERSION
 
 
 class SortableTableItem(QTableWidgetItem):
@@ -77,7 +77,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self, database_path: str = "s2_watch.db") -> None:
         super().__init__()
-        self.setWindowTitle("S2 Watch")
+        self.setWindowTitle(f"S2 Watch {APP_VERSION}")
         self.resize(800, 500)
         self.store = SQLiteStore(database_path)
         self.host = QLineEdit(self.store.get_setting("js8call.host", "127.0.0.1"))

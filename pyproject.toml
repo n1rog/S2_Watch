@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "s2-watch"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Cross-platform desktop monitor for radio application messages"
 requires-python = ">=3.11"
 dependencies = [
@@ -21,6 +21,9 @@ s2-watch = "s2_watch.main:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.setuptools.dynamic]
+version = {attr = "s2_watch.__version__"}
 
 [tool.setuptools.packages.find]
 include = ["s2_watch*"]

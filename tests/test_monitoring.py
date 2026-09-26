@@ -178,7 +178,9 @@ def test_watch_form_json_rejects_unknown_application() -> None:
 def test_application_version_is_defined() -> None:
     from s2_watch.ui.main_window import APP_VERSION
 
-    assert APP_VERSION == "0.1.0"
+    from s2_watch import __version__
+
+    assert APP_VERSION == __version__
 
 
 def test_settings_are_persisted(tmp_path: Path) -> None:
