@@ -25,6 +25,19 @@ class SortableTableItem(QTableWidgetItem):
         return super().__lt__(other)
 
 
+class PriorityItem(QTableWidgetItem):
+    """Newsworthiness time cell: sorts by focus-region priority, then by the real time
+    (the displayed "Sep-26-26" text would sort alphabetically across months)."""
+
+    SORT_ROLE = Qt.ItemDataRole.UserRole + 3
+
+    def __lt__(self, other: QTableWidgetItem) -> bool:
+        mine, theirs = self.data(self.SORT_ROLE), other.data(self.SORT_ROLE)
+        if mine is not None and theirs is not None:
+            return str(mine) < str(theirs)
+        return super().__lt__(other)
+
+
 from s2_watch.adapters.js8call_tcp import JS8CallTcpAdapter
 from s2_watch.adapters.magcommstat_sqlite import MagCommstatSQLiteAdapter
 from s2_watch.adapters.commstat_sqlite import CommstatSQLiteAdapter
@@ -43,7 +56,7 @@ from s2_watch.storage import SQLiteStore
 from s2_watch.ui.icons import app_icon
 from s2_watch.ui.map_view import MapView
 from s2_watch.ui.metrics_view import MetricsView
-from s2_watch.overlays import NwsAlertsPoller
+from s2_watch.overlays import AircraftPoller, NwsAlertsPoller
 from s2_watch.ui.watch_form_dialog import WatchFormDialog
 
 
@@ -53,9 +66,11 @@ class MainWindow(QMainWindow):
     LIVE_ROWS_LIMIT = 2000
     ANALYSIS_ROWS_LIMIT = 1000
     ANALYSIS_COLUMNS = (
-        "Time", "Application", "Watch form", "Result", "Status", "Category", "Urgency",
+        "Time", "Application", "Watch form", "Result", "Status", "Region", "Category", "Urgency",
         "Confidence", "Seen", "Summary", "Message",
     )
+    REGION_COLUMN = ANALYSIS_COLUMNS.index("Region")
+    REGION_ROLE = Qt.ItemDataRole.UserRole + 4
     SEEN_COLUMN = ANALYSIS_COLUMNS.index("Seen")
     STATUS_COLUMN = ANALYSIS_COLUMNS.index("Status")
     # Report triage: (status, label with icon so it never relies on colour, shortcut).
@@ -80,6 +95,10 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(f"S2 Watch {APP_VERSION}")
         self.resize(800, 500)
         self.store = SQLiteStore(database_path)
+        # MARS regions the operator focuses on; empty = the whole U.S. is treated the same.
+        self.focus_regions: set[int] = {
+            int(value) for value in self.store.get_setting("focus.regions", "").split(",") if value.strip().isdigit()
+        }
         self.host = QLineEdit(self.store.get_setting("js8call.host", "127.0.0.1"))
         self.port = QSpinBox()
         self.port.setRange(1, 65535)
@@ -269,6 +288,10 @@ class MainWindow(QMainWindow):
              "Shades each grid square by when a station there was last heard, so quiet areas stand out."),
             ("greyline", "Show day / night (grey line)",
              "Shades the night side of the Earth; HF propagation changes along the grey line."),
+            ("aircraft", "Show aircraft (ADS-B)",
+             "Military aircraft and emergency squawks (7500/7600/7700) everywhere; all traffic, including general "
+             "aviation, helicopters and air ambulances, in your focus regions and when zoomed in. "
+             "Free community ADS-B data (adsb.lol, adsb.fi); needs internet."),
         ):
             checkbox = QCheckBox(label)
             checkbox.setToolTip(tooltip)
@@ -279,6 +302,10 @@ class MainWindow(QMainWindow):
         self.nws_poller = NwsAlertsPoller(parent=self)
         self.nws_poller.alerts_ready.connect(self.map_view.set_nws_alerts)
         self.nws_poller.failed.connect(self.map_view.set_nws_error)
+        self.aircraft_poller = AircraftPoller(parent=self)
+        self.aircraft_poller.aircraft_ready.connect(self.map_view.set_aircraft)
+        self.aircraft_poller.failed.connect(self.map_view.set_aircraft_error)
+        self.map_view._bridge.view_changed.connect(self.aircraft_poller.set_view)
         self.map_online_tiles = QCheckBox("Use online map tiles (OpenStreetMap)")
         self.map_online_tiles.setToolTip(
             "When off, or when there is no network, the map uses its built-in offline base map."
@@ -362,6 +389,21 @@ class MainWindow(QMainWindow):
         )
         theme_menu = configuration_menu.addMenu("Theme")
         theme_menu.addActions(self.theme.actions())
+        focus_menu = configuration_menu.addMenu("Focus Regions")
+        focus_menu.setToolTipsVisible(True)
+        self.no_focus_action = focus_menu.addAction("All of the U.S. (no focus)")
+        self.no_focus_action.setCheckable(True)
+        self.no_focus_action.setChecked(not self.focus_regions)
+        self.no_focus_action.triggered.connect(self.clear_focus_regions)
+        focus_menu.addSeparator()
+        self.focus_actions: list[QAction] = []
+        for region in range(1, 11):
+            action = focus_menu.addAction(f"Region {region} (MR{region:02d})")
+            action.setCheckable(True)
+            action.setChecked(region in self.focus_regions)
+            action.setData(region)
+            action.triggered.connect(self.focus_regions_changed)
+            self.focus_actions.append(action)
         configuration_menu.addSeparator()
         for title, dialog in (
             ("Watch Forms…", self.watch_forms_dialog),
@@ -459,6 +501,7 @@ class MainWindow(QMainWindow):
         self.map_radar_changed()
         for overlay in self.map_overlay_filters:
             self.map_overlay_changed(overlay)
+        self.apply_focus(fit_map=True)
         self.map_regions_changed()
         self.map_online_tiles_changed()
         self.connect_js8call()
@@ -862,6 +905,10 @@ class MainWindow(QMainWindow):
                     self._report_items[report.report_id] = item
                 # Alert once per report, and not again for reports re-read by a re-scan.
                 ignored = report is not None and report.status == "ignored"
+                # Outside the focus regions only high-urgency reports alert.
+                secondary = not self.in_focus(report.region if report else None)
+                if secondary and processed.result.urgency != "high":
+                    ignored = True
                 if (report is None or report.new_report) and not ignored and self.should_alert(processed.result):
                     alerts.append(processed.result)
         self.trim_oldest_rows(self.messages, self.LIVE_ROWS_LIMIT)
@@ -898,10 +945,14 @@ class MainWindow(QMainWindow):
         excess = table.rowCount() - limit
         if excess <= 0:
             return False
-        rows = sorted(
-            range(table.rowCount()),
-            key=lambda row: str(table.item(row, 0).data(Qt.ItemDataRole.UserRole)) if table.item(row, 0) else "",
-        )
+        def age_key(row):
+            item = table.item(row, 0)
+            if item is None:
+                return ""
+            # Newsworthiness drops rest-of-U.S. reports before focus-region ones.
+            priority = item.data(PriorityItem.SORT_ROLE)
+            return str(priority if priority is not None else item.data(Qt.ItemDataRole.UserRole))
+        rows = sorted(range(table.rowCount()), key=age_key)
         for row in sorted(rows[:excess], reverse=True):
             table.removeRow(row)
         return True
@@ -1024,12 +1075,17 @@ class MainWindow(QMainWindow):
         self.map_view.set_overlay_visible(overlay, visible)
         if overlay == "nws":
             self.nws_poller.set_enabled(visible)
+        if overlay == "aircraft":
+            self.aircraft_poller.set_enabled(visible)
 
     def update_news_label(self) -> None:
         # The table holds reports from the review window read at startup plus new traffic.
+        focus = ", ".join(f"R{region}" for region in sorted(self.focus_regions))
         self.news_label.setText(
-            f"<b>Newsworthiness</b> — reports from the last {self.review_duration.currentText()} "
-            f"<span style='color:gray'>(review window; change under Configuration → Sources…)</span>"
+            f"<b>Newsworthiness</b> — reports from the last {self.review_duration.currentText()}"
+            + (f", <b>focus {focus} first</b>, then the rest of the U.S." if focus else "")
+            + " <span style='color:gray'>(review window: Configuration → Sources…; "
+            "focus: Configuration → Focus Regions)</span>"
         )
 
     def map_radar_changed(self) -> None:
@@ -1057,6 +1113,7 @@ class MainWindow(QMainWindow):
             message.form_name or "",
             label,
             self.status_text(report.status, report.note) if report else "",
+            self.region_text(report),
             result.category,
             result.urgency,
             f"{result.confidence:.0%}",
@@ -1066,12 +1123,14 @@ class MainWindow(QMainWindow):
         )
         first = None
         for column, value in enumerate(values):
-            item = QTableWidgetItem(value)
+            item = PriorityItem(value) if column == 0 else QTableWidgetItem(value)
             if column == 0:
                 item.setData(Qt.ItemDataRole.UserRole, message.received_at.isoformat())
                 item.setData(Qt.ItemDataRole.UserRole + 1, message)
                 if report is not None:
                     item.setData(self.REPORT_ROLE, report.report_id)
+                item.setData(self.REGION_ROLE, report.region if report else None)
+                self.set_priority_key(item)
                 first = item
             self.analysis.setItem(row, column, item)
         self.style_report_row(row, report.status if report else "")
@@ -1079,6 +1138,55 @@ class MainWindow(QMainWindow):
         return first
 
     # -- report labels (triage) -------------------------------------------------------
+
+    # -- focus regions ------------------------------------------------------------------
+
+    def in_focus(self, region: int | None) -> bool:
+        """With no focus regions chosen, every report is primary."""
+        return not self.focus_regions or region in self.focus_regions
+
+    def set_priority_key(self, item: QTableWidgetItem) -> None:
+        region = item.data(self.REGION_ROLE)
+        received = datetime.fromisoformat(str(item.data(Qt.ItemDataRole.UserRole)))
+        if received.tzinfo is None:
+            received = received.replace(tzinfo=timezone.utc)
+        focus = "1" if self.in_focus(region if region is None else int(region)) else "0"
+        item.setData(PriorityItem.SORT_ROLE, f"{focus}|{received.astimezone(timezone.utc).isoformat()}")
+
+    @staticmethod
+    def region_text(report) -> str:
+        if report is None or (report.region is None and not report.state):
+            return "—"
+        parts = [f"R{report.region}"] if report.region is not None else []
+        if report.state:
+            parts.append(report.state)
+        return " · ".join(parts)
+
+    def focus_regions_changed(self) -> None:
+        self.focus_regions = {int(action.data()) for action in self.focus_actions if action.isChecked()}
+        self.no_focus_action.setChecked(not self.focus_regions)
+        self.store.set_setting("focus.regions", ",".join(str(region) for region in sorted(self.focus_regions)))
+        self.apply_focus(fit_map=True)
+
+    def clear_focus_regions(self) -> None:
+        for action in self.focus_actions:
+            action.setChecked(False)
+        self.focus_regions_changed()
+
+    def apply_focus(self, fit_map: bool = False) -> None:
+        """Re-rank Newsworthiness and update the map and Metrics for the focus regions."""
+        for row in range(self.analysis.rowCount()):
+            item = self.analysis.item(row, 0)
+            if item is not None and item.data(Qt.ItemDataRole.UserRole):
+                self.set_priority_key(item)
+        self.analysis.sortItems(0, Qt.SortOrder.DescendingOrder)
+        self.apply_news_rows_limit()
+        self.map_view.set_focus_regions(sorted(self.focus_regions), fit_map)
+        self.aircraft_poller.set_focus(self.focus_regions)
+        self.metrics_view.set_focus_regions(self.focus_regions)
+        focus = ", ".join(f"R{region}" for region in sorted(self.focus_regions))
+        self.update_news_label()
+        self.setWindowTitle(f"S2 Watch {APP_VERSION}" + (f" — focus {focus}" if focus else ""))
 
     def status_text(self, status: str, note: str = "") -> str:
         label = self.STATUS_LABELS.get(status, "")
@@ -1250,6 +1358,7 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event) -> None:
         self.timer.stop()
         self.nws_poller.set_enabled(False)
+        self.aircraft_poller.set_enabled(False)
         # The polling thread owns the adapters and its own database connection.
         self._worker.request_stop()
         QMetaObject.invokeMethod(self._worker, "stop", Qt.ConnectionType.BlockingQueuedConnection)

@@ -22,6 +22,8 @@ class ReportInfo:
     sources: tuple[str, ...]
     status: str = ""          # see REPORT_STATUSES
     note: str = ""
+    state: str = ""
+    region: int | None = None  # MARS region, when known
 
 
 def utc_iso(value: datetime) -> str:
@@ -225,12 +227,20 @@ class SQLiteStore:
         self.connection.commit()
         return self._report_info(report_id, new_report)
 
-    def report_totals(self, since: str) -> tuple[int, int, int]:
+    @staticmethod
+    def _region_filter(regions, column: str = "region") -> tuple[str, list]:
+        """SQL limiting reports to MARS ``regions`` (None = every report)."""
+        if not regions:
+            return "", []
+        return f" AND {column} IN ({','.join('?' * len(regions))})", sorted(regions)
+
+    def report_totals(self, since: str, regions=None) -> tuple[int, int, int]:
         """(reports, newsworthy reports, copies received) for reports first seen since ``since``."""
+        clause, values = self._region_filter(regions)
         reports, newsworthy, copies = self.connection.execute(
             "SELECT COUNT(*), COALESCE(SUM(newsworthy), 0), COALESCE(SUM(copies), 0) FROM reports"
-            " WHERE first_seen >= ? AND status != 'ignored'",
-            (since,),
+            " WHERE first_seen >= ? AND status != 'ignored'" + clause,
+            (since, *values),
         ).fetchone()
         return int(reports), int(newsworthy), int(copies)
 
@@ -244,21 +254,23 @@ class SQLiteStore:
         keys = ("id", "first_seen", "category", "urgency", "state", "region", "first_source", "sender", "copies")
         return [dict(zip(keys, row)) for row in rows]
 
-    def copies_by_source(self, since: str) -> dict[str, int]:
+    def copies_by_source(self, since: str, regions=None) -> dict[str, int]:
         """Copies of newsworthy reports received from each source application."""
+        clause, values = self._region_filter(regions, "r.region")
         rows = self.connection.execute(
             """SELECT m.source_application, COUNT(*) FROM messages m JOIN reports r ON r.id = m.report_id
-               WHERE r.newsworthy = 1 AND r.first_seen >= ? AND r.status != 'ignored'
-               GROUP BY m.source_application""",
-            (since,),
+               WHERE r.newsworthy = 1 AND r.first_seen >= ? AND r.status != 'ignored'""" + clause +
+            " GROUP BY m.source_application",
+            (since, *values),
         ).fetchall()
         return {source: int(count) for source, count in rows}
 
     def _report_info(self, report_id: int, new_report: bool) -> ReportInfo:
-        copies, sources, status, note = self.connection.execute(
-            "SELECT copies, sources, status, status_note FROM reports WHERE id = ?", (report_id,)
+        copies, sources, status, note, state, region = self.connection.execute(
+            "SELECT copies, sources, status, status_note, state, region FROM reports WHERE id = ?", (report_id,)
         ).fetchone()
-        return ReportInfo(report_id, new_report, int(copies), tuple(sources.split(",")), status, note)
+        return ReportInfo(report_id, new_report, int(copies), tuple(sources.split(",")), status, note,
+                          state or "", int(region) if region is not None else None)
 
     def report_status(self, report_id: int) -> tuple[str, str]:
         row = self.connection.execute(
@@ -281,9 +293,11 @@ class SQLiteStore:
                     (status, note, changed, report_id))
         self.connection.commit()
 
-    def ignored_reports(self, since: str) -> int:
+    def ignored_reports(self, since: str, regions=None) -> int:
+        clause, values = self._region_filter(regions)
         row = self.connection.execute(
-            "SELECT COUNT(*) FROM reports WHERE status = 'ignored' AND newsworthy = 1 AND first_seen >= ?", (since,)
+            "SELECT COUNT(*) FROM reports WHERE status = 'ignored' AND newsworthy = 1 AND first_seen >= ?" + clause,
+            (since, *values),
         ).fetchone()
         return int(row[0])
 

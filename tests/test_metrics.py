@@ -70,3 +70,28 @@ def test_labels_persist_and_ignored_reports_leave_the_metrics(tmp_path: Path) ->
     assert view.reports_tile.value.text() == "1"
     assert "1 ignored, not counted" in view.reports_tile.detail.text()
     assert {label for label, values, _t, _tip in view.categories.rows if values[0]} == {"Supply Chain"}
+
+
+def test_metrics_scope_limits_to_focus_regions(tmp_path: Path) -> None:
+    from PySide6.QtWidgets import QApplication
+
+    from s2_watch.ui.metrics_view import MetricsView
+
+    QApplication.instance() or QApplication([])
+    store = SQLiteStore(tmp_path / "s2.db")
+    add(store, "MagCommstat", "FLASH FLOOD IN DENVER", "Climate / Environment", 30, "CO", 8)
+    add(store, "MagCommstat", "PORT CLOSURE IN HOUSTON", "Supply Chain", 30, "TX", 6)
+    add(store, "MagCommstat", "BOMB THREAT AT SCHOOL", "Terrorism", 30, "", None)
+    view = MetricsView(store)
+    view.period.setCurrentIndex(0)
+    view.set_focus_regions({8})
+    view.scope.setCurrentIndex(0)   # my focus regions
+    view.refresh()
+    assert view.reports_tile.value.text() == "1"
+    assert {label for label, values, _t, _tip in view.categories.rows if values[0]} == {"Climate / Environment"}
+    view.scope.setCurrentIndex(1)   # all of the U.S.
+    view.refresh()
+    assert view.reports_tile.value.text() == "3"
+    view.set_focus_regions(set())   # no focus: scope hidden, everything counts
+    view.refresh()
+    assert view.scope.isHidden() and view.reports_tile.value.text() == "3"

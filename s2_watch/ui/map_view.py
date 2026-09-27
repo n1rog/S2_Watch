@@ -57,10 +57,16 @@ def mars_state_anchors() -> dict[tuple[int, str], tuple[str, tuple[float, float]
 
 class MapBridge(QObject):
     message_selected = Signal(str)
+    # The zoomed-in map area (lat, lon, radius in nautical miles; radius 0 = zoomed out).
+    view_changed = Signal(float, float, float)
 
     @Slot(str)
     def select_message(self, message_id: str) -> None:
         self.message_selected.emit(message_id)
+
+    @Slot(float, float, float)
+    def report_view(self, lat: float, lon: float, radius_nm: float) -> None:
+        self.view_changed.emit(lat, lon, radius_nm)
 
 
 class MapView(QWidget):
@@ -88,7 +94,9 @@ class MapView(QWidget):
         self._radar_visible = False
         self._regions_visible = False
         self._online_tiles = True
-        self._overlays = {"nws": False, "coverage": False, "greyline": False}
+        self._overlays = {"nws": False, "coverage": False, "greyline": False, "aircraft": False}
+        self._aircraft: tuple[list[dict], str] | None = None
+        self._focus_regions: list[int] = []
         self._nws_alerts: list[dict] | None = None
         self._coverage: list[dict] | None = None
         self._message_locations: dict[int, list[dict[str, object]]] = {}
@@ -160,6 +168,18 @@ class MapView(QWidget):
 
     def set_nws_error(self, message: str) -> None:
         self._run(f"setNwsAlerts(null, {json.dumps(message[:120])})")
+
+    def set_aircraft(self, aircraft: list[dict], source: str) -> None:
+        self._aircraft = (aircraft, source)
+        self._run(f"setAircraft({json.dumps(aircraft)}, {json.dumps(source)})")
+
+    def set_aircraft_error(self, message: str) -> None:
+        self._run(f"setAircraft([], '', {json.dumps(message[:120])})")
+
+    def set_focus_regions(self, regions: list[int], fit: bool = False) -> None:
+        """Emphasise the operator's focus regions; ``fit`` also zooms the map to them."""
+        self._focus_regions = list(regions)
+        self._run(f"setFocusRegions({json.dumps(self._focus_regions)}, {str(fit).lower()})")
 
     def set_coverage(self, cells: list[dict]) -> None:
         self._coverage = cells
@@ -300,6 +320,9 @@ class MapView(QWidget):
                 self._run(f"setNwsAlerts({json.dumps(self._nws_alerts)})")
             if self._coverage is not None:
                 self._run(f"setCoverage({json.dumps(self._coverage)})")
+            self._run(f"setFocusRegions({json.dumps(self._focus_regions)}, true)")
+            if self._aircraft is not None:
+                self._run(f"setAircraft({json.dumps(self._aircraft[0])}, {json.dumps(self._aircraft[1])})")
             self._push_to_page()
 
     def _push_to_page(self) -> None:
@@ -312,7 +335,7 @@ class MapView(QWidget):
         overlays = " ".join(
             f"{function}({str(self._overlays[name]).lower()});"
             for name, function in (("nws", "setNwsVisible"), ("coverage", "setCoverageVisible"),
-                                   ("greyline", "setGreylineVisible"))
+                                   ("greyline", "setGreylineVisible"), ("aircraft", "setAircraftVisible"))
         )
         self._web_view.page().runJavaScript(
             f"setLocations({locations}); setRadarVisible({radar}); "
@@ -412,18 +435,45 @@ map.getPane('regionLabels').style.pointerEvents = 'none';
 const marsRegions={json.dumps(load_mars_regions())};
 const regionColors={json.dumps(REGION_COLORS)};
 const regionLayer = L.layerGroup();
-L.geoJSON(marsRegions, {{
-  pane:'regions', interactive:false,
-  style: f => {{
-    const color = regionColors[(f.properties.region - 1) % regionColors.length];
-    return {{color:color, weight:2, opacity:0.8, fillColor:color, fillOpacity:0.06}};
-  }}
-}}).addTo(regionLayer);
+// Focus regions (chosen by the operator) are drawn bold; the rest of the U.S. fades.
+let focusRegions = new Set();
+function regionStyle(f) {{
+  const color = regionColors[(f.properties.region - 1) % regionColors.length];
+  if (!focusRegions.size) return {{color:color, weight:2, opacity:0.8, fillColor:color, fillOpacity:0.06}};
+  return focusRegions.has(f.properties.region)
+    ? {{color:color, weight:3.5, opacity:0.95, fillColor:color, fillOpacity:0.13}}
+    : {{color:color, weight:1.2, opacity:0.4, fillColor:color, fillOpacity:0.015}};
+}}
+const regionShapes = L.geoJSON(marsRegions, {{pane:'regions', interactive:false, style: regionStyle}}).addTo(regionLayer);
+const regionLabels = [];
 marsRegions.features.forEach(f => (f.properties.labels || []).forEach(point => {{
-  L.marker(point, {{pane:'regionLabels', interactive:false, keyboard:false,
+  const label = L.marker(point, {{pane:'regionLabels', interactive:false, keyboard:false,
     icon:L.divIcon({{className:'region-label', html:'<span>'+escapeHtml(f.properties.name)+'</span>', iconSize:[0,0]}})
   }}).addTo(regionLayer);
+  label.region = f.properties.region;
+  regionLabels.push(label);
 }}));
+function setFocusRegions(regions, fit) {{
+  focusRegions = new Set(regions);
+  regionShapes.setStyle(regionStyle);
+  for (const label of regionLabels) {{
+    const element = label.getElement();
+    if (element) element.style.opacity = !focusRegions.size || focusRegions.has(label.region) ? '1' : '0.45';
+  }}
+  if (fit && focusRegions.size) {{
+    // Fit to the focus regions' states, leaving out far-flung Alaska and Hawaii unless they're all there is.
+    const points = [];
+    for (const f of marsRegions.features) {{
+      if (!focusRegions.has(f.properties.region)) continue;
+      for (const [state, info] of Object.entries(f.properties.states || {{}})) {{
+        if (!['AK', 'HI'].includes(state) || Object.keys(f.properties.states).length <= 2) points.push(info.anchor);
+      }}
+    }}
+    if (points.length) map.fitBounds(L.latLngBounds(points).pad(0.35), {{maxZoom: 7}});
+  }} else if (fit) {{
+    map.setView([39.5, -98.35], 4);
+  }}
+}}
 function setRegionsVisible(visible) {{
   if (visible && !map.hasLayer(regionLayer)) regionLayer.addTo(map);
   if (!visible && map.hasLayer(regionLayer)) map.removeLayer(regionLayer);
@@ -559,7 +609,7 @@ map.createPane('greyline').style.zIndex = 320;
 map.createPane('coverage').style.zIndex = 330;
 map.createPane('nws').style.zIndex = 340;
 map.getPane('greyline').style.pointerEvents = 'none';
-const overlayState = {{nws: false, coverage: false, greyline: false}};
+const overlayState = {{nws: false, coverage: false, greyline: false, aircraft: false}};
 const overlayTimers = {{}};
 
 // NWS severity uses the fixed status colours; the severity is always written in the
@@ -741,6 +791,153 @@ function setGreylineVisible(visible) {{
   }}
 }}
 
+// ---- Aircraft (ADS-B): military and emergency squawks everywhere; all traffic when zoomed in ----
+// Drawn on one canvas and redrawn on each update: a page element per aircraft, created and
+// removed as aircraft come and go, piled up memory until a full garbage collection.
+map.createPane('aircraft').style.zIndex = 460;
+map.getPane('aircraft').style.pointerEvents = 'none';
+const PLANE_PATH = new Path2D('M12 2c.8 0 1.3 1 1.3 2.2V9l7.7 4.6v2.1l-7.7-2.3v4.9l2.2 1.7V22L12 21l-3.5 1v-1.9l2.2-1.7v-4.9L3 15.7v-2.1L10.7 9V4.2C10.7 3 11.2 2 12 2z');
+// Helicopter symbol (rotor, cabin, tail); light aircraft use the plane at a smaller size.
+const HELICOPTER_PATH = new Path2D('M2 5.2h20v1.6H2zM11.2 6.5h1.6v1.2h-1.6zM12 7.4c2 0 3.4 1.6 3.4 3.6v2.4c0 2-1.4 3.6-3.4 3.6s-3.4-1.6-3.4-3.6V11c0-2 1.4-3.6 3.4-3.6zM11.3 16.8h1.4v4.4h-1.4zM9.2 20.4h5.6v1.4H9.2z');
+const AIRCRAFT_KINDS = {{
+  emergency: ['Emergency squawk', '#d03b3b'], military: ['Military', '#4a3aa7'],
+  medical: ['Medical / air ambulance', '#008300'], civil: ['Other traffic', '#6f6f6f'],
+}};
+let aircraftList = [];
+let aircraftSource = '';
+let aircraftUpdated = null;
+let aircraftError = '';
+const aircraftKind = a => a.emergency ? 'emergency' : (a.military ? 'military' : (a.medical ? 'medical' : 'civil'));
+const AircraftCanvas = L.Layer.extend({{
+  onAdd(map) {{
+    this._canvas = L.DomUtil.create('canvas', 'aircraft-canvas', map.getPane('aircraft'));
+    map.on('moveend zoomend resize viewreset', this._reset, this);
+    map.on('zoomstart', this._hide, this);
+    this._reset();
+  }},
+  onRemove(map) {{
+    L.DomUtil.remove(this._canvas);
+    map.off('moveend zoomend resize viewreset', this._reset, this);
+    map.off('zoomstart', this._hide, this);
+  }},
+  _hide() {{ this._canvas.style.visibility = 'hidden'; }},
+  _reset() {{
+    const size = map.getSize(), ratio = window.devicePixelRatio || 1;
+    L.DomUtil.setPosition(this._canvas, map.containerPointToLayerPoint([0, 0]));
+    this._canvas.width = size.x * ratio; this._canvas.height = size.y * ratio;
+    this._canvas.style.width = size.x + 'px'; this._canvas.style.height = size.y + 'px';
+    this._canvas.style.visibility = '';
+    this.redraw();
+  }},
+  redraw() {{
+    const context = this._canvas.getContext('2d'), ratio = window.devicePixelRatio || 1;
+    context.setTransform(ratio, 0, 0, ratio, 0, 0);
+    context.clearRect(0, 0, this._canvas.width, this._canvas.height);
+    // Other traffic first, so military and emergencies draw on top.
+    const order = {{civil: 0, medical: 1, military: 2, emergency: 3}};
+    const sorted = aircraftList.slice().sort((a, b) => order[aircraftKind(a)] - order[aircraftKind(b)]);
+    for (const a of sorted) {{
+      const point = map.latLngToContainerPoint([a.lat, a.lon]);
+      if (point.x < -30 || point.y < -30 || point.x > this._canvas.width / ratio + 30 || point.y > this._canvas.height / ratio + 30) continue;
+      const kind = aircraftKind(a);
+      if (kind === 'civil' && map.getZoom() < 7) {{
+        // Zoomed out, ordinary traffic is a dot; symbols appear at regional zoom.
+        context.beginPath(); context.arc(point.x, point.y, a.shape === 'light' ? 2 : 2.6, 0, 2 * Math.PI);
+        context.fillStyle = AIRCRAFT_KINDS.civil[1]; context.fill();
+        continue;
+      }}
+      context.save();
+      context.translate(point.x, point.y);
+      if (kind === 'emergency') {{
+        context.beginPath(); context.arc(0, 0, 15, 0, 2 * Math.PI);
+        context.lineWidth = 2; context.strokeStyle = AIRCRAFT_KINDS.emergency[1]; context.stroke();
+      }}
+      context.rotate(((a.track || 0) * Math.PI) / 180);
+      const size = a.shape === 'light' ? 16 : (a.shape === 'helicopter' ? 20 : 22);
+      context.scale(size / 24, size / 24);
+      context.translate(-12, -12);
+      context.fillStyle = AIRCRAFT_KINDS[kind][1];
+      context.strokeStyle = '#ffffff'; context.lineWidth = 1.3;
+      const glyph = a.shape === 'helicopter' ? HELICOPTER_PATH : PLANE_PATH;
+      context.stroke(glyph); context.fill(glyph);
+      context.restore();
+      if (kind === 'emergency') {{
+        const label = a.squawk + ' ' + a.emergency;
+        context.font = 'bold 11px sans-serif';
+        const width = context.measureText(label).width + 8;
+        context.fillStyle = AIRCRAFT_KINDS.emergency[1];
+        context.fillRect(point.x + 16, point.y - 18, width, 16);
+        context.fillStyle = '#ffffff';
+        context.fillText(label, point.x + 20, point.y - 6);
+      }}
+    }}
+  }},
+}});
+const aircraftLayer = new AircraftCanvas();
+// Hover: one reusable tooltip for the aircraft nearest the pointer.
+const aircraftHover = L.tooltip({{direction: 'top', offset: [0, -10]}});
+let hoveredAircraft = null;
+function aircraftTooltip(a) {{
+  const altitude = a.altitude === 'ground' ? 'on the ground' : (a.altitude != null ? a.altitude.toLocaleString() + ' ft' : 'altitude unknown');
+  return '<b>' + escapeHtml(a.flight || a.registration || a.hex.toUpperCase()) + '</b>' +
+    (a.type ? ' · ' + escapeHtml(a.type) : '') + (a.military ? ' · military' : '') + (a.medical ? ' · air ambulance' : '') +
+    (a.shape === 'helicopter' ? ' · helicopter' : (a.shape === 'light' ? ' · light aircraft' : '')) +
+    (a.emergency ? '<br><b style="color:#b3261e">Squawk ' + escapeHtml(a.squawk) + ': ' + escapeHtml(a.emergency) + '</b>' : '') +
+    '<br>' + escapeHtml(altitude) + (a.speed != null ? ' · ' + a.speed + ' kt' : '') + (a.track != null ? ' · heading ' + a.track + '°' : '') +
+    (a.registration ? '<br>Reg. ' + escapeHtml(a.registration) : '') + '<br><span style="color:#555">ICAO ' + escapeHtml(a.hex.toUpperCase()) +
+    (a.squawk && !a.emergency ? ' · squawk ' + escapeHtml(a.squawk) : '') + '</span>';
+}}
+map.on('mousemove', event => {{
+  if (!overlayState.aircraft) return;
+  let nearest = null, best = 12 * 12;
+  for (const a of aircraftList) {{
+    const point = map.latLngToContainerPoint([a.lat, a.lon]);
+    const distance = (point.x - event.containerPoint.x) ** 2 + (point.y - event.containerPoint.y) ** 2;
+    if (distance < best) {{ best = distance; nearest = a; }}
+  }}
+  if (nearest && nearest !== hoveredAircraft) {{
+    aircraftHover.setLatLng([nearest.lat, nearest.lon]).setContent(aircraftTooltip(nearest));
+    if (!map.hasLayer(aircraftHover)) aircraftHover.addTo(map);
+  }} else if (!nearest && map.hasLayer(aircraftHover)) {{
+    map.removeLayer(aircraftHover);
+  }}
+  hoveredAircraft = nearest;
+}});
+function setAircraft(list, source, error) {{
+  if (error) {{ aircraftError = error; updateOverlayLegend(); return; }}
+  aircraftError = ''; aircraftSource = source; aircraftUpdated = new Date();
+  aircraftList = list;
+  if (overlayState.aircraft) aircraftLayer.redraw();
+  if (hoveredAircraft) {{
+    const same = list.find(a => a.hex === hoveredAircraft.hex);
+    if (same) aircraftHover.setLatLng([same.lat, same.lon]).setContent(aircraftTooltip(same));
+  }}
+  updateOverlayLegend();
+}}
+// Tell S2 Watch which area to fetch all traffic for (only when zoomed in to regional scale).
+let lastAircraftView = '';
+function reportAircraftView() {{
+  if (!overlayState.aircraft || !mapBridge || !mapBridge.report_view) return;
+  let lat = 0, lon = 0, radius = 0;
+  if (map.getZoom() >= 7) {{
+    const center = map.getCenter();
+    lat = center.lat; lon = center.lng;
+    radius = Math.min(250, map.distance(center, map.getBounds().getNorthEast()) / 1852);
+  }}
+  const key = [lat.toFixed(2), lon.toFixed(2), Math.round(radius)].join(',');
+  if (key === lastAircraftView) return;
+  lastAircraftView = key;
+  mapBridge.report_view(lat, lon, radius);
+}}
+map.on('moveend', reportAircraftView);
+map.on('zoomend', () => {{ if (overlayState.aircraft) updateOverlayLegend(); }});
+function setAircraftVisible(visible) {{
+  if (visible === overlayState.aircraft) return;
+  overlayState.aircraft = visible;
+  if (visible) {{ aircraftLayer.addTo(map); lastAircraftView = ''; reportAircraftView(); }}
+  else {{ map.removeLayer(aircraftLayer); if (map.hasLayer(aircraftHover)) map.removeLayer(aircraftHover); }}
+  updateOverlayLegend();
+}}
 // One legend for whichever overlays are on.
 const overlayLegend = L.control({{position: 'topright'}});
 overlayLegend.onAdd = () => {{ const element = L.DomUtil.create('div', 'overlay-legend'); L.DomEvent.disableClickPropagation(element); return element; }};
@@ -759,6 +956,22 @@ function updateOverlayLegend() {{
   if (overlayState.coverage) {{
     parts.push('<b>Station coverage</b> <span>(' + coverageCells.length + ' grid squares)</span>');
     COVERAGE_STEPS.forEach(step => parts.push('<div>' + swatch(step[1] + '4d', step[2]) + step[3] + '</div>'));
+  }}
+  if (overlayState.aircraft) {{
+    const counts = {{emergency: 0, military: 0, medical: 0, civil: 0}};
+    for (const a of aircraftList) counts[aircraftKind(a)] += 1;
+    parts.push('<b>Aircraft (ADS-B)</b>' + (aircraftError ? '<div class="note">Unavailable: ' + escapeHtml(aircraftError) + '</div>' : ''));
+    for (const kind of ['emergency', 'military', 'medical', 'civil']) {{
+      parts.push('<div>' + swatch(AIRCRAFT_KINDS[kind][1], kind === 'emergency' ? '#7a1f1f' : AIRCRAFT_KINDS[kind][1]) +
+                 AIRCRAFT_KINDS[kind][0] + ' <span>' + counts[kind] + '</span></div>');
+    }}
+    const focus = [...focusRegions].sort((a, b) => a - b).map(region => 'R' + region).join(', ');
+    parts.push('<div class="note">All traffic (incl. general aviation and helicopters): ' +
+               (focus ? 'focus regions ' + focus + (map.getZoom() >= 7 ? ' and this view' : '') :
+                        (map.getZoom() >= 7 ? 'this view' : 'zoom in to see it')) +
+               '; elsewhere military and emergencies only.' +
+               (map.getZoom() < 7 ? ' Other traffic shows as dots until you zoom in.' : ' Small plane = light aircraft.') + '</div>');
+    if (aircraftUpdated) parts.push('<div class="note">Updated ' + escapeHtml(aircraftUpdated.toLocaleTimeString()) + ' · ' + escapeHtml(aircraftSource) + ' (open data)</div>');
   }}
   if (overlayState.greyline) {{
     parts.push('<b>Day / night</b><div>' + swatch('rgba(11,26,42,.22)', 'rgba(11,26,42,.45)') + 'Night side' +

@@ -277,6 +277,16 @@ class MetricsView(QScrollArea):
         self.period.setCurrentIndex(1)
         self.period.currentIndexChanged.connect(self.refresh)
         controls.addWidget(self.period)
+        controls.addSpacing(16)
+        self.scope_label = QLabel("Scope:")
+        controls.addWidget(self.scope_label)
+        self.scope = QComboBox()
+        self.scope.addItem("My focus regions", "focus")
+        self.scope.addItem("All of the U.S.", "all")
+        self.scope.currentIndexChanged.connect(self.refresh)
+        controls.addWidget(self.scope)
+        self.focus_regions: set[int] = set()
+        self.set_focus_regions(set())
         controls.addStretch(1)
         self.updated = QLabel("")
         controls.addWidget(self.updated)
@@ -341,6 +351,20 @@ class MetricsView(QScrollArea):
         super().hideEvent(event)
         self._periodic.stop()
 
+    def set_focus_regions(self, regions: set[int]) -> None:
+        """Offer a 'My focus regions' scope when the operator has chosen regions."""
+        self.focus_regions = set(regions)
+        has_focus = bool(self.focus_regions)
+        self.scope_label.setVisible(has_focus)
+        self.scope.setVisible(has_focus)
+        if has_focus:
+            self.scope.setItemText(0, "My focus regions (" + ", ".join(f"R{r}" for r in sorted(self.focus_regions)) + ")")
+        if self.isVisible():
+            self.refresh()
+
+    def _in_scope(self, region) -> bool:
+        return not self.focus_regions or self.scope.currentData() == "all" or region in self.focus_regions
+
     def data_changed(self) -> None:
         """New reports arrived; refresh soon if the tab is visible."""
         if self.isVisible():
@@ -350,13 +374,14 @@ class MetricsView(QScrollArea):
         span: timedelta = self.period.currentData()
         now = datetime.now(timezone.utc)
         since = utc_iso(now - span)
-        total, newsworthy, copies = self.store.report_totals(since)
-        reports = self.store.newsworthy_reports(since)
-        by_source_copies = self.store.copies_by_source(since)
+        regions = None if not self.focus_regions or self.scope.currentData() == "all" else self.focus_regions
+        total, newsworthy, copies = self.store.report_totals(since, regions)
+        reports = [report for report in self.store.newsworthy_reports(since) if self._in_scope(report["region"])]
+        by_source_copies = self.store.copies_by_source(since, regions)
         self.updated.setText(f"Updated {datetime.now():%H:%M:%S}")
 
         merged = copies - total
-        ignored = self.store.ignored_reports(since)
+        ignored = self.store.ignored_reports(since, regions)
         self.reports_tile.set(
             str(newsworthy),
             f"of {total} reports captured" + (f" · {ignored} ignored, not counted" if ignored else ""),

@@ -234,6 +234,18 @@ with a legend in the map's top-right corner for whichever are on:
 - **Day / night (grey line)**: the night side of the Earth, recalculated every 5
   minutes; HF propagation changes along it.
 
+- **Aircraft (ADS-B)**: free community ADS-B data from adsb.lol (adsb.fi as a
+  fallback). Military aircraft and emergency squawks (7500 hijack, 7600 radio failure,
+  7700 emergency) show everywhere; all traffic, including general aviation, helicopters
+  and air ambulances, shows inside your focus regions and wherever you zoom in to
+  regional scale (the free APIs limit each query to 250 nautical miles, so the whole
+  U.S. at once is not practical). Helicopters and light aircraft have their own
+  symbols; air ambulances are recognised by callsign (LIFE…, MEDEVAC, AIRLIFE, CAREFLT,
+  REACH …) and drawn in green, though medical flights flying under their tail number
+  show as ordinary helicopters. Zoomed out, ordinary traffic draws as dots. Aircraft
+  are shown on the map only; they raise no alerts. Requests are spaced out and back
+  off when the services rate-limit.
+
 Overlay shapes are kept and updated in place rather than rebuilt on each refresh,
 which had grown the embedded browser's memory by about 10 MB per refresh.
 
@@ -291,6 +303,16 @@ CommStat's CSV header, checksums), for copies up to 24 hours apart. Live Monitor
 and History keep every copy; Newsworthiness, the map, and alerts show each report
 once, and the **Seen** column shows how many copies arrived and through which
 applications (for example "3× · MagCommstat, JS8SuperSpotter").
+
+**Focus regions** (Configuration → Focus Regions) let you concentrate on your own MARS
+regions, with the rest of the U.S. secondary; with none chosen, the whole U.S. is
+treated the same. With focus regions set, Newsworthiness lists reports from them
+first (newest first), then the rest of the U.S., and a **Region** column shows each
+report's MARS region and state; tray alerts for reports outside the focus regions are
+limited to high urgency; the map opens on the focus regions, drawn bold with the other
+regions faded; aircraft traffic is shown in full inside them; and Metrics offers a
+Scope of "My focus regions" or "All of the U.S.". Reports with no known location count
+as secondary. The window title shows the focus, e.g. "S2 Watch 0.3.0 — focus R8".
 
 Reports in Newsworthiness can be labelled for triage. Select one or more rows
 (Ctrl- or Shift-click), then right-click → **Mark as**, or press a key:
