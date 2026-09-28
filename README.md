@@ -243,9 +243,11 @@ with a legend in the map's top-right corner for whichever are on:
   and air ambulances, shows inside your focus regions and wherever you zoom in to
   regional scale (the free APIs limit each query to 250 nautical miles, so the whole
   U.S. at once is not practical). Helicopters and light aircraft have their own
-  symbols; air ambulances are recognised by callsign (LIFE…, MEDEVAC, AIRLIFE, CAREFLT,
-  REACH …) and drawn in green, though medical flights flying under their tail number
-  show as ordinary helicopters. Ordinary traffic is yellow; zoomed out it draws as dots. Aircraft
+  symbols. Colours: civilian yellow, military blue, medevac / air ambulance red
+  (recognised by callsign: LIFE…, MEDEVAC, AIRLIFE, CAREFLT, REACH …; medical flights
+  flying under their tail number show as civilian). An emergency squawk adds a black
+  ring and a black label (e.g. "7700 Emergency") around the aircraft, in its usual
+  colour. Zoomed out, civilian traffic draws as dots. Aircraft
   are shown on the map only; they raise no alerts. Requests are spaced out and back
   off when the services rate-limit.
 

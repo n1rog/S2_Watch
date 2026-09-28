@@ -799,17 +799,15 @@ map.getPane('aircraft').style.pointerEvents = 'none';
 const PLANE_PATH = new Path2D('M12 2c.8 0 1.3 1 1.3 2.2V9l7.7 4.6v2.1l-7.7-2.3v4.9l2.2 1.7V22L12 21l-3.5 1v-1.9l2.2-1.7v-4.9L3 15.7v-2.1L10.7 9V4.2C10.7 3 11.2 2 12 2z');
 // Helicopter symbol (rotor, cabin, tail); light aircraft use the plane at a smaller size.
 const HELICOPTER_PATH = new Path2D('M2 5.2h20v1.6H2zM11.2 6.5h1.6v1.2h-1.6zM12 7.4c2 0 3.4 1.6 3.4 3.6v2.4c0 2-1.4 3.6-3.4 3.6s-3.4-1.6-3.4-3.6V11c0-2 1.4-3.6 3.4-3.6zM11.3 16.8h1.4v4.4h-1.4zM9.2 20.4h5.6v1.4H9.2z');
+// Colour = what the aircraft is; an emergency squawk adds a black ring and label, so it
+// stands out whatever the aircraft's colour (red is medevac, not emergency).
 const AIRCRAFT_KINDS = {{
-  emergency: ['Emergency squawk', '#d03b3b'], military: ['Military', '#4a3aa7'],
-  medical: ['Medical / air ambulance', '#008300'], civil: ['Other traffic', '#ffd21f'],
+  military: ['Military', '#1565c0'], medical: ['Medevac / air ambulance', '#d32f2f'], civil: ['Civilian', '#ffd21f'],
 }};
-// Yellow needs a dark outline to read on the light map; the other colours use white.
+const EMERGENCY_MARK = '#111111';
+// Yellow needs a dark outline to read on the light map; blue and red use white.
 const aircraftOutline = kind => kind === 'civil' ? '#3d3200' : '#ffffff';
-let aircraftList = [];
-let aircraftSource = '';
-let aircraftUpdated = null;
-let aircraftError = '';
-const aircraftKind = a => a.emergency ? 'emergency' : (a.military ? 'military' : (a.medical ? 'medical' : 'civil'));
+const aircraftKind = a => a.military ? 'military' : (a.medical ? 'medical' : 'civil');
 const AircraftCanvas = L.Layer.extend({{
   onAdd(map) {{
     this._canvas = L.DomUtil.create('canvas', 'aircraft-canvas', map.getPane('aircraft'));
@@ -836,13 +834,14 @@ const AircraftCanvas = L.Layer.extend({{
     context.setTransform(ratio, 0, 0, ratio, 0, 0);
     context.clearRect(0, 0, this._canvas.width, this._canvas.height);
     // Other traffic first, so military and emergencies draw on top.
-    const order = {{civil: 0, medical: 1, military: 2, emergency: 3}};
-    const sorted = aircraftList.slice().sort((a, b) => order[aircraftKind(a)] - order[aircraftKind(b)]);
+    // Civilian first, then medevac and military; emergencies always on top.
+    const order = a => (a.emergency ? 10 : 0) + {{civil: 0, medical: 1, military: 2}}[aircraftKind(a)];
+    const sorted = aircraftList.slice().sort((a, b) => order(a) - order(b));
     for (const a of sorted) {{
       const point = map.latLngToContainerPoint([a.lat, a.lon]);
       if (point.x < -30 || point.y < -30 || point.x > this._canvas.width / ratio + 30 || point.y > this._canvas.height / ratio + 30) continue;
       const kind = aircraftKind(a);
-      if (kind === 'civil' && map.getZoom() < 7) {{
+      if (kind === 'civil' && !a.emergency && map.getZoom() < 7) {{
         // Zoomed out, ordinary traffic is a dot; symbols appear at regional zoom.
         context.beginPath(); context.arc(point.x, point.y, a.shape === 'light' ? 2.4 : 3, 0, 2 * Math.PI);
         context.fillStyle = AIRCRAFT_KINDS.civil[1]; context.fill();
@@ -851,9 +850,11 @@ const AircraftCanvas = L.Layer.extend({{
       }}
       context.save();
       context.translate(point.x, point.y);
-      if (kind === 'emergency') {{
+      if (a.emergency) {{
         context.beginPath(); context.arc(0, 0, 15, 0, 2 * Math.PI);
-        context.lineWidth = 2; context.strokeStyle = AIRCRAFT_KINDS.emergency[1]; context.stroke();
+        context.lineWidth = 3; context.strokeStyle = EMERGENCY_MARK; context.stroke();
+        context.beginPath(); context.arc(0, 0, 17, 0, 2 * Math.PI);
+        context.lineWidth = 1; context.strokeStyle = '#ffffff'; context.stroke();
       }}
       context.rotate(((a.track || 0) * Math.PI) / 180);
       const size = a.shape === 'light' ? 16 : (a.shape === 'helicopter' ? 20 : 22);
@@ -864,11 +865,11 @@ const AircraftCanvas = L.Layer.extend({{
       const glyph = a.shape === 'helicopter' ? HELICOPTER_PATH : PLANE_PATH;
       context.stroke(glyph); context.fill(glyph);
       context.restore();
-      if (kind === 'emergency') {{
+      if (a.emergency) {{
         const label = a.squawk + ' ' + a.emergency;
         context.font = 'bold 11px sans-serif';
         const width = context.measureText(label).width + 8;
-        context.fillStyle = AIRCRAFT_KINDS.emergency[1];
+        context.fillStyle = EMERGENCY_MARK;
         context.fillRect(point.x + 16, point.y - 18, width, 16);
         context.fillStyle = '#ffffff';
         context.fillText(label, point.x + 20, point.y - 6);
@@ -883,7 +884,7 @@ let hoveredAircraft = null;
 function aircraftTooltip(a) {{
   const altitude = a.altitude === 'ground' ? 'on the ground' : (a.altitude != null ? a.altitude.toLocaleString() + ' ft' : 'altitude unknown');
   return '<b>' + escapeHtml(a.flight || a.registration || a.hex.toUpperCase()) + '</b>' +
-    (a.type ? ' · ' + escapeHtml(a.type) : '') + (a.military ? ' · military' : '') + (a.medical ? ' · air ambulance' : '') +
+    (a.type ? ' · ' + escapeHtml(a.type) : '') + (a.military ? ' · military' : '') + (a.medical ? ' · medevac' : '') +
     (a.shape === 'helicopter' ? ' · helicopter' : (a.shape === 'light' ? ' · light aircraft' : '')) +
     (a.emergency ? '<br><b style="color:#b3261e">Squawk ' + escapeHtml(a.squawk) + ': ' + escapeHtml(a.emergency) + '</b>' : '') +
     '<br>' + escapeHtml(altitude) + (a.speed != null ? ' · ' + a.speed + ' kt' : '') + (a.track != null ? ' · heading ' + a.track + '°' : '') +
@@ -961,13 +962,16 @@ function updateOverlayLegend() {{
     COVERAGE_STEPS.forEach(step => parts.push('<div>' + swatch(step[1] + '4d', step[2]) + step[3] + '</div>'));
   }}
   if (overlayState.aircraft) {{
-    const counts = {{emergency: 0, military: 0, medical: 0, civil: 0}};
-    for (const a of aircraftList) counts[aircraftKind(a)] += 1;
+    const counts = {{military: 0, medical: 0, civil: 0}};
+    let emergencies = 0;
+    for (const a of aircraftList) {{ counts[aircraftKind(a)] += 1; if (a.emergency) emergencies += 1; }}
     parts.push('<b>Aircraft (ADS-B)</b>' + (aircraftError ? '<div class="note">Unavailable: ' + escapeHtml(aircraftError) + '</div>' : ''));
-    for (const kind of ['emergency', 'military', 'medical', 'civil']) {{
-      parts.push('<div>' + swatch(AIRCRAFT_KINDS[kind][1], kind === 'emergency' ? '#7a1f1f' : (kind === 'civil' ? '#3d3200' : AIRCRAFT_KINDS[kind][1])) +
+    for (const kind of ['military', 'medical', 'civil']) {{
+      parts.push('<div>' + swatch(AIRCRAFT_KINDS[kind][1], kind === 'civil' ? '#3d3200' : AIRCRAFT_KINDS[kind][1]) +
                  AIRCRAFT_KINDS[kind][0] + ' <span>' + counts[kind] + '</span></div>');
     }}
+    parts.push('<div><i style="background:transparent;border:3px solid ' + EMERGENCY_MARK + ';border-radius:50%;box-sizing:border-box"></i>' +
+               'Emergency squawk (black ring) <span>' + emergencies + '</span></div>');
     const focus = [...focusRegions].sort((a, b) => a - b).map(region => 'R' + region).join(', ');
     parts.push('<div class="note">All traffic (incl. general aviation and helicopters): ' +
                (focus ? 'focus regions ' + focus + (map.getZoom() >= 7 ? ' and this view' : '') :
