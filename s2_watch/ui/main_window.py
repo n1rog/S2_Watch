@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
     QWidget, QMenu, QToolButton, QWidgetAction, QAbstractItemView, QInputDialog,
 )
 
-from s2_watch import __version__ as APP_VERSION
+from s2_watch import REPOSITORY_URL, __version__ as APP_VERSION
 
 
 class SortableTableItem(QTableWidgetItem):
@@ -580,7 +580,8 @@ class MainWindow(QMainWindow):
             "<p>S2 Watch monitors messages from radio communication "
             "applications, applies configurable watch forms, identifies "
             "potentially newsworthy reports, and displays messages and "
-            "locations in one place.</p>",
+            "locations in one place.</p>"
+            f"<p><b>Source code:</b> <a href='{REPOSITORY_URL}'>{REPOSITORY_URL}</a></p>",
         )
 
     def connect_js8call(self) -> None:
