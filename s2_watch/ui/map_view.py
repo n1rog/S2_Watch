@@ -500,7 +500,10 @@ const RadarLayer = L.GridLayer.extend({{
     return canvas;
   }},
 }});
-const radarLayer = new RadarLayer({{opacity:0.55, attribution:'Radar © RainViewer'}});
+// RainViewer's free tiles stop at zoom 7 (past that each tile reads "Zoom Level Not
+// Supported"); closer in, Leaflet enlarges the zoom-7 radar.
+const RADAR_MAX_ZOOM = 7;
+const radarLayer = new RadarLayer({{opacity:0.55, maxNativeZoom:RADAR_MAX_ZOOM, attribution:'Radar © RainViewer'}});
 radarLayer.on('tileunload', event => {{
   const suffix = '|' + event.coords.z + '/' + event.coords.x + '/' + event.coords.y;
   for (const [key, bitmap] of radarBitmaps) {{
