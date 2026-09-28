@@ -101,7 +101,7 @@ class SQLiteStore:
             )"""
         )
         report_columns = {row[1] for row in self.connection.execute("PRAGMA table_info(reports)")}
-        for column in ("status", "status_note", "status_changed"):
+        for column in ("status", "status_note", "status_changed", "corroboration"):
             if column not in report_columns:
                 self.connection.execute(f"ALTER TABLE reports ADD COLUMN {column} TEXT NOT NULL DEFAULT ''")
         self.connection.execute("CREATE INDEX IF NOT EXISTS reports_first_seen ON reports(first_seen)")
@@ -271,6 +271,10 @@ class SQLiteStore:
         ).fetchone()
         return ReportInfo(report_id, new_report, int(copies), tuple(sources.split(",")), status, note,
                           state or "", int(region) if region is not None else None)
+
+    def set_corroboration(self, report_id: int, text: str) -> None:
+        self.connection.execute("UPDATE reports SET corroboration = ? WHERE id = ?", (text, report_id))
+        self.connection.commit()
 
     def report_status(self, report_id: int) -> tuple[str, str]:
         row = self.connection.execute(

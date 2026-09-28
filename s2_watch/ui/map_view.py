@@ -801,8 +801,10 @@ const PLANE_PATH = new Path2D('M12 2c.8 0 1.3 1 1.3 2.2V9l7.7 4.6v2.1l-7.7-2.3v4
 const HELICOPTER_PATH = new Path2D('M2 5.2h20v1.6H2zM11.2 6.5h1.6v1.2h-1.6zM12 7.4c2 0 3.4 1.6 3.4 3.6v2.4c0 2-1.4 3.6-3.4 3.6s-3.4-1.6-3.4-3.6V11c0-2 1.4-3.6 3.4-3.6zM11.3 16.8h1.4v4.4h-1.4zM9.2 20.4h5.6v1.4H9.2z');
 const AIRCRAFT_KINDS = {{
   emergency: ['Emergency squawk', '#d03b3b'], military: ['Military', '#4a3aa7'],
-  medical: ['Medical / air ambulance', '#008300'], civil: ['Other traffic', '#6f6f6f'],
+  medical: ['Medical / air ambulance', '#008300'], civil: ['Other traffic', '#ffd21f'],
 }};
+// Yellow needs a dark outline to read on the light map; the other colours use white.
+const aircraftOutline = kind => kind === 'civil' ? '#3d3200' : '#ffffff';
 let aircraftList = [];
 let aircraftSource = '';
 let aircraftUpdated = null;
@@ -842,8 +844,9 @@ const AircraftCanvas = L.Layer.extend({{
       const kind = aircraftKind(a);
       if (kind === 'civil' && map.getZoom() < 7) {{
         // Zoomed out, ordinary traffic is a dot; symbols appear at regional zoom.
-        context.beginPath(); context.arc(point.x, point.y, a.shape === 'light' ? 2 : 2.6, 0, 2 * Math.PI);
+        context.beginPath(); context.arc(point.x, point.y, a.shape === 'light' ? 2.4 : 3, 0, 2 * Math.PI);
         context.fillStyle = AIRCRAFT_KINDS.civil[1]; context.fill();
+        context.lineWidth = 1; context.strokeStyle = aircraftOutline('civil'); context.stroke();
         continue;
       }}
       context.save();
@@ -857,7 +860,7 @@ const AircraftCanvas = L.Layer.extend({{
       context.scale(size / 24, size / 24);
       context.translate(-12, -12);
       context.fillStyle = AIRCRAFT_KINDS[kind][1];
-      context.strokeStyle = '#ffffff'; context.lineWidth = 1.3;
+      context.strokeStyle = aircraftOutline(kind); context.lineWidth = 1.3;
       const glyph = a.shape === 'helicopter' ? HELICOPTER_PATH : PLANE_PATH;
       context.stroke(glyph); context.fill(glyph);
       context.restore();
@@ -962,7 +965,7 @@ function updateOverlayLegend() {{
     for (const a of aircraftList) counts[aircraftKind(a)] += 1;
     parts.push('<b>Aircraft (ADS-B)</b>' + (aircraftError ? '<div class="note">Unavailable: ' + escapeHtml(aircraftError) + '</div>' : ''));
     for (const kind of ['emergency', 'military', 'medical', 'civil']) {{
-      parts.push('<div>' + swatch(AIRCRAFT_KINDS[kind][1], kind === 'emergency' ? '#7a1f1f' : AIRCRAFT_KINDS[kind][1]) +
+      parts.push('<div>' + swatch(AIRCRAFT_KINDS[kind][1], kind === 'emergency' ? '#7a1f1f' : (kind === 'civil' ? '#3d3200' : AIRCRAFT_KINDS[kind][1])) +
                  AIRCRAFT_KINDS[kind][0] + ' <span>' + counts[kind] + '</span></div>');
     }}
     const focus = [...focusRegions].sort((a, b) => a - b).map(region => 'R' + region).join(', ');

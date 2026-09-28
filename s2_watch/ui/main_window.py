@@ -57,6 +57,7 @@ from s2_watch.ui.icons import app_icon
 from s2_watch.ui.map_view import MapView
 from s2_watch.ui.metrics_view import MetricsView
 from s2_watch.overlays import AircraftPoller, NwsAlertsPoller
+from s2_watch.corroboration import corroborate
 from s2_watch.ui.watch_form_dialog import WatchFormDialog
 
 
@@ -66,9 +67,11 @@ class MainWindow(QMainWindow):
     LIVE_ROWS_LIMIT = 2000
     ANALYSIS_ROWS_LIMIT = 1000
     ANALYSIS_COLUMNS = (
-        "Time", "Application", "Watch form", "Result", "Status", "Region", "Category", "Urgency",
+        "Time", "Application", "Watch form", "Result", "Status", "Official", "Region", "Category", "Urgency",
         "Confidence", "Seen", "Summary", "Message",
     )
+    OFFICIAL_COLUMN = ANALYSIS_COLUMNS.index("Official")
+    LOCATIONS_ROLE = Qt.ItemDataRole.UserRole + 5
     REGION_COLUMN = ANALYSIS_COLUMNS.index("Region")
     REGION_ROLE = Qt.ItemDataRole.UserRole + 4
     SEEN_COLUMN = ANALYSIS_COLUMNS.index("Seen")
@@ -301,6 +304,10 @@ class MainWindow(QMainWindow):
             map_filter_layout.addWidget(checkbox)
         self.nws_poller = NwsAlertsPoller(parent=self)
         self.nws_poller.alerts_ready.connect(self.map_view.set_nws_alerts)
+        # Alerts are fetched all the time (not only when the NWS layer is shown) to
+        # corroborate radio reports.
+        self.nws_alerts: list[dict] = []
+        self.nws_poller.alerts_ready.connect(self.nws_alerts_updated)
         self.nws_poller.failed.connect(self.map_view.set_nws_error)
         self.aircraft_poller = AircraftPoller(parent=self)
         self.aircraft_poller.aircraft_ready.connect(self.map_view.set_aircraft)
@@ -502,6 +509,7 @@ class MainWindow(QMainWindow):
         for overlay in self.map_overlay_filters:
             self.map_overlay_changed(overlay)
         self.apply_focus(fit_map=True)
+        self.nws_poller.set_enabled(True)
         self.map_regions_changed()
         self.map_online_tiles_changed()
         self.connect_js8call()
@@ -900,7 +908,7 @@ class MainWindow(QMainWindow):
             self.map_view.add_message(processed.message, processed.locations,
                                       dimmed=bool(report and report.status == "ignored"))
             if processed.result:
-                item = self.insert_analysis_row(processed.message, processed.result, report)
+                item = self.insert_analysis_row(processed.message, processed.result, report, processed.locations)
                 if report:
                     self._report_items[report.report_id] = item
                 # Alert once per report, and not again for reports re-read by a re-scan.
@@ -1073,8 +1081,6 @@ class MainWindow(QMainWindow):
         visible = self.map_overlay_filters[overlay].isChecked()
         self.store.set_setting(f"map.{overlay}.visible", "1" if visible else "0")
         self.map_view.set_overlay_visible(overlay, visible)
-        if overlay == "nws":
-            self.nws_poller.set_enabled(visible)
         if overlay == "aircraft":
             self.aircraft_poller.set_enabled(visible)
 
@@ -1103,7 +1109,8 @@ class MainWindow(QMainWindow):
         self.apply_news_rows_limit()
         self.show_alerts([result] if self.should_alert(result) else [])
 
-    def insert_analysis_row(self, message: Message, result: AnalysisResult, report=None) -> QTableWidgetItem:
+    def insert_analysis_row(self, message: Message, result: AnalysisResult, report=None,
+                            locations=None) -> QTableWidgetItem:
         label = "NEWSWORTHY" if result.newsworthy else "routine"
         row = self.analysis.rowCount()
         self.analysis.insertRow(row)
@@ -1113,6 +1120,7 @@ class MainWindow(QMainWindow):
             message.form_name or "",
             label,
             self.status_text(report.status, report.note) if report else "",
+            "",
             self.region_text(report),
             result.category,
             result.urgency,
@@ -1130,14 +1138,43 @@ class MainWindow(QMainWindow):
                 if report is not None:
                     item.setData(self.REPORT_ROLE, report.report_id)
                 item.setData(self.REGION_ROLE, report.region if report else None)
+                item.setData(self.LOCATIONS_ROLE, list(locations or []))
                 self.set_priority_key(item)
                 first = item
             self.analysis.setItem(row, column, item)
         self.style_report_row(row, report.status if report else "")
+        self.update_corroboration(row)
         self.map_view.set_message_category(message, result.category if result.newsworthy else "routine")
         return first
 
     # -- report labels (triage) -------------------------------------------------------
+
+    # -- official corroboration ---------------------------------------------------------
+
+    def nws_alerts_updated(self, alerts: list[dict]) -> None:
+        self.nws_alerts = alerts
+        for row in range(self.analysis.rowCount()):
+            self.update_corroboration(row)
+        self.analysis.resizeColumnToContents(self.OFFICIAL_COLUMN)
+
+    def update_corroboration(self, row: int) -> None:
+        """Mark a report that an active NWS alert at the same place confirms."""
+        item = self.analysis.item(row, 0)
+        official = self.analysis.item(row, self.OFFICIAL_COLUMN)
+        message = item.data(Qt.ItemDataRole.UserRole + 1) if item else None
+        if not isinstance(message, Message) or official is None:
+            return
+        summary = self.analysis.item(row, self.ANALYSIS_COLUMNS.index("Summary"))
+        found = corroborate(f"{message.raw_content} {summary.text() if summary else ''}",
+                            item.data(self.LOCATIONS_ROLE) or [], message.received_at, self.nws_alerts)
+        text = found.text() if found else ""
+        if official.text() != text:
+            official.setText(text)
+            official.setToolTip(
+                f"Active NWS {found.event} ({found.severity}) covers this location; issued {found.sent}." if found else "")
+            report_id = item.data(self.REPORT_ROLE)
+            if report_id is not None:
+                self.store.set_corroboration(int(report_id), text)
 
     # -- focus regions ------------------------------------------------------------------
 

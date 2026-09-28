@@ -104,7 +104,7 @@ def main():
         part = max(geometry.geoms, key=lambda g: g.area) if geometry.geom_type == "MultiPolygon" else geometry
         centre = polylabel(part, tolerance=0.005)
         counties.append({"name": p["NAME"], "kind": p.get("LSAD") or "County", "state": state,
-                         "lat": round(centre.y, 4), "lon": round(centre.x, 4)})
+                         "fips": p["STATE"] + p["COUNTY"], "lat": round(centre.y, 4), "lon": round(centre.x, 4)})
         simplified = geometry.simplify(0.005, preserve_topology=True)
         # FIPS code: NWS alerts name their counties by it (SAME codes).
         counties_geo.append({"type": "Feature", "properties": {"fips": p["STATE"] + p["COUNTY"]},

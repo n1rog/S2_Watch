@@ -113,6 +113,18 @@ class Gazetteer:
             self._point_cache[key] = (state, region)
         return self._point_cache[key]
 
+    def county_at(self, lat: float, lon: float) -> str | None:
+        """FIPS code of the county containing the point (from the bundled county outlines)."""
+        key = ("county", round(lat, 3), round(lon, 3))
+        if key not in self._point_cache:
+            self._point_cache[key] = next(
+                (fips for fips, (south, west, north, east), polygons in _county_shapes()
+                 if south <= lat <= north and west <= lon <= east
+                 and any(_point_in_polygon(lat, lon, polygon) for polygon in polygons)),
+                None,
+            )
+        return self._point_cache[key]
+
     def with_area(self, location: "ResolvedLocation") -> "ResolvedLocation":
         """Fill in a location's state and region where the level did not already give them."""
         if location.state or location.region:
@@ -130,6 +142,22 @@ def _point_in_polygon(lat: float, lon: float, rings: list[list[tuple[float, floa
             if (y1 > lat) != (y2 > lat) and lon < x1 + (lat - y1) * (x2 - x1) / (y2 - y1):
                 inside = not inside
     return inside
+
+
+@lru_cache(maxsize=1)
+def _county_shapes() -> list[tuple[str, tuple[float, float, float, float], list]]:
+    """(FIPS, bounding box, polygons) for every county, read once from the map's county file."""
+    text = (DATA_DIR / "web" / "counties.js").read_text(encoding="utf-8")
+    collection = json.loads(text[text.index("=") + 1:].rstrip().rstrip(";"))
+    shapes = []
+    for feature in collection["features"]:
+        geometry = feature["geometry"]
+        polygons = geometry["coordinates"] if geometry["type"] == "MultiPolygon" else [geometry["coordinates"]]
+        rings = [[[tuple(point) for point in ring] for ring in polygon] for polygon in polygons]
+        lons = [point[0] for polygon in rings for point in polygon[0]]
+        lats = [point[1] for polygon in rings for point in polygon[0]]
+        shapes.append((feature["properties"]["fips"], (min(lats), min(lons), max(lats), max(lons)), rings))
+    return shapes
 
 
 @lru_cache(maxsize=1)

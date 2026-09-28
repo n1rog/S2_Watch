@@ -64,6 +64,7 @@ def compact_alerts(payload: dict) -> list[dict]:
             "headline": props.get("headline") or props.get("event", ""),
             "area": props.get("areaDesc", ""),
             "onset": props.get("onset") or props.get("effective") or "",
+            "sent": props.get("sent") or props.get("effective") or "",
             "ends": props.get("ends") or props.get("expires") or "",
             "sender": props.get("senderName", ""),
             "description": description,
