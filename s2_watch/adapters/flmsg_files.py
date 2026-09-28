@@ -1,4 +1,5 @@
 import re
+from dataclasses import replace
 from datetime import timedelta, datetime, timezone
 from pathlib import Path
 
@@ -38,7 +39,9 @@ class FLMSGFileAdapter(ApplicationAdapter):
                 if self._seen.get(str(path)) == signature:
                     continue
                 content = path.read_text(encoding="utf-8", errors="replace")
-                messages.append(self._parse(path, content))
+                # FLMSG files carry no reliable receive time; the file's is when it arrived here.
+                messages.append(replace(self._parse(path, content),
+                                        received_at=datetime.fromtimestamp(stat.st_mtime, timezone.utc)))
                 self._seen[str(path)] = signature
         except OSError as error:
             self.status = "Directory unavailable"

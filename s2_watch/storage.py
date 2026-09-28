@@ -288,6 +288,32 @@ class SQLiteStore:
         self.connection.execute("UPDATE messages SET form_name = ? WHERE id = ?", (form_name, message_id))
         self.connection.commit()
 
+    def earliest_received_at(self, message_id: int, received_at: datetime) -> datetime:
+        """The earliest time known for a message, keeping the stored one in step.
+
+        A source without timestamps is stamped with the time it was read, so reading it
+        again (every launch) must not move the message to now; a corrected, earlier time
+        from the source moves the message and its report back.
+        """
+        row = self.connection.execute(
+            "SELECT received_at, report_id FROM messages WHERE id = ?", (message_id,)
+        ).fetchone()
+        if not row:
+            return received_at
+        candidate = received_at if received_at.tzinfo else received_at.replace(tzinfo=timezone.utc)
+        stored = datetime.fromisoformat(row[0])
+        stored = stored if stored.tzinfo else stored.replace(tzinfo=timezone.utc)
+        if stored <= candidate:
+            return stored
+        self.connection.execute("UPDATE messages SET received_at = ? WHERE id = ?", (candidate.isoformat(), message_id))
+        if row[1] is not None:
+            self.connection.execute(
+                "UPDATE reports SET first_seen = ? WHERE id = ? AND first_seen > ?",
+                (utc_iso(candidate), row[1], utc_iso(candidate)),
+            )
+        self.connection.commit()
+        return candidate
+
     def detach_from_report(self, message_id: int) -> None:
         """Unlink a message from its report, deleting the report if nothing else belongs to it."""
         row = self.connection.execute("SELECT report_id FROM messages WHERE id = ?", (message_id,)).fetchone()

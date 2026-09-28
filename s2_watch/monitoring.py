@@ -79,6 +79,7 @@ class Monitor:
                 if sum(self._process(item) for item in items):
                     digest = replace(message, form_name="Digest", fields={**message.fields, "digest_parent": "1"})
                     message_id = self.store.save_message(digest, message_key(message), legacy_message_key(message))
+                    digest = replace(digest, received_at=self.store.earliest_received_at(message_id, digest.received_at))
                     self.store.detach_from_report(message_id)  # an earlier version made it one report
                     self.store.set_form_name(message_id, "Digest")
                     self.on_match(digest)
@@ -98,6 +99,8 @@ class Monitor:
                 matched = replace(matched, form_name=same_category.name)
         # A message read again (a re-scan or a restart) keeps its original row.
         message_id = self.store.save_message(matched, message_key(message), legacy_message_key(message))
+        # A message read again keeps the time it was first seen (sources without timestamps).
+        matched = replace(matched, received_at=self.store.earliest_received_at(message_id, matched.received_at))
         self.on_match(matched)
         if result is not None:
             self.store.save_analysis(message_id, result)

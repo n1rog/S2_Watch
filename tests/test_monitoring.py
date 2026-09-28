@@ -344,3 +344,34 @@ def test_rescan_shows_messages_again_without_saving_duplicates(tmp_path: Path) -
         Monitor([Source()], [form], store, shown.append).poll()
     assert len(shown) == 2
     assert len(store.search_history(text="FLOODING")) == 1
+
+
+def test_flmsg_message_time_is_when_the_file_arrived(tmp_path: Path) -> None:
+    import os
+    from datetime import datetime, timezone
+    message_file = tmp_path / "report.k2s"
+    message_file.write_text("<flmsg>4.0.23\n:mg:12 Fire near town\n")
+    arrived = datetime(2026, 9, 28, 2, 59, 48, tzinfo=timezone.utc)
+    os.utime(message_file, (arrived.timestamp(), arrived.timestamp()))
+    assert FLMSGFileAdapter(tmp_path).read_messages()[0].received_at == arrived
+
+
+def test_message_read_again_keeps_its_first_time(tmp_path: Path) -> None:
+    from datetime import datetime, timedelta, timezone
+    first_seen = datetime(2026, 9, 28, 3, 0, tzinfo=timezone.utc)
+    times = iter([first_seen, first_seen + timedelta(hours=11), first_seen - timedelta(hours=1)])
+
+    class Source:
+        # A source without timestamps: each read is stamped with the time it happened.
+        application_name = "FLMSG"
+
+        def read_messages(self):
+            return [Message("FLMSG", "FLOODING ON MAIN ST", received_at=next(times), fields={"filename": "a.k2s"})]
+
+    store = SQLiteStore(tmp_path / "s2.db")
+    shown = []
+    form = WatchForm("FLMSG", "Weather", "flood")
+    for _ in range(3):   # launch, relaunch 11 hours later, then a corrected earlier time
+        Monitor([Source()], [form], store, shown.append).poll()
+    assert [message.received_at for message in shown] == [first_seen, first_seen, first_seen - timedelta(hours=1)]
+    assert datetime.fromisoformat(store.search_history(text="FLOODING")[0][0]) == first_seen - timedelta(hours=1)
