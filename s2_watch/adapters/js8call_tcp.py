@@ -21,6 +21,9 @@ class JS8CallTcpAdapter(ApplicationAdapter):
         self._buffer = b""
 
     def read_messages(self) -> list[Message]:
+        if not self.host:
+            self.status = "Not configured"
+            return []
         if self._socket is None and not self._connect():
             return []
         try:

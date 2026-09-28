@@ -50,7 +50,6 @@ from s2_watch.analysis.rules import RuleBasedNewsAnalyzer
 from s2_watch.analysis.categories import NEWS_CATEGORIES
 from s2_watch.models import ANY_APPLICATION, APPLICATIONS, Message, WatchForm
 from s2_watch.adapters.osint import OsintAdapter
-from s2_watch.analysis.category_patterns import CATEGORY_PATTERNS
 from s2_watch.forms_io import forms_from_json, forms_to_json
 from s2_watch.monitor_worker import MonitorConfig, MonitorWorker, ProcessedMessage
 from s2_watch.storage import SQLiteStore
@@ -60,6 +59,7 @@ from s2_watch.ui.metrics_view import MetricsView
 from s2_watch.overlays import AircraftPoller, NwsAlertsPoller
 from s2_watch.corroboration import corroborate, official_items
 from s2_watch.digest import digest_label
+from s2_watch.default_forms import install_default_forms
 from s2_watch.adapters import osint as osint_sources
 from s2_watch.locating import LocationResolver
 from s2_watch.ui.watch_form_dialog import WatchFormDialog
@@ -89,14 +89,6 @@ class MainWindow(QMainWindow):
     )
     STATUS_LABELS = {status: label for status, label, _key in STATUS_ACTIONS if status}
     REPORT_ROLE = Qt.ItemDataRole.UserRole + 2
-    DEFAULT_WATCH_FORMS = {
-        "JS8Call": "All JS8Call messages",
-        "MagCommstat": "All MagCommstat messages",
-        "Commstat": "All Commstat messages",
-        "FLMSG": "All FLMSG messages",
-        "JS8SuperSpotter": "All JS8SuperSpotter messages",
-        "OSINT": "All OSINT reports",
-    }
 
     def __init__(self, database_path: str = "s2_watch.db") -> None:
         super().__init__()
@@ -686,30 +678,9 @@ class MainWindow(QMainWindow):
                         item.setText(self.format_display_time(timestamp))
         self.search_history()
 
-    # Bump to offer category forms added in a later release; forms the user deleted
-    # after an earlier installation are not recreated.
-    CATEGORY_FORMS_VERSION = 1
-
-    def install_category_forms(self) -> None:
-        if int(self.store.get_setting("forms.category_version", "0") or 0) >= self.CATEGORY_FORMS_VERSION:
-            return
-        existing = {(form.application, form.name) for form in self.store.list_watch_forms()}
-        for category, pattern in CATEGORY_PATTERNS.items():
-            if (ANY_APPLICATION, category) not in existing:
-                self.store.save_watch_form(
-                    WatchForm(ANY_APPLICATION, category, pattern, enabled=False, use_regex=True)
-                )
-        self.store.set_setting("forms.category_version", str(self.CATEGORY_FORMS_VERSION))
-
     def refresh_forms(self) -> None:
-        self.install_category_forms()
+        install_default_forms(self.store)
         forms = self.store.list_watch_forms()
-        existing_forms = {(form.application, form.name) for form in forms}
-        for application, name in self.DEFAULT_WATCH_FORMS.items():
-            if (application, name) not in existing_forms:
-                default = WatchForm(application, name, "", enabled=False)
-                self.store.save_watch_form(default)
-                forms.append(default)
         self.clear_live_messages()
         self.forms.blockSignals(True)
         self.forms.clear()

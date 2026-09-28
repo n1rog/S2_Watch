@@ -11,6 +11,26 @@ application can remain minimized while S2 Watch displays matching messages.
 The text-log adapter remains available as a fallback for installations where
 the TCP API is not enabled.
 
+## Installing
+
+Install scripts for Linux, macOS and Windows live in `installer/`. Each one checks
+for and downloads what S2 Watch needs (Python 3.11+, Qt's system libraries on Linux,
+the Visual C++ runtime on Windows, and PySide6), installs S2 Watch into its own
+Python environment, creates menu and desktop shortcuts, and then runs the setup
+wizard. The wizard walks through sources, the review window, focus regions, watch
+forms, analysis, alerts, map layers and display.
+
+Build the installer package (the repository is private, so the package carries
+the program with it):
+
+```bash
+python tools/make_installer_package.py   # -> dist/S2Watch-<version>-installer.zip
+```
+
+Unzip it, then run `bash install.sh` (Linux/macOS) or double-click `install.cmd`
+(Windows). See `installer/README-INSTALL.txt`. Rerun the setup wizard any time with
+`s2-watch --configure`. `--database PATH` selects the data file.
+
 ## Development
 
 ```bash
