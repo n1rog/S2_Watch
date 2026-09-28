@@ -14,6 +14,7 @@ Items become ordinary Messages (application "OSINT"), so watch forms, the analyz
 deduplication, locations, labels and Metrics treat them like radio reports.
 """
 
+import csv
 import html
 import json
 import re
@@ -39,8 +40,21 @@ GDELT_URL = ("https://api.gdeltproject.org/api/v2/doc/doc?" +
 FAA_TFR_URL = "https://tfr.faa.gov/tfrapi/exportTfrList"
 STATE_ADVISORIES_URL = "https://travel.state.gov/_res/rss/TAsTWs.xml"
 FEMA_URL = "https://www.fema.gov/api/open/v2/DisasterDeclarationsSummaries"
+USGS_URL = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_week.geojson"
+SPC_URLS = ("https://www.spc.noaa.gov/climo/reports/today_filtered.csv",
+            "https://www.spc.noaa.gov/climo/reports/yesterday_filtered.csv")
+NIFC_URL = ("https://services3.arcgis.com/T4QMspbfLg3qTGWY/arcgis/rest/services/WFIGS_Incident_Locations_Current/"
+            "FeatureServer/0/query?" + urllib.parse.urlencode({
+                # Wildfires (not prescribed burns) of 100+ acres that are not yet fully contained.
+                "where": "IncidentSize >= 100 AND IncidentTypeCategory = 'WF' "
+                         "AND (PercentContained < 100 OR PercentContained IS NULL)",
+                "outFields": "IncidentName,IncidentSize,PercentContained,POOState,FireDiscoveryDateTime,"
+                             "ModifiedOnDateTime_dt,UniqueFireIdentifier",
+                "returnGeometry": "true", "outSR": "4326", "f": "json"}))
+# US states and territories, roughly: quakes elsewhere only count when magnitude 6+.
+US_BOXES = ((24, 50, -125, -66), (51, 72, -180, -129), (18, 23, -161, -154), (17, 19, -68, -65), (13, 21, 144, 146))
 # Minutes between fetches of each source.
-SCHEDULE = {"gdelt": 15, "faa": 30, "state": 60, "fema": 60}
+SCHEDULE = {"gdelt": 15, "faa": 30, "state": 60, "fema": 60, "usgs": 10, "spc": 15, "nifc": 60}
 DECLARATION_TYPES = {"DR": "Major Disaster", "EM": "Emergency", "FM": "Fire Management"}
 STATE_NAMES = {
     "AL": "Alabama", "AK": "Alaska", "AZ": "Arizona", "AR": "Arkansas", "CA": "California", "CO": "Colorado",
@@ -172,8 +186,108 @@ def fetch_fema_declarations(days: int = 30) -> list[Message]:
     return messages
 
 
+def _position(lat: float, lon: float) -> str:
+    # Written as decimal coordinates so the location finder places the item exactly.
+    return f"({lat:.3f}, {lon:.3f})"
+
+
+def fetch_usgs_earthquakes() -> list[Message]:
+    messages = []
+    for quake in json.loads(_get(USGS_URL)).get("features", []):
+        props, (lon, lat, _depth) = quake["properties"], quake["geometry"]["coordinates"]
+        magnitude = props.get("mag") or 0
+        in_us = any(south <= lat <= north and west <= lon <= east for south, north, west, east in US_BOXES)
+        if not in_us and magnitude < 6:
+            continue
+        when = datetime.fromtimestamp(props["time"] / 1000, tz=timezone.utc)
+        text = f"USGS: M{magnitude:.1f} earthquake — {props.get('place', '')} {_position(lat, lon)}"
+        # Every quake can confirm a radio report; only notable ones become reports themselves.
+        notable = magnitude >= (4.0 if in_us else 6.0)
+        messages.append(Message(APPLICATION, text, received_at=when, fields={
+            "type": "EARTHQUAKE", "sender": "USGS", "message_id": quake.get("id", text), "magnitude": f"{magnitude:.1f}",
+            "notable": "1" if notable else "",
+            "lat": f"{lat}", "lon": f"{lon}", "url": props.get("url", ""), "source": "USGS",
+        }))
+    return messages
+
+
+def fetch_spc_storm_reports() -> list[Message]:
+    """Tornado, wind and hail reports from the Storm Prediction Center (today and yesterday).
+
+    SPC days run 12Z to 12Z and times are UTC ("1440" = 14:40Z); hail sizes are in
+    hundredths of an inch, wind speeds in mph ("UNK" when estimated from damage).
+    """
+    messages = []
+    # SPC's "today" is the convective day that began at the most recent 12Z.
+    today = (datetime.now(timezone.utc) - timedelta(hours=12)).date()
+    for days_back, url in enumerate(SPC_URLS):
+        day = today - timedelta(days=days_back)
+        kind, measure = "", ""
+        for row in csv.reader(_get(url).decode("utf-8", "replace").splitlines()):
+            if not row:
+                continue
+            if row[0] == "Time":
+                kind = {"F_Scale": "Tornado", "Speed": "Damaging wind", "Size": "Hail"}.get(row[1], "Storm")
+                measure = row[1]
+                continue
+            if len(row) < 8:
+                continue
+            time_text, value, place, county, state, lat, lon, comments = row[:8]
+            try:
+                hour, minute = int(time_text[:2]), int(time_text[2:])
+                report_day = day if hour >= 12 else day + timedelta(days=1)
+                when = datetime(report_day.year, report_day.month, report_day.day, hour, minute, tzinfo=timezone.utc)
+                lat_value, lon_value = float(lat), float(lon)
+            except ValueError:
+                continue
+            detail = {"F_Scale": f"rated {value}" if value not in ("", "UNK") else "",
+                      "Speed": f"{value} mph" if value not in ("", "UNK") else "",
+                      "Size": f"{int(value) / 100:.2f} in" if value.isdigit() else ""}.get(measure, "")
+            text = (f"SPC storm report: {kind}{' ' + detail if detail else ''} — {place}, {county} County, {state} "
+                    f"{_position(lat_value, lon_value)}. {comments}")
+            messages.append(Message(APPLICATION, text, received_at=when, fields={
+                "type": "SPC STORM REPORT", "sender": "NOAA SPC", "message_id": f"{kind}|{when.isoformat()}|{lat}|{lon}",
+                "state": state, "lat": lat, "lon": lon, "source": "SPC",
+            }))
+    return messages
+
+
+def fetch_nifc_wildfires() -> list[Message]:
+    """Active wildfires of 100 acres or more (prescribed burns excluded); one item a day per fire."""
+    messages = []
+    for feature in json.loads(_get(NIFC_URL)).get("features", []):
+        attributes, geometry = feature.get("attributes", {}), feature.get("geometry") or {}
+        if "x" not in geometry:
+            continue
+        stamp = attributes.get("ModifiedOnDateTime_dt") or attributes.get("FireDiscoveryDateTime") or 0
+        modified = datetime.fromtimestamp(stamp / 1000, tz=timezone.utc) if stamp else datetime.now(timezone.utc)
+        name = (attributes.get("IncidentName") or "Unnamed").strip().title()
+        state = (attributes.get("POOState") or "").replace("US-", "")
+        contained = attributes.get("PercentContained")
+        text = (f"NIFC wildfire: {name} Fire — {STATE_NAMES.get(state, state)}; "
+                f"{int(attributes.get('IncidentSize') or 0):,} acres"
+                + (f", {int(contained)}% contained" if contained is not None else "")
+                + f" {_position(geometry['y'], geometry['x'])}")
+        discovered = attributes.get("FireDiscoveryDateTime") or 0
+        new_fire = discovered and datetime.now(timezone.utc).timestamp() - discovered / 1000 < 3 * 86400
+        notable = (attributes.get("IncidentSize") or 0) >= 10_000 or bool(new_fire)
+        messages.append(Message(APPLICATION, text, received_at=modified, fields={
+            "type": "WILDFIRE", "sender": "NIFC", "notable": "1" if notable else "", "state": state, "lat": f"{geometry['y']}", "lon": f"{geometry['x']}",
+            "message_id": f"{attributes.get('UniqueFireIdentifier', name)}|{modified.date()}", "source": "NIFC",
+        }))
+    return messages
+
+
+def cached_messages(kinds=None) -> list[Message]:
+    """Everything the OSINT sources last fetched (optionally only some item types)."""
+    with _CACHE_LOCK:
+        messages = [message for _fetched, items in _CACHE.values() for message in items]
+    return [message for message in messages if kinds is None or message.fields.get("type") in kinds]
+
+
 FETCHERS = {"gdelt": fetch_gdelt, "faa": fetch_faa_security_tfrs, "state": fetch_state_advisories,
-            "fema": fetch_fema_declarations}
+            "fema": fetch_fema_declarations, "usgs": fetch_usgs_earthquakes, "spc": fetch_spc_storm_reports,
+            "nifc": fetch_nifc_wildfires}
 
 
 class OsintAdapter:
@@ -222,6 +336,8 @@ class OsintAdapter:
                 identity = f"{name}|{message.fields.get('message_id')}"
                 if identity in self._delivered or (cutoff and _utc(message.received_at) < cutoff):
                     continue
+                if message.fields.get("notable") == "":
+                    continue  # kept for corroboration only (e.g. small quakes and fires)
                 self._delivered.add(identity)
                 self._pending.append(message)
         working = [source for source in self.fetchers if source not in self.errors]

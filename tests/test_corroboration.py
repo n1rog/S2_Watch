@@ -45,3 +45,62 @@ def test_hazard_families() -> None:
     assert hazards("EXCESSIVE HEAT WARNING") == {"heat"}
     assert hazards("Winter Storm Warning") == {"winter"}
     assert "thunderstorm" in hazards("SEVERE TSTORMS WITH HAIL")
+
+
+def test_osint_items_confirm_matching_reports() -> None:
+    from datetime import timedelta
+
+    from s2_watch.corroboration import official_items
+
+    quake = Message("OSINT", "USGS: M4.1 earthquake — 10 km N of Ridgecrest, CA (35.700, -117.670)",
+                    received_at=RECEIVED + timedelta(minutes=10),
+                    fields={"type": "EARTHQUAKE", "magnitude": "4.1", "lat": "35.7", "lon": "-117.67"})
+    hail = Message("OSINT", "SPC storm report: Hail 1.75 in — 3 N Norman, Cleveland County, OK (35.260, -97.440). Report.",
+                   received_at=RECEIVED - timedelta(hours=2),
+                   fields={"type": "SPC STORM REPORT", "lat": "35.26", "lon": "-97.44", "state": "OK"})
+    fema = Message("OSINT", "FEMA Emergency declaration EM-3654: Flooding — Iowa; incident type Flood; 4 areas designated",
+                   received_at=RECEIVED - timedelta(days=3), fields={"type": "FEMA DECLARATION", "state": "IA"})
+    items = official_items([quake, hail, fema])
+
+    text = "FELT A STRONG EARTHQUAKE IN BAKERSFIELD, CA"   # ~125 km from the epicentre
+    found = corroborate(text, locations(text), RECEIVED, [], items)
+    assert found.text() == "✓ USGS M4.1 quake · radio 10 min earlier"
+
+    text = "LARGE HAIL IN NORMAN, OK"
+    assert corroborate(text, locations(text), RECEIVED, [], items).text() == "✓ SPC hail report"
+
+    text = "IA - FLOODING ON RIVER ROADS"   # state-level report: only FEMA can confirm it
+    assert corroborate(text, locations(text), RECEIVED, [], items).text() == "✓ FEMA flood declaration"
+
+    text = "FELT AN EARTHQUAKE IN DENVER, CO"   # too far from the quake
+    assert corroborate(text, locations(text), RECEIVED, [], items) is None
+
+
+def test_current_alert_does_not_confirm_an_old_report() -> None:
+    from datetime import timedelta
+
+    text = "FLASH FLOODING IN TULSA, OK"
+    week_old = RECEIVED - timedelta(days=7)
+    alert = dict(POLYGON_ALERT, onset="2026-09-27T18:25:00+00:00", ends="2026-09-28T06:00:00+00:00")
+    assert corroborate(text, locations(text), week_old, [alert]) is None
+    assert corroborate(text, locations(text), RECEIVED, [alert]).lead_minutes == 25
+
+
+def test_small_quakes_confirm_reports_but_do_not_become_reports(monkeypatch) -> None:
+    from s2_watch.adapters import osint
+
+    small = Message("OSINT", "USGS: M2.7 earthquake", fields={"type": "EARTHQUAKE", "notable": "", "message_id": "q1"})
+    large = Message("OSINT", "USGS: M4.6 earthquake", fields={"type": "EARTHQUAKE", "notable": "1", "message_id": "q2"})
+    monkeypatch.setattr(osint, "_CACHE", {})
+    adapter = osint.OsintAdapter(None, fetchers={"usgs": lambda: [small, large]})
+    try:
+        import time
+        for _ in range(50):
+            delivered = adapter.read_messages()
+            if delivered:
+                break
+            time.sleep(0.02)
+        assert [m.fields["message_id"] for m in delivered] == ["q2"]
+        assert {m.fields["message_id"] for m in osint.cached_messages({"EARTHQUAKE"})} == {"q1", "q2"}
+    finally:
+        adapter.close()

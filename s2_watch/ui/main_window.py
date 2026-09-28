@@ -58,7 +58,9 @@ from s2_watch.ui.icons import app_icon
 from s2_watch.ui.map_view import MapView
 from s2_watch.ui.metrics_view import MetricsView
 from s2_watch.overlays import AircraftPoller, NwsAlertsPoller
-from s2_watch.corroboration import corroborate
+from s2_watch.corroboration import corroborate, official_items
+from s2_watch.adapters import osint as osint_sources
+from s2_watch.locating import LocationResolver
 from s2_watch.ui.watch_form_dialog import WatchFormDialog
 
 
@@ -309,6 +311,13 @@ class MainWindow(QMainWindow):
         # Alerts are fetched all the time (not only when the NWS layer is shown) to
         # corroborate radio reports.
         self.nws_alerts: list[dict] = []
+        # Official OSINT items (USGS, SPC, NIFC, FEMA, FAA) that can confirm reports too.
+        self.official: list = []
+        self._official_resolver = LocationResolver()
+        self.official_timer = QTimer(self)
+        self.official_timer.setInterval(5 * 60 * 1000)
+        self.official_timer.timeout.connect(self.refresh_official)
+        self.official_timer.start()
         self.nws_poller.alerts_ready.connect(self.nws_alerts_updated)
         self.nws_poller.failed.connect(self.map_view.set_nws_error)
         self.aircraft_poller = AircraftPoller(parent=self)
@@ -1169,6 +1178,13 @@ class MainWindow(QMainWindow):
 
     def nws_alerts_updated(self, alerts: list[dict]) -> None:
         self.nws_alerts = alerts
+        self.refresh_official()
+
+    def refresh_official(self) -> None:
+        self.official = official_items(
+            osint_sources.cached_messages({"EARTHQUAKE", "SPC STORM REPORT", "WILDFIRE", "FEMA DECLARATION", "FAA TFR"}),
+            self._official_resolver,
+        )
         for row in range(self.analysis.rowCount()):
             self.update_corroboration(row)
         self.analysis.resizeColumnToContents(self.OFFICIAL_COLUMN)
@@ -1178,16 +1194,18 @@ class MainWindow(QMainWindow):
         item = self.analysis.item(row, 0)
         official = self.analysis.item(row, self.OFFICIAL_COLUMN)
         message = item.data(Qt.ItemDataRole.UserRole + 1) if item else None
-        if not isinstance(message, Message) or official is None:
-            return
+        if not isinstance(message, Message) or official is None or message.source_application == "OSINT":
+            return  # OSINT items are official sources themselves
         summary = self.analysis.item(row, self.ANALYSIS_COLUMNS.index("Summary"))
         found = corroborate(f"{message.raw_content} {summary.text() if summary else ''}",
-                            item.data(self.LOCATIONS_ROLE) or [], message.received_at, self.nws_alerts)
+                            item.data(self.LOCATIONS_ROLE) or [], message.received_at, self.nws_alerts, self.official)
         text = found.text() if found else ""
         if official.text() != text:
             official.setText(text)
             official.setToolTip(
-                f"Active NWS {found.event} ({found.severity}) covers this location; issued {found.sent}." if found else "")
+                (f"{found.source} {found.event} matches this report's hazard and location"
+                 + (f" (issued {found.sent})" if found.sent else "")
+                 + (f"; {found.others} more official source(s) also match" if found.others else "") + ".") if found else "")
             report_id = item.data(self.REPORT_ROLE)
             if report_id is not None:
                 self.store.set_corroboration(int(report_id), text)

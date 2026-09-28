@@ -325,18 +325,27 @@ official sources on a background thread: US news about protests, riots, unrest,
 shootings, bombings and terrorism from the GDELT news search (news-derived, not
 official; every 15 minutes), FAA security flight restrictions (mostly VIP movements
 and security events; every 30 minutes), State Department travel advisories whose
-level or risks changed in the last 30 days, and FEMA disaster and emergency
-declarations (hourly). Items flow through watch forms, the analyzer, deduplication,
+level or risks changed in the last 30 days, FEMA disaster and emergency declarations
+(hourly), USGS earthquakes (every 10 minutes), SPC tornado, wind and hail reports
+(every 15 minutes), and NIFC wildfires (hourly). Only notable earthquakes (US M4.0+,
+elsewhere M6+) and wildfires (10,000+ acres, or discovered in the last 3 days, not yet
+contained, prescribed burns excluded) become reports; smaller ones are still used to
+confirm radio reports. Items flow through watch forms, the analyzer, deduplication,
 locations, labels and Metrics like radio reports. DHS NTAS, CISA and U.S. Embassy
 alert feeds are not included because their servers refuse automated clients.
 
-The **Official** column in Newsworthiness marks a radio report that an active NWS alert
-confirms: an alert of the same hazard family (flood, heat, fire and smoke, winter,
-wind, tornado, thunderstorm and hail, tropical …) covering the report's location,
-inside the alert's outline or in one of its counties, for example "✓ NWS Flood Watch ·
-radio 25 min earlier" when the radio report came first. NWS alerts are fetched every
-5 minutes for this even when the NWS map layer is off. Only specific locations
-(coordinates, grid squares, cities, counties) are checked.
+The **Official** column in Newsworthiness marks a radio report that an official source
+confirms: same kind of hazard, same place, around the same time. Sources and rules:
+an active NWS alert covering the report's location (inside its outline or one of its
+counties, active around the report's time); a USGS earthquake within 150 km and 24
+hours; an SPC storm report within 50 km and 12 hours; an NIFC wildfire within 60 km;
+a FAA security flight restriction within 50 km and 7 days (for security/VIP reports);
+and a FEMA declaration for the same hazard in the report's state within 30 days. The
+strongest match is shown with a count of any others, for example "✓ NWS Flood Watch ·
+radio 25 min earlier +1" when the radio report came first. Apart from FEMA, reports
+need a specific location (coordinates, grid square, city or county). NWS alerts are
+fetched every 5 minutes for this even when the NWS map layer is off; OSINT items are
+never checked against each other.
 
 Reports in Newsworthiness can be labelled for triage. Select one or more rows
 (Ctrl- or Shift-click), then right-click → **Mark as**, or press a key:

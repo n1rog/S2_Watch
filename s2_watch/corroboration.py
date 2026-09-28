@@ -1,15 +1,17 @@
-"""Match radio reports to official NWS alerts in effect at the same place.
+"""Match radio reports to official sources describing the same hazard at the same place.
 
-A report is corroborated when an active alert covers one of its locations (inside the
-alert's outline, or in one of the counties it was issued for) and both are about the
-same kind of hazard. Locations must be specific (coordinates, grid, city, or county):
-a state or MARS region is too coarse to confirm anything. When the radio report came
-before the alert was issued, that lead time is noted: early reporting is the point of
-an S2 network.
+Sources: active NWS alerts (inside the alert's outline or one of its counties), USGS
+earthquakes, SPC storm reports, NIFC wildfires, FEMA declarations (same state) and FAA
+security flight restrictions. Each must be about the same kind of hazard as the report,
+near its location and close in time. Report locations must be specific (coordinates,
+grid, city, or county), except that a FEMA declaration can confirm any report placed in
+its state. When the radio report came before the official one, that lead time is
+noted: early reporting is the point of an S2 network.
 """
 
+import math
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from s2_watch.locating import _point_in_polygon, load_gazetteer
 
@@ -28,20 +30,89 @@ HAZARDS = {
     "coastal": ("surf", "rip current", "coastal", "tsunami"),
     "earthquake": ("earthquake", "quake"),
     "avalanche": ("avalanche",),
+    "security": ("security", "vip", "motorcade", "secret service", "presidential", "president", "flight restriction",
+                 "tfr", "no-fly", "no fly"),
+}
+FEMA_HAZARDS = {
+    "fire": {"fire", "air"}, "flood": {"flood"}, "severe storm": {"thunderstorm", "wind", "flood", "tornado"},
+    "hurricane": {"tropical", "flood", "wind"}, "tropical storm": {"tropical", "flood", "wind"},
+    "typhoon": {"tropical", "flood", "wind"}, "tornado": {"tornado", "thunderstorm"}, "winter storm": {"winter"},
+    "severe ice storm": {"winter"}, "snowstorm": {"winter"}, "earthquake": {"earthquake"},
+    "coastal storm": {"coastal", "flood", "wind"}, "mud/landslide": {"flood"},
 }
 SPECIFIC_LEVELS = {"precise", "city", "county", "grid"}
 
 
 @dataclass(frozen=True)
 class Corroboration:
-    event: str
+    event: str                 # e.g. "Flood Watch", "M4.1 quake"
     severity: str
     sent: str
-    lead_minutes: int | None   # how long before the alert the radio report came in
+    lead_minutes: int | None   # how long before the official source the radio report came in
+    source: str = "NWS"
+    others: int = 0            # further official items confirming the same report
 
     def text(self) -> str:
         lead = f" · radio {self.lead_minutes} min earlier" if self.lead_minutes and self.lead_minutes > 0 else ""
-        return f"✓ NWS {self.event}{lead}"
+        more = f" +{self.others}" if self.others else ""
+        return f"✓ {self.source} {self.event}{lead}{more}"
+
+
+@dataclass
+class OfficialItem:
+    """A point-like official observation (not an NWS alert area)."""
+
+    source: str
+    event: str
+    hazards: set[str]
+    time: datetime
+    lat: float | None = None
+    lon: float | None = None
+    radius_km: float = 50
+    window: timedelta = timedelta(hours=24)
+    state: str = ""            # FEMA: matched by state instead of distance
+    rank: int = 1
+
+
+def _distance_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    x = math.radians(lon2 - lon1) * math.cos(math.radians((lat1 + lat2) / 2))
+    return math.hypot(x, math.radians(lat2 - lat1)) * 6371
+
+
+def official_items(messages, resolver=None) -> list[OfficialItem]:
+    """Official items from the OSINT feed (USGS, SPC, NIFC, FEMA, FAA) for corroboration."""
+    items = []
+    for message in messages:
+        fields, kind = message.fields, message.fields.get("type", "")
+        when = message.received_at if message.received_at.tzinfo else message.received_at.replace(tzinfo=timezone.utc)
+        try:
+            lat, lon = float(fields["lat"]), float(fields["lon"])
+        except (KeyError, ValueError):
+            lat = lon = None
+        if kind == "EARTHQUAKE" and lat is not None:
+            items.append(OfficialItem("USGS", f"M{fields.get('magnitude', '?')} quake", {"earthquake"}, when, lat, lon,
+                                      radius_km=150, rank=3))
+        elif kind == "SPC STORM REPORT" and lat is not None:
+            event = message.raw_content.split(":", 1)[1].split("—", 1)[0].strip().split(" ")[0].lower()
+            hazards = {"tornado": {"tornado", "thunderstorm"}, "hail": {"thunderstorm"}}.get(event, {"wind", "thunderstorm"})
+            items.append(OfficialItem("SPC", f"{event} report", hazards, when, lat, lon, radius_km=50,
+                                      window=timedelta(hours=12), rank=3))
+        elif kind == "WILDFIRE" and lat is not None:
+            name = message.raw_content.split(":", 1)[1].split("—", 1)[0].strip()
+            items.append(OfficialItem("NIFC", name, {"fire", "air"}, when, lat, lon, radius_km=60,
+                                      window=timedelta(days=30), rank=2))
+        elif kind == "FEMA DECLARATION" and fields.get("state"):
+            incident = message.raw_content.split("incident type", 1)[-1].split(";", 1)[0].strip().lower()
+            hazards = FEMA_HAZARDS.get(incident, set())
+            if hazards:
+                items.append(OfficialItem("FEMA", f"{incident} declaration", hazards, when, state=fields["state"],
+                                          window=timedelta(days=30), rank=1))
+        elif kind == "FAA TFR" and resolver is not None:
+            place = next((location for location in resolver.resolve(message) if location.level in SPECIFIC_LEVELS | {"state"}), None)
+            if place is not None and place.level != "state":
+                items.append(OfficialItem("FAA", "security flight restriction", {"security"}, when, place.lat, place.lon,
+                                          radius_km=50, window=timedelta(days=7), rank=1))
+    return items
 
 
 def hazards(text: str) -> set[str]:
@@ -66,11 +137,38 @@ def _covers(alert: dict, lat: float, lon: float, county: str | None) -> bool:
     return county is not None and county in alert.get("counties", ())
 
 
-def corroborate(report_text: str, locations, received_at: datetime, alerts: list[dict]) -> Corroboration | None:
-    """The most severe active alert that covers the report's place and matches its hazard."""
+def corroborate(report_text: str, locations, received_at: datetime, alerts: list[dict],
+                official: list[OfficialItem] = ()) -> Corroboration | None:
+    """The strongest official confirmation of a report: an NWS alert, else the best other item."""
     report_hazards = hazards(report_text)
+    if not report_hazards:
+        return None
+    received = received_at if received_at.tzinfo else received_at.replace(tzinfo=timezone.utc)
     places = [location for location in locations if location.level in SPECIFIC_LEVELS]
-    if not report_hazards or not places or not alerts:
+    states = {location.state for location in locations if getattr(location, "state", None)}
+    confirmations = []
+    nws = _corroborate_nws(report_hazards, places, received, alerts)
+    if nws:
+        confirmations.append((10, nws))
+    for item in official:
+        if not item.hazards & report_hazards or abs(item.time - received) > item.window:
+            continue
+        if item.state:
+            matched = item.state in states
+        else:
+            matched = any(_distance_km(place.lat, place.lon, item.lat, item.lon) <= item.radius_km for place in places)
+        if matched:
+            lead = int((item.time - received).total_seconds() // 60)
+            confirmations.append((item.rank, Corroboration(item.event, "", item.time.isoformat(), lead, item.source)))
+    if not confirmations:
+        return None
+    confirmations.sort(key=lambda pair: -pair[0])
+    best = confirmations[0][1]
+    return Corroboration(best.event, best.severity, best.sent, best.lead_minutes, best.source, len(confirmations) - 1)
+
+
+def _corroborate_nws(report_hazards, places, received: datetime, alerts: list[dict]) -> Corroboration | None:
+    if not places or not alerts:
         return None
     gazetteer = load_gazetteer()
     counties = {(location.lat, location.lon): gazetteer.county_at(location.lat, location.lon) for location in places}
@@ -79,6 +177,14 @@ def corroborate(report_text: str, locations, received_at: datetime, alerts: list
     for alert in alerts:
         if not hazards(alert.get("event", "")) & report_hazards:
             continue
+        # Only an alert active around the report's time: starting at most a day after it
+        # and not already ended before it (an alert for today says nothing about last week).
+        start = _parse_time(alert.get("onset") or alert.get("sent") or "")
+        end = _parse_time(alert.get("ends") or "")
+        if (start and start - received > timedelta(hours=24)) or (end and end < received - timedelta(hours=1)):
+            continue
+        if start and received - start > timedelta(days=3) and not end:
+            continue
         if not any(_covers(alert, location.lat, location.lon, counties[(location.lat, location.lon)])
                    for location in places):
             continue
@@ -86,7 +192,6 @@ def corroborate(report_text: str, locations, received_at: datetime, alerts: list
             best = alert
     if best is None:
         return None
-    sent = _parse_time(best.get("sent") or best.get("onset") or "")
-    received = received_at if received_at.tzinfo else received_at.replace(tzinfo=timezone.utc)
-    lead = int((sent - received).total_seconds() // 60) if sent else None
+    start = _parse_time(best.get("onset") or best.get("sent") or "")
+    lead = int((start - received).total_seconds() // 60) if start else None
     return Corroboration(best.get("event", "Alert"), best.get("severity", ""), best.get("sent", ""), lead)
