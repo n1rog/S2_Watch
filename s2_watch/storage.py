@@ -272,6 +272,24 @@ class SQLiteStore:
         return ReportInfo(report_id, new_report, int(copies), tuple(sources.split(",")), status, note,
                           state or "", int(region) if region is not None else None)
 
+    def set_form_name(self, message_id: int, form_name: str) -> None:
+        self.connection.execute("UPDATE messages SET form_name = ? WHERE id = ?", (form_name, message_id))
+        self.connection.commit()
+
+    def detach_from_report(self, message_id: int) -> None:
+        """Unlink a message from its report, deleting the report if nothing else belongs to it."""
+        row = self.connection.execute("SELECT report_id FROM messages WHERE id = ?", (message_id,)).fetchone()
+        if not row or row[0] is None:
+            return
+        self.connection.execute("UPDATE messages SET report_id = NULL WHERE id = ?", (message_id,))
+        remaining = self.connection.execute("SELECT COUNT(*) FROM messages WHERE report_id = ?", (row[0],)).fetchone()[0]
+        if remaining:
+            self.connection.execute("UPDATE reports SET copies = ? WHERE id = ?", (remaining, row[0]))
+        else:
+            self.connection.execute("DELETE FROM reports WHERE id = ?", (row[0],))
+        self.connection.execute("DELETE FROM analysis_results WHERE message_id = ?", (message_id,))
+        self.connection.commit()
+
     def set_corroboration(self, report_id: int, text: str) -> None:
         self.connection.execute("UPDATE reports SET corroboration = ? WHERE id = ?", (text, report_id))
         self.connection.commit()

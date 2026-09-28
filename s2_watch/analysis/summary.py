@@ -158,6 +158,14 @@ def summarize(message: Message, result: AnalysisResult, locations=()) -> str:
         return result.category if result.newsworthy else "Routine traffic"
     if not result.newsworthy:
         return _gist(body)
+    if message.fields.get("digest") and len(body) <= 160:
+        # A digest item is already a headline ("MN — New Richland emergency: ~9" rain,
+        # 36 evacuated (KSTP)"): keep it, minus the state prefix and the news source.
+        text = re.sub(r"^[A-Z]{2}(?:\s*/\s*[A-Z]{2})*\s*[-–—:]\s*", "", body)
+        text = re.sub(r"\s*\((?:[A-Z][\w .&/-]{1,20})\)\s*$", "", text).rstrip(" .;")
+        where = locations[0].label if locations else ""
+        place = where.split(",")[0].strip().lower()
+        return f"{text} — {where}" if where and place not in text.lower() else text
     facts, fact_spans = _facts(body)
     event = _event_phrase(body, result, fact_spans)
     # A fact that only repeats the headline ('3" of snow' / '3" snow') is dropped.

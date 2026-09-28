@@ -59,6 +59,7 @@ from s2_watch.ui.map_view import MapView
 from s2_watch.ui.metrics_view import MetricsView
 from s2_watch.overlays import AircraftPoller, NwsAlertsPoller
 from s2_watch.corroboration import corroborate, official_items
+from s2_watch.digest import digest_label
 from s2_watch.adapters import osint as osint_sources
 from s2_watch.locating import LocationResolver
 from s2_watch.ui.watch_form_dialog import WatchFormDialog
@@ -1003,7 +1004,7 @@ class MainWindow(QMainWindow):
             self.format_display_time(message.received_at),
             message.source_application,
             message.form_name or "",
-            message.raw_content,
+            self.message_text(message),
         )
         for column, value in enumerate(values):
             item = SortableTableItem(value) if column == 0 else QTableWidgetItem(value)
@@ -1152,7 +1153,7 @@ class MainWindow(QMainWindow):
             f"{result.confidence:.0%}",
             self.seen_text(report),
             result.summary,
-            message.raw_content,
+            self.message_text(message),
         )
         first = None
         for column, value in enumerate(values):
@@ -1350,6 +1351,12 @@ class MainWindow(QMainWindow):
             message = item.data(Qt.ItemDataRole.UserRole + 1)
             if isinstance(message, Message):
                 self.map_view.set_message_dimmed(message, status == "ignored")
+
+    @staticmethod
+    def message_text(message: Message) -> str:
+        """The message, with the digest it came from when it is one item of a digest."""
+        label = digest_label(message)
+        return f"{message.raw_content}  — {label}" if label else message.raw_content
 
     def should_alert(self, result: AnalysisResult) -> bool:
         if not result.newsworthy or not self.alerts_enabled.isChecked():

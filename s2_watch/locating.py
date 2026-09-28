@@ -49,7 +49,7 @@ _LOCATIVE = re.compile(
 _COUNTY = re.compile(rf"\b({_WORD}(?:\s+{_WORD}){{0,2}})\s+(?:COUNTY|CNTY|CO\.|PARISH|BOROUGH)(?![A-Z])")
 _COUNTY_SUFFIX = re.compile(r"\s(?:COUNTY|CNTY|CO\.?|PARISH|BOROUGH)$")
 # Status lines usually open with the state: "MO - FLOOD WATCH", "AZ: Dust engulfs ...".
-_STATE_PREFIX = re.compile(r"^\s*([A-Z]{2})\s*[-–:]")
+_STATE_PREFIX = re.compile(r"^\s*([A-Z]{2})(?:\s*/\s*[A-Z]{2})*\s*[-–—:]")
 # In StatReps and CommStat status lines (",EM12JV,1,X23,+,TX USUAL RIG") the state
 # opens the text even without punctuation.
 _STATE_WORD_PREFIX = re.compile(r"^\s*([A-Z]{2})\s+[A-Z]")
@@ -241,7 +241,8 @@ class LocationResolver:
                 states.append(state)
         for match in self._state_pattern.finditer(upper):
             states.append(g.state_by_name[match.group(1)])
-        body = normalize_text(strip_envelope(text))
+        # Before ASCII normalisation, which would drop the em dash in "MN — ...".
+        body = strip_envelope(text).upper()
         prefix = _STATE_PREFIX.match(body)
         status_line = "STATREP" in fields.get("type", "").upper() or _STATUS_LINE.search(text)
         if not prefix and status_line:

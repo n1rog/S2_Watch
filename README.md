@@ -300,6 +300,16 @@ entry such as `~/.local/share/applications/s2-watch.desktop` should set
 `Icon=` to the SVG, `Path=` to the folder holding `s2_watch.db`, and
 `StartupWMClass=s2-watch`.
 
+Digests such as weekly briefings, bulletins and news roundups ("MAGNET WEEKLY
+BRIEFING", "EmComm DocDrop News") are split into their items, each line or section that
+starts with a state ("MN — …", "MI/WI - …"), a heading ("CIVIL UNREST: …") or a bullet.
+Each item becomes its own report with its own category, location, summary and Official
+check, and shows which digest it came from ("— from “MAGNET WEEKLY BRIEFING …” (item 3
+of 22)"). The whole digest is kept in Live Monitor and History with the watch form
+"Digest". Section headings are kept apart from the item text, so "DOMESTIC TERRORISM: No
+verified plot" is not read as terrorism. When several watch forms match a report, the
+one named after its category gets the credit.
+
 One report often arrives several times: MagCommstat and JS8SuperSpotter both store
 the same StatRep, JS8SuperSpotter also stores the raw JS8 frame, and other stations
 relay it. S2 Watch links these copies to a single report by comparing the report

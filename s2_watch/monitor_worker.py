@@ -117,7 +117,9 @@ class MonitorWorker(QObject):
             self.store = None
 
     def _matched(self, message: Message) -> None:
-        self._batch.append(ProcessedMessage(message, None, self.resolver.resolve(message)))
+        # A whole digest gets no markers of its own: its items carry their own places.
+        locations = [] if message.fields.get("digest_parent") else self.resolver.resolve(message)
+        self._batch.append(ProcessedMessage(message, None, locations))
         if self.monitor and self.monitor.analyzer is None and len(self._batch) >= BATCH_SIZE:
             self._flush()
 

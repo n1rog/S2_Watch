@@ -1,8 +1,10 @@
 import hashlib
+from dataclasses import replace
 from collections.abc import Callable, Iterable
 
 from s2_watch.adapters.base import ApplicationAdapter
 from s2_watch.analysis.base import AnalysisResult, NewsAnalyzer
+from s2_watch.digest import split_digest
 from s2_watch.models import ANY_APPLICATION, Message, WatchForm
 from s2_watch.storage import SQLiteStore
 
@@ -56,24 +58,39 @@ class Monitor:
                     return
                 if self.on_read:
                     self.on_read(message)
-                matching_form = next((form for form in self.forms if form.matches(message)), None)
-                if matching_form is None:
+                # A digest (weekly briefing, bulletin) is handled item by item; the whole
+                # digest is kept for Live Monitor and History when any item matches.
+                items = split_digest(message)
+                if items is None:
+                    self._process(message)
                     continue
-                matched = Message(
-                    source_application=message.source_application,
-                    raw_content=message.raw_content,
-                    received_at=message.received_at,
-                    form_name=matching_form.name,
-                    fields=message.fields,
-                )
-                # A message read again (a re-scan or a restart) keeps its original row.
-                message_id = self.store.save_message(matched, message_key(message))
-                self.on_match(matched)
-                result = None
-                if self.analyzer:
-                    result = self.analyzer.analyze(matched)
-                    self.store.save_analysis(message_id, result)
-                if self.on_saved:
-                    self.on_saved(message_id, matched, result)
-                if result is not None and self.on_analysis:
-                    self.on_analysis(matched, result)
+                if sum(self._process(item) for item in items):
+                    digest = replace(message, form_name="Digest", fields={**message.fields, "digest_parent": "1"})
+                    message_id = self.store.save_message(digest, message_key(message))
+                    self.store.detach_from_report(message_id)  # an earlier version made it one report
+                    self.store.set_form_name(message_id, "Digest")
+                    self.on_match(digest)
+
+    def _process(self, message: Message) -> bool:
+        """Match, analyse, save and report one message; True if a watch form matched it."""
+        matching = [form for form in self.forms if form.matches(message)]
+        if not matching:
+            return False
+        matched = replace(message, form_name=matching[0].name)
+        result = self.analyzer.analyze(matched) if self.analyzer else None
+        if result is not None and result.newsworthy:
+            # Credit the form named after the report's category (the category forms), not
+            # simply the first form in the list that happened to match.
+            same_category = next((form for form in matching if form.name == result.category), None)
+            if same_category is not None:
+                matched = replace(matched, form_name=same_category.name)
+        # A message read again (a re-scan or a restart) keeps its original row.
+        message_id = self.store.save_message(matched, message_key(message))
+        self.on_match(matched)
+        if result is not None:
+            self.store.save_analysis(message_id, result)
+        if self.on_saved:
+            self.on_saved(message_id, matched, result)
+        if result is not None and self.on_analysis:
+            self.on_analysis(matched, result)
+        return True
