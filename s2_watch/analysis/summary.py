@@ -151,6 +151,9 @@ def _gist(body: str) -> str:
 def summarize(message: Message, result: AnalysisResult, locations=()) -> str:
     """A headline for the Newsworthiness table and alerts, instead of the full message."""
     body = re.sub(r"https?://\S+|www\.\S+", "", strip_envelope(message.raw_content)).strip(" ,;:-")
+    advisory = re.match(r"State Dept travel advisory: (.+?) - (Level \d: [^.]+)", body)
+    if advisory:
+        return f"Travel advisory — {advisory.group(1)} · {advisory.group(2)}"
     if not body:
         return result.category if result.newsworthy else "Routine traffic"
     if not result.newsworthy:

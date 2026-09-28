@@ -242,7 +242,7 @@ with a legend in the map's top-right corner for whichever are on:
   U.S. at once is not practical). Helicopters and light aircraft have their own
   symbols; air ambulances are recognised by callsign (LIFE…, MEDEVAC, AIRLIFE, CAREFLT,
   REACH …) and drawn in green, though medical flights flying under their tail number
-  show as ordinary helicopters. Zoomed out, ordinary traffic draws as dots. Aircraft
+  show as ordinary helicopters. Ordinary traffic is yellow; zoomed out it draws as dots. Aircraft
   are shown on the map only; they raise no alerts. Requests are spaced out and back
   off when the services rate-limit.
 
@@ -313,6 +313,25 @@ limited to high urgency; the map opens on the focus regions, drawn bold with the
 regions faded; aircraft traffic is shown in full inside them; and Metrics offers a
 Scope of "My focus regions" or "All of the U.S.". Reports with no known location count
 as secondary. The window title shows the focus, e.g. "S2 Watch 0.3.0 — focus R8".
+
+**OSINT** is a sixth source alongside the radio applications, with its own status
+light and an "All OSINT reports" watch form. It collects free, keyless open and
+official sources on a background thread: US news about protests, riots, unrest,
+shootings, bombings and terrorism from the GDELT news search (news-derived, not
+official; every 15 minutes), FAA security flight restrictions (mostly VIP movements
+and security events; every 30 minutes), State Department travel advisories whose
+level or risks changed in the last 30 days, and FEMA disaster and emergency
+declarations (hourly). Items flow through watch forms, the analyzer, deduplication,
+locations, labels and Metrics like radio reports. DHS NTAS, CISA and U.S. Embassy
+alert feeds are not included because their servers refuse automated clients.
+
+The **Official** column in Newsworthiness marks a radio report that an active NWS alert
+confirms: an alert of the same hazard family (flood, heat, fire and smoke, winter,
+wind, tornado, thunderstorm and hail, tropical …) covering the report's location,
+inside the alert's outline or in one of its counties, for example "✓ NWS Flood Watch ·
+radio 25 min earlier" when the radio report came first. NWS alerts are fetched every
+5 minutes for this even when the NWS map layer is off. Only specific locations
+(coordinates, grid squares, cities, counties) are checked.
 
 Reports in Newsworthiness can be labelled for triage. Select one or more rows
 (Ctrl- or Shift-click), then right-click → **Mark as**, or press a key:

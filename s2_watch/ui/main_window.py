@@ -48,7 +48,8 @@ from s2_watch.analysis.base import NewsAnalyzer
 from s2_watch.analysis.ollama import FallbackNewsAnalyzer, OllamaNewsAnalyzer
 from s2_watch.analysis.rules import RuleBasedNewsAnalyzer
 from s2_watch.analysis.categories import NEWS_CATEGORIES
-from s2_watch.models import ANY_APPLICATION, Message, WatchForm
+from s2_watch.models import ANY_APPLICATION, APPLICATIONS, Message, WatchForm
+from s2_watch.adapters.osint import OsintAdapter
 from s2_watch.analysis.category_patterns import CATEGORY_PATTERNS
 from s2_watch.forms_io import forms_from_json, forms_to_json
 from s2_watch.monitor_worker import MonitorConfig, MonitorWorker, ProcessedMessage
@@ -91,6 +92,7 @@ class MainWindow(QMainWindow):
         "Commstat": "All Commstat messages",
         "FLMSG": "All FLMSG messages",
         "JS8SuperSpotter": "All JS8SuperSpotter messages",
+        "OSINT": "All OSINT reports",
     }
 
     def __init__(self, database_path: str = "s2_watch.db") -> None:
@@ -175,7 +177,7 @@ class MainWindow(QMainWindow):
         self.application_status_lights: dict[str, QLabel] = {}
         status_group = QVBoxLayout()
         status_group.addWidget(QLabel("Application status"))
-        for application in ("JS8Call", "MagCommstat", "Commstat", "FLMSG", "JS8SuperSpotter"):
+        for application in APPLICATIONS:
             light = QLabel(f"● {application}: Disconnected")
             light.setStyleSheet("color: #c62828;")
             self.application_status_lights[application] = light
@@ -335,7 +337,7 @@ class MainWindow(QMainWindow):
             checkbox.stateChanged.connect(self.map_filters_changed)
             map_filter_layout.addWidget(checkbox)
         map_filter_layout.addWidget(QLabel("Show source applications"))
-        for application in ("JS8Call", "MagCommstat", "Commstat", "FLMSG", "JS8SuperSpotter"):
+        for application in APPLICATIONS:
             checkbox = QCheckBox(application)
             checkbox.setChecked(
                 self.store.get_setting(f"map.filter.application.{application}", "1") == "1"
@@ -488,6 +490,7 @@ class MainWindow(QMainWindow):
         self.commstat_adapter: CommstatSQLiteAdapter | None = None
         self.flmsg_adapter: FLMSGFileAdapter | None = None
         self.superspotter_adapter: JS8SuperSpotterSQLiteAdapter | None = None
+        self.osint_adapter: OsintAdapter | None = None
         # Reading, matching, analysis and locating run on a background thread.
         self._monitor_forms: list[WatchForm] = []
         self._analyzer: NewsAnalyzer | None = None
@@ -579,6 +582,7 @@ class MainWindow(QMainWindow):
         self.commstat_adapter = CommstatSQLiteAdapter(self.commstat_path.text().strip(), lookback)
         self.flmsg_adapter = FLMSGFileAdapter(self.flmsg_path.text().strip(), lookback)
         self.superspotter_adapter = JS8SuperSpotterSQLiteAdapter(self.superspotter_path.text().strip(), lookback)
+        self.osint_adapter = OsintAdapter(lookback)
 
     def rescan_sources(self) -> None:
         """Apply the current watch forms to the whole review window, not just new traffic.
@@ -716,6 +720,8 @@ class MainWindow(QMainWindow):
                 adapters.append(self.flmsg_adapter)
             if self.superspotter_adapter:
                 adapters.append(self.superspotter_adapter)
+            if self.osint_adapter:
+                adapters.append(self.osint_adapter)
             self._monitor_forms = self.store.list_watch_forms()
             self._analyzer = self.create_analyzer()
             self.worker_config.emit(MonitorConfig(
@@ -842,6 +848,7 @@ class MainWindow(QMainWindow):
             ("Commstat", self.commstat_adapter),
             ("FLMSG", self.flmsg_adapter),
             ("JS8SuperSpotter", self.superspotter_adapter),
+            ("OSINT", self.osint_adapter),
         ):
             if adapter:
                 status = self.application_status(application, adapter, monitored)
@@ -862,11 +869,12 @@ class MainWindow(QMainWindow):
             "Commstat": self.commstat_adapter,
             "FLMSG": self.flmsg_adapter,
             "JS8SuperSpotter": self.superspotter_adapter,
+            "OSINT": self.osint_adapter,
         }
         monitored = self.monitored_applications()
         for application, adapter in adapters.items():
             status = self.application_status(application, adapter, monitored)
-            connected = status == "Connected" or status.startswith("Connected to ")
+            connected = status.startswith("Connected")
             if application not in monitored:
                 color = "#757575"
             else:

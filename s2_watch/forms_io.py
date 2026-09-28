@@ -1,11 +1,11 @@
 import json
 from typing import Any
 
-from s2_watch.models import ANY_APPLICATION, WatchForm
+from s2_watch.models import ANY_APPLICATION, APPLICATIONS, WatchForm
 
 
 SUPPORTED_APPLICATIONS = frozenset(
-    ("JS8Call", "MagCommstat", "Commstat", "FLMSG", "JS8SuperSpotter", ANY_APPLICATION)
+    (*APPLICATIONS, ANY_APPLICATION)
 )
 
 

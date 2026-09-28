@@ -13,6 +13,8 @@ class Message:
 
 # A watch form for this application applies to messages from every monitored application.
 ANY_APPLICATION = "All applications"
+# Every monitored source: the radio messaging applications, then official/open sources.
+APPLICATIONS = ("JS8Call", "MagCommstat", "Commstat", "FLMSG", "JS8SuperSpotter", "OSINT")
 
 
 @dataclass(frozen=True)

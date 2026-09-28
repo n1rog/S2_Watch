@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
     QFormLayout,
 )
 
-from s2_watch.models import ANY_APPLICATION, WatchForm
+from s2_watch.models import ANY_APPLICATION, APPLICATIONS, WatchForm
 
 
 class WatchFormDialog(QDialog):
@@ -17,7 +17,7 @@ class WatchFormDialog(QDialog):
         parent=None,
         form: WatchForm | None = None,
         applications: tuple[str, ...] = (
-            ANY_APPLICATION, "JS8Call", "MagCommstat", "Commstat", "FLMSG", "JS8SuperSpotter"
+            ANY_APPLICATION, *APPLICATIONS
         ),
     ) -> None:
         super().__init__(parent)

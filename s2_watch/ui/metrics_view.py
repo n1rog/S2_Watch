@@ -22,11 +22,12 @@ from PySide6.QtWidgets import (
 )
 
 from s2_watch.analysis.categories import NEWS_CATEGORIES
+from s2_watch.models import APPLICATIONS
 from s2_watch.storage import SQLiteStore, utc_iso
 
 PERIODS = (("Last 24 hours", timedelta(hours=24)), ("Last 7 days", timedelta(days=7)),
            ("Last 30 days", timedelta(days=30)))
-SOURCES = ("JS8Call", "MagCommstat", "Commstat", "FLMSG", "JS8SuperSpotter")
+SOURCES = APPLICATIONS
 # Validated series colours (light surface #ffffff, dark surface #303134).
 SERIES = {"light": ("#2a78d6", "#eb6834"), "dark": ("#3987e5", "#d95926")}
 

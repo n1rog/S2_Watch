@@ -92,6 +92,12 @@ class RuleBasedNewsAnalyzer(NewsAnalyzer):
         Rule("Politics", ("election", "legislation", "government", "political"), "medium"),
         Rule("Supply Chain", ("shortage", "supply chain", "shipment delay", "port closure"), "medium"),
         Rule("Terrorism", ("terrorist", "terrorism", "bomb threat", "extremist attack"), "high"),
+        # OSINT items: FAA security flight restrictions are mostly VIP movements; FEMA
+        # declarations are natural hazards unless their incident type says otherwise.
+        Rule("Politics", (), "medium", (r"\bsecurity flight restriction\b",)),
+        Rule("Climate / Environment", (), "medium", (r"\bFEMA (?:Major Disaster|Emergency|Fire Management) declaration\b",)),
+        Rule("Health / Wellness", (), "high", (r"\bincident type (?:Biological|Toxic Substances|Chemical)\b",)),
+        Rule("Terrorism", (), "high", (r"\bincident type Terrorist\b",)),
         # The category watch forms' vocabulary: whatever a category form captures is at
         # least medium-urgency news in that category.
         *(Rule(category, (), "medium", (pattern,)) for category, pattern in CATEGORY_PATTERNS.items()
