@@ -5,7 +5,7 @@ from pathlib import Path
 from s2_watch.analysis.base import AnalysisResult
 from s2_watch.dedup import report_text, same_report
 from s2_watch.models import Message
-from s2_watch.monitoring import message_key
+from s2_watch.monitoring import legacy_message_key, message_key
 from s2_watch.storage import SQLiteStore
 
 T0 = datetime(2026, 9, 15, 23, 48, tzinfo=timezone.utc)
@@ -63,3 +63,28 @@ def test_repeated_messages_from_earlier_versions_are_removed_once(tmp_path: Path
     connection.close()
     store = SQLiteStore(path)
     assert sorted(row[3] for row in store.search_history()) == ["HAIL", "WIND"]
+
+
+def test_revised_osint_event_stays_one_message_and_report(tmp_path: Path) -> None:
+    # USGS refines a quake's location minutes later; same event id, new text.
+    store = SQLiteStore(tmp_path / "s2.db")
+    first = Message("OSINT", "USGS: M4.2 earthquake — 7 km ESE of Denali National Park, Alaska (63.507, -151.604)",
+                    received_at=T0, fields={"type": "EARTHQUAKE", "message_id": "ak0261"})
+    revised = Message("OSINT", "USGS: M4.2 earthquake — 7 km SE of Denali National Park, Alaska (63.492, -151.620)",
+                      received_at=T0, fields={"type": "EARTHQUAKE", "message_id": "ak0261"})
+    first_id = store.save_message(first, message_key(first))
+    report = store.assign_report(first_id, first, NEWS)
+    revised_id = store.save_message(revised, message_key(revised))
+    assert revised_id == first_id
+    assert store.assign_report(revised_id, revised, NEWS).report_id == report.report_id
+
+
+def test_message_saved_under_the_old_key_is_found_and_rekeyed(tmp_path: Path) -> None:
+    store = SQLiteStore(tmp_path / "s2.db")
+    quake = Message("OSINT", "USGS: M4.1 earthquake — 21 km W of Preston, Nevada (38.932, -115.308)",
+                    received_at=T0, fields={"type": "EARTHQUAKE", "message_id": "nn0001"})
+    old_id = store.save_message(quake, legacy_message_key(quake))   # saved by 0.10.0
+    assert store.save_message(quake, message_key(quake), legacy_message_key(quake)) == old_id
+    assert store.save_message(quake, message_key(quake)) == old_id   # now under the new key
+    count = sqlite3.connect(tmp_path / "s2.db").execute("SELECT COUNT(*) FROM messages").fetchone()[0]
+    assert count == 1

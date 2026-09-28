@@ -10,7 +10,19 @@ from s2_watch.storage import SQLiteStore
 
 
 def message_key(message: Message) -> str:
-    """Identity of a source message across re-reads and restarts (FLMSG files have no timestamp)."""
+    """Identity of a source message across re-reads and restarts (FLMSG files have no timestamp).
+
+    OSINT items carry the publisher's own event id; the publisher revises their text (USGS
+    relocating a quake, an edited TFR), so the id alone identifies them.
+    """
+    if message.source_application == "OSINT" and message.fields.get("message_id"):
+        parts = (message.source_application, message.fields.get("type", ""), message.fields["message_id"])
+        return hashlib.sha1("\x1f".join(parts).encode("utf-8")).hexdigest()
+    return legacy_message_key(message)
+
+
+def legacy_message_key(message: Message) -> str:
+    """The key used before 0.11.0 (it includes the text), to find messages saved then."""
     identity = (
         message.fields.get("message_id") or message.fields.get("filename")
         or message.received_at.isoformat()
@@ -66,7 +78,7 @@ class Monitor:
                     continue
                 if sum(self._process(item) for item in items):
                     digest = replace(message, form_name="Digest", fields={**message.fields, "digest_parent": "1"})
-                    message_id = self.store.save_message(digest, message_key(message))
+                    message_id = self.store.save_message(digest, message_key(message), legacy_message_key(message))
                     self.store.detach_from_report(message_id)  # an earlier version made it one report
                     self.store.set_form_name(message_id, "Digest")
                     self.on_match(digest)
@@ -85,7 +97,7 @@ class Monitor:
             if same_category is not None:
                 matched = replace(matched, form_name=same_category.name)
         # A message read again (a re-scan or a restart) keeps its original row.
-        message_id = self.store.save_message(matched, message_key(message))
+        message_id = self.store.save_message(matched, message_key(message), legacy_message_key(message))
         self.on_match(matched)
         if result is not None:
             self.store.save_analysis(message_id, result)

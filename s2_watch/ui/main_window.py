@@ -89,6 +89,9 @@ class MainWindow(QMainWindow):
     )
     STATUS_LABELS = {status: label for status, label, _key in STATUS_ACTIONS if status}
     REPORT_ROLE = Qt.ItemDataRole.UserRole + 2
+    STATUS_ROLE = Qt.ItemDataRole.UserRole + 6
+    # Reports labelled these stay listed however many rows Newsworthiness is set to show.
+    PINNED_STATUSES = ("interest", "followup")
 
     def __init__(self, database_path: str = "s2_watch.db") -> None:
         super().__init__()
@@ -376,6 +379,7 @@ class MainWindow(QMainWindow):
 
         display_layout = QFormLayout()
         display_layout.addRow("Display time zone:", self.time_zone)
+        self.news_rows.setToolTip("Reports marked Of interest or Follow-up are always shown")
         display_layout.addRow("Newsworthiness rows shown:", self.news_rows)
         display_layout.addRow(self.alerts_enabled)
         display_layout.addRow(self.alert_high_urgency)
@@ -647,7 +651,9 @@ class MainWindow(QMainWindow):
     def apply_news_rows_limit(self) -> None:
         visible_rows = self.news_rows.value()
         for row in range(self.analysis.rowCount()):
-            self.analysis.setRowHidden(row, row >= visible_rows)
+            status_item = self.analysis.item(row, self.STATUS_COLUMN)
+            pinned = status_item is not None and status_item.data(self.STATUS_ROLE) in self.PINNED_STATUSES
+            self.analysis.setRowHidden(row, row >= visible_rows and not pinned)
 
     def theme_changed(self) -> None:
         theme = str(self.theme.checkedAction().data())
@@ -1255,6 +1261,9 @@ class MainWindow(QMainWindow):
     def style_report_row(self, row: int, status: str) -> None:
         """Ignored reports stay visible but greyed out; labelled ones show their status in bold."""
         muted = self.analysis.palette().color(QPalette.ColorRole.PlaceholderText)
+        status_item = self.analysis.item(row, self.STATUS_COLUMN)
+        if status_item is not None:
+            status_item.setData(self.STATUS_ROLE, status)
         for column in range(self.analysis.columnCount()):
             item = self.analysis.item(row, column)
             if item is None:
@@ -1339,6 +1348,7 @@ class MainWindow(QMainWindow):
             message = item.data(Qt.ItemDataRole.UserRole + 1)
             if isinstance(message, Message):
                 self.map_view.set_message_dimmed(message, status == "ignored")
+        self.apply_news_rows_limit()
 
     @staticmethod
     def message_text(message: Message) -> str:

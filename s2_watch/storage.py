@@ -137,14 +137,26 @@ class SQLiteStore:
         )
         self.set_setting("migrations.repeated_messages_removed", "1")
 
-    def save_message(self, message: Message, source_key: str | None = None) -> int:
-        """Save a matched message once; a message read again returns its existing id."""
+    def save_message(self, message: Message, source_key: str | None = None, legacy_key: str | None = None) -> int:
+        """Save a matched message once; a message read again returns its existing id.
+
+        ``legacy_key`` is the key an earlier version saved the message under; a match is
+        re-keyed so the message is not saved (and counted) a second time.
+        """
         if source_key is not None:
             row = self.connection.execute(
                 "SELECT id FROM messages WHERE source_key = ?", (source_key,)
             ).fetchone()
             if row:
                 return int(row[0])
+            if legacy_key and legacy_key != source_key:
+                row = self.connection.execute(
+                    "SELECT id FROM messages WHERE source_key = ?", (legacy_key,)
+                ).fetchone()
+                if row:
+                    self.connection.execute("UPDATE messages SET source_key = ? WHERE id = ?", (source_key, row[0]))
+                    self.connection.commit()
+                    return int(row[0])
             # Saved by an earlier version, before messages had a source key.
             row = self.connection.execute(
                 """SELECT id FROM messages WHERE source_key IS NULL AND source_application = ?

@@ -808,6 +808,10 @@ const EMERGENCY_MARK = '#111111';
 // Yellow needs a dark outline to read on the light map; blue and red use white.
 const aircraftOutline = kind => kind === 'civil' ? '#3d3200' : '#ffffff';
 const aircraftKind = a => a.military ? 'military' : (a.medical ? 'medical' : 'civil');
+let aircraftList = [];
+let aircraftSource = '';
+let aircraftUpdated = null;
+let aircraftError = '';
 const AircraftCanvas = L.Layer.extend({{
   onAdd(map) {{
     this._canvas = L.DomUtil.create('canvas', 'aircraft-canvas', map.getPane('aircraft'));
