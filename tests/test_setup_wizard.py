@@ -29,7 +29,7 @@ def test_wizard_walks_every_step_and_saves(tmp_path: Path, monkeypatch) -> None:
         "n", "n",                         # JS8SuperSpotter: search? no; used? no
         "6",                              # review window: 1 week
         "co ok",                          # focus regions by state -> 8 and 6
-        "", "y", "n",                     # all categories, OSINT yes, every message no
+        "", "y",                          # all categories, OSINT yes
         "1",                              # rules
         "y", "n",                         # alerts on, not only high urgency
         "", "", "y", "", "", "",          # map: tiles, NWS, aircraft yes, radar/coverage/greyline defaults
@@ -55,7 +55,7 @@ def test_wizard_walks_every_step_and_saves(tmp_path: Path, monkeypatch) -> None:
 def test_nothing_is_saved_when_the_summary_is_declined(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr("s2_watch.setup_wizard.feeder_candidates", lambda: {
         "magcommstat.database": [], "commstat.database": [], "flmsg.directory": [], "js8superspotter.database": []})
-    answers = ["n"] + ["n", "n"] * 2 + ["n"] + ["n", "n"] + ["1", "-", "", "n", "n", "1", "n"] + ["n"] * 7 + ["1", "1", "n"]
+    answers = ["n"] + ["n", "n"] * 2 + ["n"] + ["n", "n"] + ["1", "-", "", "n", "1", "n"] + ["n"] * 7 + ["1", "1", "n"]
     ask, _queue = scripted(answers)
     assert run_wizard(str(tmp_path / "s2.db"), ask, lambda *_: None) == 1
     assert SQLiteStore(tmp_path / "s2.db").get_setting("review.hours", "unset") == "unset"

@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QLabel, QLineEdit, QListWidget,
     QListWidgetItem, QMainWindow, QMessageBox, QPushButton, QSpinBox,
     QTableWidget, QTableWidgetItem,
-    QFileDialog, QSystemTrayIcon, QTabWidget, QVBoxLayout,
+    QFileDialog, QSystemTrayIcon, QTabWidget, QVBoxLayout, QHBoxLayout,
     QWidget, QMenu, QToolButton, QWidgetAction, QAbstractItemView, QInputDialog,
 )
 
@@ -453,8 +453,21 @@ class MainWindow(QMainWindow):
         self.map_filter_button.setToolTip("Show or hide map filters")
         self.map_filter_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self.map_filter_button.setMenu(self.map_filter_menu)
+        # The watch period is also on the Map page; this combo mirrors the Sources one.
+        self.map_watch_period = QComboBox()
+        for index in range(self.review_duration.count()):
+            self.map_watch_period.addItem(self.review_duration.itemText(index), self.review_duration.itemData(index))
+        self.map_watch_period.setCurrentIndex(self.review_duration.currentIndex())
+        self.map_watch_period.setToolTip("How far back to review feeder data for reports")
+        self.map_watch_period.currentIndexChanged.connect(self.review_duration.setCurrentIndex)
+        map_toolbar = QHBoxLayout()
+        map_toolbar.addWidget(self.map_filter_button)
+        map_toolbar.addSpacing(16)
+        map_toolbar.addWidget(QLabel("Watch period:"))
+        map_toolbar.addWidget(self.map_watch_period)
+        map_toolbar.addStretch(1)
         map_layout = QVBoxLayout()
-        map_layout.addWidget(self.map_filter_button)
+        map_layout.addLayout(map_toolbar)
         self.map_view.setMinimumHeight(500)
         map_layout.addWidget(self.map_view, 3)
         self.news_label = QLabel()
@@ -611,6 +624,10 @@ class MainWindow(QMainWindow):
 
     def review_duration_changed(self) -> None:
         self.store.set_setting("review.hours", str(self.review_duration.currentData()))
+        if hasattr(self, "map_watch_period"):
+            self.map_watch_period.blockSignals(True)
+            self.map_watch_period.setCurrentIndex(self.review_duration.currentIndex())
+            self.map_watch_period.blockSignals(False)
         self.update_news_label()
         self.messages.setRowCount(0)
         self.analysis.setRowCount(0)
@@ -1087,8 +1104,7 @@ class MainWindow(QMainWindow):
         self.news_label.setText(
             f"<b>Newsworthiness</b> — reports from the last {self.review_duration.currentText()}"
             + (f", <b>focus {focus} first</b>, then the rest of the U.S." if focus else "")
-            + " <span style='color:gray'>(review window: Configuration → Sources…; "
-            "focus: Configuration → Focus Regions)</span>"
+            + " <span style='color:gray'>(focus: Configuration → Focus Regions)</span>"
         )
 
     def map_radar_changed(self) -> None:

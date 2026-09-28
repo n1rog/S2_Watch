@@ -237,11 +237,9 @@ class Wizard:
             "Include OSINT (free official/open sources: FAA security restrictions, FEMA, USGS, SPC storm reports,\n"
             "  NIFC wildfires, State Dept advisories, news on unrest) as reports? Needs internet.",
             self.forms.get(("OSINT", DEFAULT_WATCH_FORMS["OSINT"]), True))
-        show_all = self.yes("Also show EVERY message from your radio applications in Live Monitor (not only news)?",
-                            any(self.forms.get((app, name), False) for app, name in DEFAULT_WATCH_FORMS.items() if app != "OSINT"))
-        for application, name in DEFAULT_WATCH_FORMS.items():
-            if application != "OSINT":
-                self.forms[(application, name)] = show_all
+        # The per-application "every message" forms stay disabled; enable them in the app if wanted.
+        self.say("Per-application forms (every message from one application) are left disabled;\n"
+                 "  enable them later from Configuration → Watch Forms if you want them.")
 
     def step_analysis(self) -> None:
         self.heading("5. Analysis")
