@@ -65,7 +65,10 @@ environmental hazards (wildfire, smoke and air quality, earthquakes, evacuations
 chemical spills). The offline analyzer uses the same vocabulary, so a message a
 category form captures is classified in that category. The forms are added once;
 a category form you delete is not recreated.
-All watch forms start disabled when S2 Watch launches. An application is only
+S2 Watch remembers its settings between launches: which watch forms are enabled,
+map filters and overlays, focus regions, theme, analysis and alert options, the window
+size and position, the tab you were on, Newsworthiness column widths, and the Metrics
+period and scope. An application is only
 read while at least one of its watch forms is enabled; until then its status light
 is gray and reads "Not monitored — no watch form enabled". Whenever the enabled
 watch forms change, S2 Watch re-reads the whole review window in the background

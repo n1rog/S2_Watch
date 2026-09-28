@@ -3,7 +3,7 @@ from html import escape
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 
-from PySide6.QtCore import QMetaObject, QThread, QTimer, Qt, Signal
+from PySide6.QtCore import QByteArray, QMetaObject, QThread, QTimer, Qt, Signal
 from PySide6.QtGui import QAction, QActionGroup, QBrush, QColor, QFont, QKeySequence, QPalette
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QLabel, QLineEdit, QListWidget,
@@ -332,8 +332,11 @@ class MainWindow(QMainWindow):
         self.map_station_filter = QCheckBox("Station locations")
         self.map_news_filter = QCheckBox("News locations")
         self.map_region_location_filter = QCheckBox("General locations (state / MARS region)")
-        for checkbox in (self.map_station_filter, self.map_news_filter, self.map_region_location_filter):
-            checkbox.setChecked(True)
+        self.map_kind_filters = {
+            "station": self.map_station_filter, "news": self.map_news_filter, "region": self.map_region_location_filter,
+        }
+        for kind, checkbox in self.map_kind_filters.items():
+            checkbox.setChecked(self.store.get_setting(f"map.filter.kind.{kind}", "1") == "1")
             checkbox.stateChanged.connect(self.map_filters_changed)
             map_filter_layout.addWidget(checkbox)
         map_filter_layout.addWidget(QLabel("Show source applications"))
@@ -468,7 +471,10 @@ class MainWindow(QMainWindow):
             tabs.addTab(tab, title)
         self.metrics_view = MetricsView(self.store)
         tabs.addTab(self.metrics_view, "Metrics")
-        tabs.setCurrentIndex(0)
+        self.tabs = tabs
+        saved_tab = self.store.get_setting("ui.tab", "0")
+        tabs.setCurrentIndex(int(saved_tab) if saved_tab.isdigit() and int(saved_tab) < tabs.count() else 0)
+        tabs.currentChanged.connect(lambda index: self.store.set_setting("ui.tab", str(index)))
         container = QWidget()
         container_layout = QVBoxLayout(container)
         container_layout.addWidget(tabs)
@@ -502,7 +508,6 @@ class MainWindow(QMainWindow):
         self._worker.batch_ready.connect(self.handle_batch)
         self._worker.coverage_ready.connect(self.map_view.set_coverage)
         self._worker_thread.start()
-        self.store.disable_all_watch_forms()
         self.refresh_forms()
         self.search_history()
         self.configure_geocoder()
@@ -513,6 +518,7 @@ class MainWindow(QMainWindow):
             self.map_overlay_changed(overlay)
         self.apply_focus(fit_map=True)
         self.nws_poller.set_enabled(True)
+        self.restore_window_state()
         self.map_regions_changed()
         self.map_online_tiles_changed()
         self.connect_js8call()
@@ -1043,6 +1049,8 @@ class MainWindow(QMainWindow):
         self.configure_geocoder()
 
     def map_filters_changed(self) -> None:
+        for kind, checkbox in self.map_kind_filters.items():
+            self.store.set_setting(f"map.filter.kind.{kind}", "1" if checkbox.isChecked() else "0")
         applications = {
             application for application, checkbox in self.map_application_filters.items()
             if checkbox.isChecked()
@@ -1400,7 +1408,25 @@ class MainWindow(QMainWindow):
                 f"{category or 'unanalyzed'} | {confidence_text} | {content}"
             )
 
+    def restore_window_state(self) -> None:
+        geometry = self.store.get_setting("ui.geometry")
+        if geometry:
+            self.restoreGeometry(QByteArray.fromBase64(geometry.encode()))
+        # Column layouts are keyed by the column list, so a release that adds columns starts fresh.
+        header = self.store.get_setting(self.analysis_header_key())
+        if header:
+            self.analysis.horizontalHeader().restoreState(QByteArray.fromBase64(header.encode()))
+
+    def analysis_header_key(self) -> str:
+        return "ui.newsworthiness_columns." + "-".join(column[:3] for column in self.ANALYSIS_COLUMNS)
+
+    def save_window_state(self) -> None:
+        self.store.set_setting("ui.geometry", bytes(self.saveGeometry().toBase64()).decode())
+        self.store.set_setting(self.analysis_header_key(),
+                               bytes(self.analysis.horizontalHeader().saveState().toBase64()).decode())
+
     def closeEvent(self, event) -> None:
+        self.save_window_state()
         self.timer.stop()
         self.nws_poller.set_enabled(False)
         self.aircraft_poller.set_enabled(False)
