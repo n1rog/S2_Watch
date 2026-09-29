@@ -1,3 +1,4 @@
+import json
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -110,6 +111,11 @@ class SQLiteStore:
             self.connection.execute("ALTER TABLE messages ADD COLUMN source_key TEXT")
         if "report_id" not in message_columns:
             self.connection.execute("ALTER TABLE messages ADD COLUMN report_id INTEGER")
+        if "fields_json" not in message_columns:
+            # The source's structured fields (grid, sender, coordinates...), so a report
+            # can be shown and mapped again at launch without re-reading its source.
+            self.connection.execute("ALTER TABLE messages ADD COLUMN fields_json TEXT NOT NULL DEFAULT ''")
+        self.connection.execute("CREATE INDEX IF NOT EXISTS messages_report_id ON messages(report_id)")
         self._remove_repeated_messages()
         self.connection.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS messages_source_key ON messages(source_key)"
@@ -148,6 +154,7 @@ class SQLiteStore:
                 "SELECT id FROM messages WHERE source_key = ?", (source_key,)
             ).fetchone()
             if row:
+                self._backfill_fields(int(row[0]), message)
                 return int(row[0])
             if legacy_key and legacy_key != source_key:
                 row = self.connection.execute(
@@ -156,6 +163,7 @@ class SQLiteStore:
                 if row:
                     self.connection.execute("UPDATE messages SET source_key = ? WHERE id = ?", (source_key, row[0]))
                     self.connection.commit()
+                    self._backfill_fields(int(row[0]), message)
                     return int(row[0])
             # Saved by an earlier version, before messages had a source key.
             row = self.connection.execute(
@@ -171,10 +179,10 @@ class SQLiteStore:
                 self.connection.commit()
                 return int(row[0])
         cursor = self.connection.execute(
-            """INSERT INTO messages(source_application, form_name, raw_content, received_at, source_key)
-               VALUES (?, ?, ?, ?, ?)""",
+            """INSERT INTO messages(source_application, form_name, raw_content, received_at, source_key, fields_json)
+               VALUES (?, ?, ?, ?, ?, ?)""",
             (message.source_application, message.form_name, message.raw_content,
-             message.received_at.isoformat(), source_key),
+             message.received_at.isoformat(), source_key, json.dumps(message.fields) if message.fields else ""),
         )
         self.connection.commit()
         return cursor.lastrowid
@@ -288,6 +296,52 @@ class SQLiteStore:
         self.connection.execute("UPDATE messages SET form_name = ? WHERE id = ?", (form_name, message_id))
         self.connection.commit()
 
+    def _backfill_fields(self, message_id: int, message: Message) -> None:
+        """Messages saved before 0.12.0 have no fields; add them when the source is read again."""
+        if message.fields:
+            cursor = self.connection.execute(
+                "UPDATE messages SET fields_json = ? WHERE id = ? AND fields_json = ''",
+                (json.dumps(message.fields), message_id),
+            )
+            if cursor.rowcount:
+                self.connection.commit()
+
+    def report_info(self, report_id: int) -> ReportInfo:
+        return self._report_info(report_id, new_report=False)
+
+    def recent_reports(self, since: datetime, limit: int = 1000) -> list[tuple[int, Message, AnalysisResult | None]]:
+        """Each report seen since ``since``, newest first, as its first saved copy and analysis.
+
+        This is what the Newsworthiness table and map show at launch, before (and whether
+        or not) the sources are read again.
+        """
+        rows = self.connection.execute(
+            """SELECT r.id, m.source_application, m.form_name, m.raw_content, m.received_at, m.fields_json,
+                      a.newsworthy, a.category, a.urgency, a.summary, a.confidence, a.matched_terms
+               FROM reports r
+               JOIN messages m ON m.id = (SELECT MIN(id) FROM messages WHERE report_id = r.id)
+               LEFT JOIN analysis_results a ON a.message_id = m.id
+               WHERE r.last_seen >= ?
+               ORDER BY r.last_seen DESC LIMIT ?""",
+            (utc_iso(since), limit),
+        ).fetchall()
+        reports = []
+        for (report_id, application, form_name, raw_content, received_at, fields_json,
+             newsworthy, category, urgency, summary, confidence, matched_terms) in rows:
+            try:
+                fields = json.loads(fields_json) if fields_json else {}
+            except ValueError:
+                fields = {}
+            when = datetime.fromisoformat(received_at)
+            message = Message(application, raw_content, received_at=when if when.tzinfo else when.replace(tzinfo=timezone.utc),
+                              form_name=form_name, fields={str(k): str(v) for k, v in fields.items()})
+            result = None
+            if newsworthy is not None:
+                result = AnalysisResult(bool(newsworthy), category, urgency, summary, float(confidence),
+                                        tuple(term for term in (matched_terms or "").split("\x1f") if term))
+            reports.append((int(report_id), message, result))
+        return reports
+
     def earliest_received_at(self, message_id: int, received_at: datetime) -> datetime:
         """The earliest time known for a message, keeping the stored one in step.
 
@@ -331,6 +385,13 @@ class SQLiteStore:
     def set_corroboration(self, report_id: int, text: str) -> None:
         self.connection.execute("UPDATE reports SET corroboration = ? WHERE id = ?", (text, report_id))
         self.connection.commit()
+
+    def report_times(self, report_id: int) -> tuple[datetime | None, datetime | None]:
+        """When a report was first and last heard (UTC)."""
+        row = self.connection.execute("SELECT first_seen, last_seen FROM reports WHERE id = ?", (report_id,)).fetchone()
+        if not row:
+            return None, None
+        return tuple(datetime.fromisoformat(value) if value else None for value in row)
 
     def report_status(self, report_id: int) -> tuple[str, str]:
         row = self.connection.execute(

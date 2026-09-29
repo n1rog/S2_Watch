@@ -3,8 +3,8 @@ from html import escape
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 
-from PySide6.QtCore import QByteArray, QMetaObject, QThread, QTimer, Qt, Signal
-from PySide6.QtGui import QAction, QActionGroup, QBrush, QColor, QFont, QKeySequence, QPalette
+from PySide6.QtCore import QByteArray, QMetaObject, QThread, QTimer, QUrl, Qt, Signal
+from PySide6.QtGui import QAction, QActionGroup, QBrush, QColor, QDesktopServices, QFont, QKeySequence, QPalette
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QLabel, QLineEdit, QListWidget,
     QListWidgetItem, QMainWindow, QMessageBox, QPushButton, QSpinBox,
@@ -14,6 +14,9 @@ from PySide6.QtWidgets import (
 )
 
 from s2_watch import REPOSITORY_URL, __version__ as APP_VERSION
+from s2_watch.backups import back_up_in_background, backup_folder
+from s2_watch.followup import FollowUpFacts
+from s2_watch.ui.followup_dialog import FollowUpDialog
 
 
 class SortableTableItem(QTableWidgetItem):
@@ -67,6 +70,7 @@ from s2_watch.ui.watch_form_dialog import WatchFormDialog
 
 class MainWindow(QMainWindow):
     worker_config = Signal(object)  # MonitorConfig, delivered to the polling thread
+    backup_finished = Signal(object, object)  # backup path or None, error or None (from a thread)
     # On-screen tables keep only the newest rows; everything stays searchable in History.
     LIVE_ROWS_LIMIT = 2000
     ANALYSIS_ROWS_LIMIT = 1000
@@ -97,6 +101,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle(f"S2 Watch {APP_VERSION}")
         self.resize(800, 500)
+        self.database_path = database_path
         self.store = SQLiteStore(database_path)
         # MARS regions the operator focuses on; empty = the whole U.S. is treated the same.
         self.focus_regions: set[int] = {
@@ -431,6 +436,15 @@ class MainWindow(QMainWindow):
             configuration_menu.addAction(title).triggered.connect(
                 lambda _checked=False, dialog=dialog: self.open_settings_dialog(dialog)
             )
+        configuration_menu.addSeparator()
+        configuration_menu.addAction("Back Up Now").triggered.connect(lambda: self.back_up_database(force=True))
+        configuration_menu.addAction("Open Backups Folder").triggered.connect(self.open_backups_folder)
+        # A copy of the database each day (kept 14 days); checked hourly for long runs.
+        self.backup_finished.connect(self.database_backed_up)
+        self._backup_timer = QTimer(self)
+        self._backup_timer.timeout.connect(self.back_up_database)
+        self._backup_timer.start(60 * 60 * 1000)
+        QTimer.singleShot(60_000, self.back_up_database)
         help_menu = self.menuBar().addMenu("Help")
         about_action = help_menu.addAction("About S2 Watch")
         about_action.triggered.connect(self.show_about)
@@ -573,6 +587,20 @@ class MainWindow(QMainWindow):
         dialog.show()
         dialog.raise_()
         dialog.activateWindow()
+
+    def back_up_database(self, force: bool = False) -> None:
+        back_up_in_background(self.database_path, self.backup_finished.emit, force=force)
+
+    def database_backed_up(self, path, error) -> None:
+        if error is not None:
+            self.statusBar().showMessage(f"Database backup failed: {error}", 15000)
+        elif path is not None:
+            self.statusBar().showMessage(f"Database backed up to {path}", 8000)
+
+    def open_backups_folder(self) -> None:
+        folder = backup_folder(self.database_path)
+        folder.mkdir(parents=True, exist_ok=True)
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
 
     def show_about(self) -> None:
         QMessageBox.about(
@@ -737,6 +765,8 @@ class MainWindow(QMainWindow):
             self._analyzer = self.create_analyzer()
             self.worker_config.emit(MonitorConfig(
                 adapters, self._monitor_forms, self._analyzer, self.geocoding_enabled.isChecked(),
+                preload_since=datetime.now(timezone.utc) - timedelta(hours=int(self.review_duration.currentData())),
+                preload_limit=self.ANALYSIS_ROWS_LIMIT,
             ))
 
     def create_analyzer(self) -> NewsAnalyzer | None:
@@ -917,7 +947,8 @@ class MainWindow(QMainWindow):
         self.messages.setSortingEnabled(False)
         self.analysis.setSortingEnabled(False)
         for processed in batch:
-            self.insert_live_row(processed.message)
+            if not processed.preloaded:   # Live Monitor shows traffic as it is read
+                self.insert_live_row(processed.message)
             report = processed.report
             shown = self.shown_report_item(report.report_id) if report else None
             if shown is not None:
@@ -1295,7 +1326,35 @@ class MainWindow(QMainWindow):
         for action in self.report_actions:
             mark.addAction(action)
         menu.addAction(self.edit_note_action)
+        draft = menu.addAction("Draft follow-up report…")
+        draft.setEnabled(len(rows) == 1)
+        draft.triggered.connect(lambda: self.draft_followup(rows[0][0], rows[0][1]))
         menu.exec(self.analysis.viewport().mapToGlobal(position))
+
+    def draft_followup(self, row: int, report_id: int) -> None:
+        item = self.analysis.item(row, 0)
+        message = item.data(Qt.ItemDataRole.UserRole + 1) if item else None
+        if not isinstance(message, Message):
+            return
+        text = lambda column: (self.analysis.item(row, self.ANALYSIS_COLUMNS.index(column)).text()
+                               if self.analysis.item(row, self.ANALYSIS_COLUMNS.index(column)) else "")
+        confidence = text("Confidence").rstrip("%")
+        result = AnalysisResult(text("Result") == "NEWSWORTHY", text("Category"), text("Urgency"), text("Summary"),
+                                float(confidence) / 100 if confidence.isdigit() else 0.0)
+        info = self.store.report_info(report_id)
+        first_seen, last_seen = self.store.report_times(report_id)
+        facts = FollowUpFacts(
+            message, result, list(item.data(self.LOCATIONS_ROLE) or []),
+            callsign=self.store.get_setting("operator.callsign", ""),
+            region=info.region, state=info.state, copies=info.copies, sources=info.sources,
+            first_seen=first_seen, last_seen=last_seen,
+            official=self.analysis.item(row, self.OFFICIAL_COLUMN).text() if self.analysis.item(row, self.OFFICIAL_COLUMN) else "",
+            note=info.note,
+        )
+        dialog = FollowUpDialog(facts, self.store, self)
+        dialog.exec()
+        if dialog.marked:
+            self.apply_report_status([report_id], "followup", info.note if info.status == "followup" else None)
 
     def mark_selected_reports(self, status: str) -> None:
         rows = self.selected_report_rows()

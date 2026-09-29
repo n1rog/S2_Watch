@@ -895,7 +895,8 @@ function aircraftTooltip(a) {{
     (a.shape === 'helicopter' ? ' · helicopter' : (a.shape === 'light' ? ' · light aircraft' : '')) +
     (a.emergency ? '<br><b style="color:#b3261e">Squawk ' + escapeHtml(a.squawk) + ': ' + escapeHtml(a.emergency) + '</b>' : '') +
     '<br>' + escapeHtml(altitude) + (a.speed != null ? ' · ' + a.speed + ' kt' : '') + (a.track != null ? ' · heading ' + a.track + '°' : '') +
-    (a.registration ? '<br>Reg. ' + escapeHtml(a.registration) : '') + '<br><span style="color:#555">ICAO ' + escapeHtml(a.hex.toUpperCase()) +
+    (a.registration ? '<br>Reg. ' + escapeHtml(a.registration) : '') +
+    (a.operator ? '<br>' + escapeHtml(a.operator) : '') + '<br><span style="color:#555">ICAO ' + escapeHtml(a.hex.toUpperCase()) +
     (a.squawk && !a.emergency ? ' · squawk ' + escapeHtml(a.squawk) : '') + '</span>';
 }}
 map.on('mousemove', event => {{
@@ -980,11 +981,9 @@ function updateOverlayLegend() {{
     parts.push('<div><i style="background:transparent;border:3px solid ' + EMERGENCY_MARK + ';border-radius:50%;box-sizing:border-box"></i>' +
                'Emergency squawk (black ring) <span>' + emergencies + '</span></div>');
     const focus = [...focusRegions].sort((a, b) => a - b).map(region => 'R' + region).join(', ');
-    parts.push('<div class="note">All traffic (incl. general aviation and helicopters): ' +
-               (focus ? 'focus regions ' + focus + (map.getZoom() >= 7 ? ' and this view' : '') :
-                        (map.getZoom() >= 7 ? 'this view' : 'zoom in to see it')) +
-               '; elsewhere military and emergencies only.' +
-               (map.getZoom() < 7 ? ' Other traffic shows as dots until you zoom in.' : ' Small plane = light aircraft.') + '</div>');
+    parts.push('<div class="note">All U.S. traffic, including general aviation and helicopters' +
+               ' (refreshed every 3 min' + (focus ? '; focus regions ' + focus + ' every minute' : '') + ').' +
+               (map.getZoom() < 7 ? ' Zoomed out, civilian aircraft are drawn as dots.' : ' Small plane = light aircraft.') + '</div>');
     if (aircraftUpdated) parts.push('<div class="note">Updated ' + escapeHtml(aircraftUpdated.toLocaleTimeString()) + ' · ' + escapeHtml(aircraftSource) + ' (open data)</div>');
   }}
   if (overlayState.greyline) {{

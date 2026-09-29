@@ -10,6 +10,7 @@ show where the network is reporting and where it has gone quiet.
 """
 
 import json
+from pathlib import Path
 import math
 import re
 import threading
@@ -197,6 +198,36 @@ MEDICAL_CALLSIGN = re.compile(
     r"FLTFORLIFE|FFL\d|GUARDIAN|GUARDN|STATMED|MEDFLT|ANGEL|HEARTNET|AMBUL)",
     re.IGNORECASE,
 )
+# Owners/operators of air-ambulance aircraft (tar1090-db / adsb.fi "ownOp"). Whole words,
+# so "Los Angeles", "Angel ..." and "Hospitality" don't count.
+AIR_MEDICAL_OPERATOR = re.compile(
+    r"\b(?:AIR METHODS|AIR EVAC EMS|PHI HEALTH|PHI AIR MEDICAL|LIFE ?FLIGHT|LIFEFLIGHT|MED-?TRANS CORP|MED TRANS CORP|"
+    r"REACH AIR MEDICAL|METRO AVIATION|GUARDIAN FLIGHT|CAREFLITE|CARE ?FLIGHT|MED ?FLIGHT|MERCY FLIGHTS?|MERCY AIR|"
+    r"STAT MEDEVAC|MEDEVAC|AIR AMBULANCE|AIR MEDICAL|AIRMEDICAL|LIFENET|LIFE ?STAR|AIRLIFE|CALSTAR|"
+    r"HOSPITAL|MEDICAL CENTER|HEALTH SYSTEM|CHILDRENS HOSPITAL|HEALTH SCIENCES CENTER)\b",
+    re.IGNORECASE,
+)
+NOT_AIR_MEDICAL = re.compile(r"ANIMAL HOSPITAL|FLYING CLUB|WEST METRO AVIATION|PORTLAND METRO|DEVELOPMENT LLC|"
+                             r"HOSPITALITY|PRECIOUS LIFE|SECOND LIFE", re.IGNORECASE)
+
+
+def is_air_medical_operator(name: str) -> bool:
+    return bool(name and AIR_MEDICAL_OPERATOR.search(name) and not NOT_AIR_MEDICAL.search(name))
+_AIR_AMBULANCE: dict[str, str] | None = None
+
+
+def air_ambulance_operator(hex_code: str) -> str:
+    """The air-medical operator an aircraft is registered to (bundled list), or ""."""
+    global _AIR_AMBULANCE
+    if _AIR_AMBULANCE is None:
+        path = Path(__file__).parent / "data" / "air_ambulance.json"
+        try:
+            _AIR_AMBULANCE = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            _AIR_AMBULANCE = {}
+    return _AIR_AMBULANCE.get(hex_code.lower(), "")
+
+
 HELICOPTER_TYPES = {
     "EC35", "EC45", "EC30", "EC20", "EC25", "EC55", "EC75", "H135", "H145", "H160", "AS50", "AS55", "AS65",
     "B06", "B407", "B412", "B429", "B505", "A109", "A119", "A139", "A169", "S76", "S92", "R22", "R44", "R66",
@@ -231,7 +262,12 @@ def compact_aircraft(record: dict) -> dict | None:
         "squawk": squawk,
         "military": bool((record.get("dbFlags") or 0) & 1),
         "emergency": emergency or "",
-        "medical": bool(MEDICAL_CALLSIGN.match((record.get("flight") or "").strip())),
+        # Medevac: an air-ambulance callsign, or an aircraft registered to an air-medical
+        # operator (tail-number flights), from the bundled list or the feed's own owner field.
+        "medical": bool(MEDICAL_CALLSIGN.match((record.get("flight") or "").strip())
+                        or air_ambulance_operator(record.get("hex", ""))
+                        or is_air_medical_operator(record.get("ownOp") or "")),
+        "operator": air_ambulance_operator(record.get("hex", "")) or (record.get("ownOp") or "").strip(),
         # Drawing shape: helicopter, light aircraft (general aviation), or airliner-size.
         "shape": "helicopter" if (record.get("category") == "A7" or (record.get("t") or "") in HELICOPTER_TYPES)
                  else "light" if record.get("category") in ("A1", "A2", "B1", "B4") else "plane",
@@ -241,7 +277,12 @@ def compact_aircraft(record: dict) -> dict | None:
 # Be a considerate client of free community services: space requests out, refresh the
 # nationwide queries less often than local traffic, and back off when rate limited.
 REQUEST_SPACING_S = 1.1
-REFRESH_S = {"military": 60, "squawks": 60, "local": 30, "focus": 90}
+# All traffic nationwide at every zoom level: the whole U.S. every 3 minutes (36 spaced
+# requests, ~3 minutes and ~8 MB a sweep), the focus regions every minute, a zoomed-in view every 30 seconds.
+REFRESH_S = {"military": 60, "squawks": 60, "local": 30, "focus": 60, "national": 180}
+# Alaska and Hawaii, which the lower-48 grid leaves out: Anchorage, Fairbanks, Juneau, Honolulu.
+OUTSIDE_LOWER_48_TILES = [(61.2, -149.9, MAX_RADIUS_NM), (64.8, -147.7, MAX_RADIUS_NM),
+                          (58.3, -134.4, MAX_RADIUS_NM), (21.0, -157.5, MAX_RADIUS_NM)]
 BACKOFF_S = (60, 120, 300)
 
 
@@ -249,35 +290,52 @@ class RateLimited(OSError):
     pass
 
 
-def _fetch_part(part: str, view: tuple[float, float, float] | None) -> tuple[list[dict], str]:
-    """One kind of query ("military", "squawks", "local"), trying each aggregator in turn."""
-    errors, limited = [], False
-    for name, military_url, squawk_url, point_url in ADSB_SOURCES:
-        try:
-            if part == "military":
-                urls = [military_url]
-            elif part == "squawks":
-                urls = [squawk_url.format(squawk=squawk) for squawk in EMERGENCY_SQUAWKS]
-            elif part == "focus":
-                urls = [point_url.format(lat=round(lat, 3), lon=round(lon, 3), radius=int(radius))
-                        for lat, lon, radius in view]
-            else:
-                lat, lon, radius = view
-                urls = [point_url.format(lat=round(lat, 3), lon=round(lon, 3),
-                                         radius=int(min(MAX_RADIUS_NM, max(5, radius))))]
-            records: list[dict] = []
-            for index, url in enumerate(urls):
-                if index:
-                    time.sleep(REQUEST_SPACING_S)
-                records.extend(_get_json(url).get("ac") or [])
-            return records, name
-        except urllib.error.HTTPError as error:
-            limited = limited or error.code == 429
-            errors.append(f"{name}: HTTP {error.code}")
-        except Exception as error:
-            errors.append(f"{name}: {error}")
-        time.sleep(REQUEST_SPACING_S)
-    raise (RateLimited if limited else OSError)("; ".join(errors))
+def _part_urls(part: str, view, military_url: str, squawk_url: str, point_url: str) -> list[str]:
+    if part == "military":
+        return [military_url]
+    if part == "squawks":
+        return [squawk_url.format(squawk=squawk) for squawk in EMERGENCY_SQUAWKS]
+    circles = view if part in ("focus", "national") else [view]
+    return [point_url.format(lat=round(lat, 3), lon=round(lon, 3), radius=int(min(MAX_RADIUS_NM, max(5, radius))))
+            for lat, lon, radius in circles]
+
+
+def _fetch_part(part: str, view) -> tuple[list[dict], str]:
+    """One kind of query ("military", "squawks", "local", "focus", "national").
+
+    ``view`` is the circle, or list of circles, for the area kinds. Each request tries the
+    aggregators in turn, so one failed request costs only its own circle; the part fails
+    only when every request did.
+    """
+    per_source = [(name, _part_urls(part, view, military, squawk, point))
+                  for name, military, squawk, point in ADSB_SOURCES]
+    records: list[dict] = []
+    errors: list[str] = []
+    used: list[str] = []
+    limited = False
+    for index in range(len(per_source[0][1])):
+        if index:
+            time.sleep(REQUEST_SPACING_S)
+        for attempt, (name, urls) in enumerate(per_source):
+            if attempt:
+                time.sleep(REQUEST_SPACING_S)
+            try:
+                data = _get_json(urls[index])
+            except urllib.error.HTTPError as error:
+                limited = limited or error.code == 429
+                errors.append(f"{name}: HTTP {error.code}")
+                continue
+            except Exception as error:
+                errors.append(f"{name}: {error}")
+                continue
+            # adsb.lol calls the list "ac"; adsb.fi calls it "aircraft".
+            records.extend(data.get("ac") or data.get("aircraft") or [])
+            if name not in used:
+                used.append(name)
+            break
+    if not used:
+        raise (RateLimited if limited else OSError)("; ".join(dict.fromkeys(errors)))
+    return records, " + ".join(used)
 
 
 def focus_tiles(regions, spacing_nm: float = 340) -> list[tuple[float, float, float]]:
@@ -348,7 +406,7 @@ def merge_aircraft(records) -> list[dict]:
 
 
 class AircraftPoller(QObject):
-    """Refreshes military, emergency-squawk and local aircraft off the UI thread."""
+    """Refreshes all U.S. traffic (every type, at every zoom level) off the UI thread."""
 
     aircraft_ready = Signal(object, str)  # list[dict], source name
     failed = Signal(str)
@@ -362,11 +420,12 @@ class AircraftPoller(QObject):
         self._view_timer.setSingleShot(True)
         self._view_timer.setInterval(3000)
         self._view_timer.timeout.connect(self._view_settled)
-        self._busy = False
+        self._busy_lanes: set[str] = set()
         self.view: tuple[float, float, float] | None = None
         self._pending_view: tuple[float, float, float] | None = None
         self.focus: list[tuple[float, float, float]] = []   # query circles covering the focus regions
         self.focus_regions: set[int] = set()
+        self.national: list[tuple[float, float, float]] = []   # computed on first use
         self._parts: dict[str, tuple[float, list[dict]]] = {}   # part -> (fetched at, records)
         self._source = ""
         self._backoff_until = 0.0
@@ -401,32 +460,41 @@ class AircraftPoller(QObject):
                 self.fetch()
 
     def fetch(self) -> None:
-        now = time.monotonic()
-        if self._busy or now < self._backoff_until:
-            return
-        wanted = {"military": True, "squawks": True, "local": bool(self.view), "focus": bool(self.focus)}
-        due = [part for part in ("military", "squawks", "focus", "local")
-               if wanted[part] and now - self._parts.get(part, (-1e9, []))[0] >= REFRESH_S[part]]
+        if not self.national:
+            self.national = focus_tiles(range(1, 11)) + OUTSIDE_LOWER_48_TILES
+        wanted = {"military": True, "squawks": True, "local": bool(self.view), "focus": bool(self.focus),
+                  "national": True}
         for part, keep in wanted.items():
             if not keep:
                 self._parts.pop(part, None)
+        # The nationwide sweep takes minutes, so it runs in its own lane and never holds up
+        # the quick parts (military, emergencies, focus regions, the zoomed-in view).
+        for lane, parts in (("quick", ("military", "squawks", "focus", "local")), ("national", ("national",))):
+            self._fetch_lane(lane, [part for part in parts if wanted[part]])
+
+    def _fetch_lane(self, lane: str, parts: list[str]) -> None:
+        now = time.monotonic()
+        if lane in self._busy_lanes or now < self._backoff_until:
+            return
+        due = [part for part in parts if now - self._parts.get(part, (-1e9, []))[0] >= REFRESH_S[part]]
         if not due:
             return
-        self._busy = True
-        view, focus, focus_regions = self.view, list(self.focus), set(self.focus_regions)
+        self._busy_lanes.add(lane)
+        areas = {"focus": list(self.focus), "national": list(self.national), "local": self.view}
+        focus_regions = set(self.focus_regions)
 
         def work() -> None:
             try:
                 for index, part in enumerate(due):
                     if index:
                         time.sleep(REQUEST_SPACING_S)
-                    records, self._source = _fetch_part(part, focus if part == "focus" else view)
+                    records, self._source = _fetch_part(part, areas[part] if part in areas else None)
                     if part == "focus":
                         # The query circles spill over the region edges; keep only traffic inside.
                         records = [record for record in records if _in_regions(record, focus_regions)]
                     self._parts[part] = (time.monotonic(), records)
                 self._backoff_step = 0
-                merged = merge_aircraft(record for _at, records in self._parts.values() for record in records)
+                merged = merge_aircraft(record for _at, records in list(self._parts.values()) for record in records)
                 self.aircraft_ready.emit(merged, self._source)
             except RateLimited as error:
                 wait = BACKOFF_S[min(self._backoff_step, len(BACKOFF_S) - 1)]
@@ -436,6 +504,6 @@ class AircraftPoller(QObject):
             except Exception as error:
                 self.failed.emit(str(error))
             finally:
-                self._busy = False
+                self._busy_lanes.discard(lane)
 
-        threading.Thread(target=work, daemon=True).start()
+        threading.Thread(target=work, daemon=True, name=f"adsb-{lane}").start()

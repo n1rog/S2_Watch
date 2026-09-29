@@ -68,7 +68,7 @@ def test_aircraft_poller_backs_off_when_rate_limited(monkeypatch) -> None:
         raise overlays.RateLimited("adsb.lol: HTTP 429")
 
     monkeypatch.setattr(overlays, "_fetch_part", limited)
-    monkeypatch.setattr(threading, "Thread", lambda target, daemon: type("T", (), {"start": staticmethod(target)})())
+    monkeypatch.setattr(threading, "Thread", lambda target, daemon, **_: type("T", (), {"start": staticmethod(target)})())
     poller = overlays.AircraftPoller()
     messages = []
     poller.failed.connect(messages.append)
@@ -106,3 +106,43 @@ def test_focus_tiles_cover_the_region() -> None:
         assert covered(lat, lon, tiles), (lat, lon)
     assert not covered(33.45, -112.07, tiles) or not covered(29.76, -95.37, tiles)  # not Phoenix and Houston
     assert focus_tiles(set()) == []
+
+
+def test_each_request_falls_back_on_its_own_and_adsb_fi_format_is_read(monkeypatch) -> None:
+    import urllib.error
+
+    import s2_watch.overlays as overlays
+
+    monkeypatch.setattr(overlays, "REQUEST_SPACING_S", 0)
+
+    def fake(url, timeout=15):
+        if "adsb.lol" in url and "/39.0/" in url:
+            raise urllib.error.HTTPError(url, 429, "Too Many Requests", {}, None)
+        if "adsb.lol" in url:
+            return {"ac": [{"hex": "a1", "lat": 40.0, "lon": -100.0}]}
+        return {"aircraft": [{"hex": "f1", "lat": 39.0, "lon": -100.0}]}   # adsb.fi's key
+
+    monkeypatch.setattr(overlays, "_get_json", fake)
+    records, source = overlays._fetch_part("national", [(40.0, -100.0, 250), (39.0, -100.0, 250)])
+    assert [record["hex"] for record in records] == ["a1", "f1"]
+    assert source == "adsb.lol + adsb.fi"
+
+
+def test_air_ambulances_flying_under_tail_numbers_are_medevac() -> None:
+    import json
+    from pathlib import Path
+
+    from s2_watch.overlays import compact_aircraft, is_air_medical_operator
+
+    registered = json.loads((Path(__file__).parent.parent / "s2_watch" / "data" / "air_ambulance.json").read_text())
+    hex_code, operator = next(iter(registered.items()))
+    base = {"lat": 39.7, "lon": -104.9, "dbFlags": 0, "t": "EC35", "category": "A7"}
+    tail_number = compact_aircraft(dict(base, hex=hex_code, flight="N203HA"))
+    assert tail_number["medical"] and tail_number["operator"] == operator
+    # The feed's own owner field (adsb.fi) also counts.
+    assert compact_aircraft(dict(base, hex="zzzzzz", flight="N1", ownOp="PHI HEALTH LLC"))["medical"]
+    for name in ("AIR METHODS LLC", "MEMORIAL HERMANN HEALTH SYSTEM", "CAREFLITE", "BOSTON MEDFLIGHT"):
+        assert is_air_medical_operator(name), name
+    for name in ("LOS ANGELES INTERNATIONAL AIRPORT", "ANGEL AVIATION INC", "COLUMBINE ANIMAL HOSPITAL INC",
+                 "CORPORATE HOSPITALITY AVIATION LLC", "PORTLAND METRO AVIATION & FLYING CLUB"):
+        assert not is_air_medical_operator(name), name

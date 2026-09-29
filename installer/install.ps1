@@ -148,12 +148,38 @@ if ($LASTEXITCODE -ne 0) { Fail "S2 Watch's packages did not load. See the messa
 
 # ---- 6. Data and shortcuts -----------------------------------------------------------------
 Heading '6/7  Data and shortcuts'
-if (-not (Test-Path $Data) -and -not $Yes) {
-    $existing = Read-Host '  Import an existing S2 Watch database (s2_watch.db)? Enter its path, or press Enter to skip'
+function Import-Database($path) {
+    # A consistent copy, even of a database another S2 Watch has open.
+    & $VenvPython -c 'import sqlite3, sys; source = sqlite3.connect(sys.argv[1]); target = sqlite3.connect(sys.argv[2]); source.backup(target); target.close(); source.close()' $path $Data
+    return ($LASTEXITCODE -eq 0)
+}
+if (-not (Test-Path $Data)) {
+    # Look for an earlier S2 Watch's database (a build folder, a copy...), newest first.
+    Info 'Looking for existing S2 Watch data in your user folder...'
+    $found = @(Get-ChildItem -Path $env:USERPROFILE -Filter 's2_watch.db' -File -Recurse -Depth 6 -ErrorAction SilentlyContinue |
+        Where-Object { $_.FullName -notmatch '\\(backups|AppData\\Local\\Temp|node_modules|\.git)\\' -and -not $_.FullName.StartsWith($Prefix) } |
+        Sort-Object LastWriteTime -Descending | Select-Object -First 5)
+    $existing = ''
+    if ($found.Count -gt 0) {
+        Info 'Found existing S2 Watch data (settings, watch forms, labels, history):'
+        for ($index = 0; $index -lt $found.Count; $index++) {
+            Info ("  {0}. {1}  (last changed {2:yyyy-MM-dd HH:mm})" -f ($index + 1), $found[$index].FullName, $found[$index].LastWriteTime)
+        }
+        if ($Yes) { $existing = $found[0].FullName }
+        else {
+            $choice = Read-Host '  Import which one? [1] (0 = start fresh, or type another path)'
+            if ([string]::IsNullOrWhiteSpace($choice)) { $choice = '1' }
+            if ($choice -match '^\d+$') {
+                $number = [int]$choice
+                if ($number -ge 1 -and $number -le $found.Count) { $existing = $found[$number - 1].FullName }
+            } else { $existing = $choice.Trim('"') }
+        }
+    } elseif (-not $Yes) {
+        $existing = (Read-Host '  Import an existing S2 Watch database (s2_watch.db)? Enter its path, or press Enter to skip').Trim('"')
+    }
     if ($existing) {
-        $existing = $existing.Trim('"')
-        if (Test-Path $existing) { Copy-Item $existing $Data; Info "Imported $existing" }
-        else { Warn "$existing was not found; starting with a new database." }
+        if ((Test-Path $existing) -and (Import-Database $existing)) { Info "Imported $existing" }
+        else { Warn "$existing could not be imported; starting with a new database." }
     }
 }
 $iconFile = Join-Path $Prefix 's2-watch.ico'

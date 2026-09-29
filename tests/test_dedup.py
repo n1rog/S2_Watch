@@ -88,3 +88,34 @@ def test_message_saved_under_the_old_key_is_found_and_rekeyed(tmp_path: Path) ->
     assert store.save_message(quake, message_key(quake)) == old_id   # now under the new key
     count = sqlite3.connect(tmp_path / "s2.db").execute("SELECT COUNT(*) FROM messages").fetchone()[0]
     assert count == 1
+
+
+def test_recent_reports_rebuild_the_table_without_the_sources(tmp_path: Path) -> None:
+    store = SQLiteStore(tmp_path / "s2.db")
+    statrep = Message("MagCommstat", "MO - FLOOD WATCH", received_at=T0, fields={"type": "STATREP", "grid": "EM29RL"})
+    message_id = store.save_message(statrep, message_key(statrep))
+    store.save_analysis(message_id, NEWS)
+    report = store.assign_report(message_id, statrep, NEWS, state="MO", region=7)
+    store.set_report_status([report.report_id], "interest", "watch the river")
+    old = Message("MagCommstat", "TX HEAT ADVISORY", received_at=T0 - timedelta(days=3))
+    old_id = store.save_message(old, message_key(old))
+    store.save_analysis(old_id, NEWS)
+    store.assign_report(old_id, old, NEWS)
+
+    [(report_id, message, result)] = store.recent_reports(T0 - timedelta(hours=24))
+    assert report_id == report.report_id
+    assert message == statrep.__class__(**{**statrep.__dict__, "form_name": None})
+    assert message.fields["grid"] == "EM29RL"          # kept for the map
+    assert result == NEWS
+    info = store.report_info(report_id)
+    assert (info.status, info.note, info.region) == ("interest", "watch the river", 7)
+
+
+def test_fields_are_added_to_messages_saved_before_they_were_kept(tmp_path: Path) -> None:
+    store = SQLiteStore(tmp_path / "s2.db")
+    bare = Message("MagCommstat", "MO - FLOOD WATCH", received_at=T0)
+    message_id = store.save_message(bare, message_key(bare))
+    store.assign_report(message_id, bare, NEWS)
+    store.save_analysis(message_id, NEWS)
+    store.save_message(Message("MagCommstat", "MO - FLOOD WATCH", received_at=T0, fields={"grid": "EM29RL"}), message_key(bare))
+    assert store.recent_reports(T0 - timedelta(hours=1))[0][1].fields == {"grid": "EM29RL"}

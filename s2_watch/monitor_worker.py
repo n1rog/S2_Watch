@@ -7,6 +7,7 @@ the window in batches through the ``batch_ready`` signal.
 """
 
 from dataclasses import dataclass, field, replace
+from datetime import datetime
 
 from PySide6.QtCore import QObject, QTimer, Signal, Slot
 
@@ -28,6 +29,9 @@ class MonitorConfig:
     forms: list[WatchForm] = field(default_factory=list)
     analyzer: NewsAnalyzer | None = None
     geocoding: bool = False
+    # Show the saved reports seen since this time first, before the sources are read.
+    preload_since: datetime | None = None
+    preload_limit: int = 1000
 
 
 @dataclass
@@ -36,6 +40,7 @@ class ProcessedMessage:
     result: AnalysisResult | None
     locations: list[ResolvedLocation]
     report: ReportInfo | None = None
+    preloaded: bool = False   # from the database at launch, not read from a source just now
 
 
 class MonitorWorker(QObject):
@@ -77,6 +82,22 @@ class MonitorWorker(QObject):
             self.adapters, config.forms, self.store, self._matched, config.analyzer, self._analysed,
             self._saved, self.coverage.add,
         ) if self.adapters and self.store else None
+        if self.store and config.preload_since is not None:
+            self._preload(config)
+
+    def _preload(self, config: MonitorConfig) -> None:
+        """Send the saved reports in the watch period, so the window doesn't depend on the
+        sources still having them (a feeder offline, a revised OSINT item, a restart)."""
+        forms = [form for form in config.forms if form.enabled]
+        batch = []
+        for report_id, message, result in self.store.recent_reports(config.preload_since, config.preload_limit):
+            if result is None or not any(form.matches(message) for form in forms):
+                continue
+            locations = self.resolver.resolve(message)
+            batch.append(ProcessedMessage(message, result, locations, self.store.report_info(report_id), preloaded=True))
+        if batch:
+            batch.reverse()   # oldest first, like a source's backlog
+            self.batch_ready.emit(batch)
 
     @Slot()
     def poll(self) -> None:

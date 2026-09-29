@@ -63,3 +63,32 @@ def test_request_stop_abandons_a_long_poll(tmp_path) -> None:
     worker.poll()
     assert len(seen) == 10
     worker.stop()
+
+
+def test_restart_shows_saved_reports_before_and_without_the_sources(tmp_path) -> None:
+    from datetime import datetime, timedelta, timezone
+    QCoreApplication.instance() or QCoreApplication([])
+    form = WatchForm("JS8Call", "All", "", enabled=True)
+    first = MonitorWorker(str(tmp_path / "s2.db"))
+    first.start()
+    first.configure(MonitorConfig([FakeAdapter(["FLOODING IN TULSA, OK"])], [form], RuleBasedNewsAnalyzer()))
+    first.poll()
+    first.stop()
+
+    # Next launch: the source no longer has the message (feeder offline, pruned...).
+    worker = MonitorWorker(str(tmp_path / "s2.db"))
+    worker.start()
+    batches = []
+    worker.batch_ready.connect(batches.append)
+    since = datetime.now(timezone.utc) - timedelta(hours=24)
+    worker.configure(MonitorConfig([FakeAdapter([])], [form], RuleBasedNewsAnalyzer(), preload_since=since))
+    [[shown]] = batches
+    assert shown.preloaded and shown.message.raw_content == "FLOODING IN TULSA, OK"
+    assert shown.result.newsworthy and shown.report is not None and not shown.report.new_report
+    assert [location.label for location in shown.locations] == ["Tulsa, OK"]
+
+    # A watch form that no longer matches leaves it out.
+    batches.clear()
+    other = WatchForm("FLMSG", "Only FLMSG", "", enabled=True)
+    worker.configure(MonitorConfig([FakeAdapter([])], [other], RuleBasedNewsAnalyzer(), preload_since=since))
+    assert batches == []

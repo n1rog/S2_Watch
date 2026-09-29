@@ -197,6 +197,7 @@ class Wizard:
         self.heading("3. Focus regions")
         self.say("Reports from your MARS regions (= FEMA regions) are listed first, alert normally and are")
         self.say("emphasised on the map; the rest of the U.S. is secondary. Leave blank for the whole U.S.")
+        self.say("(Aircraft are shown everywhere; in your regions they refresh every minute, elsewhere every 3.)")
         for region, states in MARS_REGIONS.items():
             self.say(f"  Region {region:>2}: {states}")
         current = self.current("focus.regions", "")
@@ -273,7 +274,7 @@ class Wizard:
         for key, question, default in (
             ("map.tiles.online", "Use online OpenStreetMap tiles when available?", "1"),
             ("map.nws.visible", "Show NWS watches & warnings on the map?", "1"),
-            ("map.aircraft.visible", "Show aircraft (ADS-B: civilian, military, medevac, emergencies)?", "0"),
+            ("map.aircraft.visible", "Show aircraft (ADS-B: all U.S. traffic incl. medevac; about 3-4 GB of data a day)?", "0"),
             ("map.radar.visible", "Show weather radar (last 2 hours)?", "0"),
             ("map.coverage.visible", "Show station coverage (when each grid square was last heard)?", "0"),
             ("map.greyline.visible", "Show day/night (grey line)?", "0"),

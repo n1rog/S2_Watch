@@ -165,7 +165,7 @@ if [ "$OS" = "Linux" ]; then
             packages=(libxcb-cursor0 libnss3 libxkbcommon-x11-0 libegl1 libgl1 "$asound" libfontconfig1 libdbus-1-3
                       libxcb-icccm4 libxcb-keysyms1 libxcb-image0 libxcb-render-util0 libxcb-shape0 libxcomposite1
                       libxdamage1 libxrandr2 libxtst6 libxkbfile1)
-            install_command=(sudo apt-get install -y)
+            install_command=(sudo sh -c 'apt-get update -qq && apt-get install -y "$@"' apt-get)
         elif command -v dnf >/dev/null 2>&1; then
             packages=(xcb-util-cursor nss libxkbcommon-x11 mesa-libEGL mesa-libGL alsa-lib fontconfig dbus-libs
                       xcb-util-wm xcb-util-keysyms xcb-util-image xcb-util-renderutil libXcomposite libXdamage
@@ -216,12 +216,54 @@ PY
 
 # ---- 6. Data, launchers, shortcuts --------------------------------------------------------
 bold "6/7  Data and shortcuts"
-if [ ! -f "$DATA" ] && [ "$ASSUME_YES" = 0 ]; then
-    read -r -p "  Import an existing S2 Watch database (s2_watch.db)? Enter its path, or press Enter to skip: " existing || existing=""
-    existing="${existing/#\~/$HOME}"
+import_database() {  # a consistent copy, even of a database another S2 Watch has open
+    "$VENV/bin/python" -c 'import sqlite3, sys; source = sqlite3.connect(sys.argv[1]); target = sqlite3.connect(sys.argv[2]); source.backup(target); target.close(); source.close()' "$1" "$DATA"
+}
+if [ ! -f "$DATA" ]; then
+    # Look for an earlier S2 Watch's database (a build folder, a copy...), newest first.
+    found=()
+    info "Looking for existing S2 Watch data in your home folder..."
+    while IFS= read -r candidate; do found+=("$candidate"); done < <("$VENV/bin/python" - "$HOME" "$PREFIX" <<'FIND'
+import os, sys
+home, prefix = sys.argv[1], os.path.realpath(sys.argv[2])
+skip = {"backups", ".cache", "Trash", "node_modules", ".git", "venv", ".venv", "Library"}
+found = []
+for root, folders, files in os.walk(home):
+    if root[len(home):].count(os.sep) >= 6 or os.path.realpath(root).startswith(prefix):
+        folders[:] = []
+        continue
+    folders[:] = [folder for folder in folders if folder not in skip]
+    if "s2_watch.db" in files:
+        path = os.path.join(root, "s2_watch.db")
+        found.append((os.path.getmtime(path), path))
+for _mtime, path in sorted(found, reverse=True)[:5]:
+    print(path)
+FIND
+)
+    existing=""
+    if [ ${#found[@]} -gt 0 ]; then
+        info "Found existing S2 Watch data (settings, watch forms, labels, history):"
+        for index in "${!found[@]}"; do
+            info "  $((index + 1)). ${found[$index]}  (last changed $(date -r "${found[$index]}" '+%Y-%m-%d %H:%M' 2>/dev/null))"
+        done
+        if [ "$ASSUME_YES" = 1 ]; then
+            existing="${found[0]}"
+        else
+            read -r -p "  Import which one? [1] (0 = start fresh, or type another path) " choice || choice=""
+            choice="${choice:-1}"
+            if [[ "$choice" =~ ^[0-9]+$ ]]; then
+                [ "$choice" -ge 1 ] && [ "$choice" -le ${#found[@]} ] && existing="${found[$((choice - 1))]}"
+            else
+                existing="${choice/#\~/$HOME}"
+            fi
+        fi
+    elif [ "$ASSUME_YES" = 0 ]; then
+        read -r -p "  Import an existing S2 Watch database (s2_watch.db)? Enter its path, or press Enter to skip: " existing || existing=""
+        existing="${existing/#\~/$HOME}"
+    fi
     if [ -n "$existing" ]; then
-        if [ -f "$existing" ]; then cp -p "$existing" "$DATA" && info "Imported $existing"
-        else warn "$existing was not found; starting with a new database."; fi
+        if [ -f "$existing" ] && import_database "$existing"; then info "Imported $existing"
+        else warn "$existing could not be imported; starting with a new database."; fi
     fi
 fi
 ICON_DIR="$("$VENV/bin/python" -c 'import s2_watch, pathlib; print(pathlib.Path(s2_watch.__file__).parent / "data" / "icons")')"

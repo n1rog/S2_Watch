@@ -31,6 +31,48 @@ Unzip it, then run `bash install.sh` (Linux/macOS) or double-click `install.cmd`
 (Windows). See `installer/README-INSTALL.txt`. Rerun the setup wizard any time with
 `s2-watch --configure`. `--database PATH` selects the data file.
 
+## Your data and backups
+
+Settings, watch forms, reports, labels and history live in one SQLite file
+(`s2_watch.db`; its location is shown by the installer). Once a day S2 Watch copies
+it to a `backups` folder beside it and keeps the last 14 copies. Use
+**Configuration → Back Up Now** for an extra copy and **Open Backups Folder** to
+find them. To restore, quit S2 Watch and copy a backup over `s2_watch.db`.
+
+At launch the Newsworthiness table and map are rebuilt from the saved reports in
+the watch period, so reports, labels and notes don't depend on a feeder still
+having the original message.
+
+## Follow-up reports
+
+Right-click a Newsworthiness report and choose **Draft follow-up report…**. Edit
+the full report first; the FLMSG (upper-case, wrapped for radio) and JS8Call
+(short) versions are made from it as you type. Copy or save them — nothing is
+sent — and mark the report *Follow-up created*.
+
+## Aircraft (ADS-B)
+
+All U.S. traffic is fetched at every zoom level from the free adsb.lol and
+adsb.fi services: the whole country every 3 minutes, focus regions every minute
+and a zoomed-in view every 30 seconds. This uses about 3–4 GB of internet data a
+day while the aircraft layer is on. Medevac aircraft are recognised by
+air-ambulance callsigns and by registration to air-medical operators
+(`s2_watch/data/air_ambulance.json`; refresh it with
+`python tools/build_air_ambulance.py`).
+
+## Continuous integration and releases
+
+`.github/workflows/ci.yml` runs the tests and a Linux install from the installer
+package on every push. Pushing a version tag (`git push --tags`) runs the tests and
+installers on Linux, Windows and macOS and then publishes a GitHub release with
+`S2Watch-<version>-installer.zip` attached. The full run can also be started from
+the Actions tab (CI → Run workflow).
+
+## Long-run check
+
+`python tools/soak_monitor.py --hours 12` watches a running S2 Watch (Linux) and
+reports whether its memory keeps growing, following it across restarts.
+
 ## Development
 
 ```bash
