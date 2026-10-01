@@ -96,6 +96,7 @@ class MapView(QWidget):
         self._online_tiles = True
         self._overlays = {"nws": False, "coverage": False, "greyline": False, "aircraft": False}
         self._aircraft: tuple[list[dict], str] | None = None
+        self._aircraft_kinds: dict[str, bool] = {}
         self._focus_regions: list[int] = []
         self._nws_alerts: list[dict] | None = None
         self._coverage: list[dict] | None = None
@@ -172,6 +173,11 @@ class MapView(QWidget):
     def set_aircraft(self, aircraft: list[dict], source: str) -> None:
         self._aircraft = (aircraft, source)
         self._run(f"setAircraft({json.dumps(aircraft)}, {json.dumps(source)})")
+
+    def set_aircraft_kinds(self, kinds: dict[str, bool]) -> None:
+        """Show or hide aircraft by type: "civil", "military", "medical", "emergency"."""
+        self._aircraft_kinds = dict(kinds)
+        self._run(f"setAircraftKinds({json.dumps(self._aircraft_kinds)})")
 
     def set_aircraft_error(self, message: str) -> None:
         self._run(f"setAircraft([], '', {json.dumps(message[:120])})")
@@ -321,6 +327,8 @@ class MapView(QWidget):
             if self._coverage is not None:
                 self._run(f"setCoverage({json.dumps(self._coverage)})")
             self._run(f"setFocusRegions({json.dumps(self._focus_regions)}, true)")
+            if self._aircraft_kinds:
+                self._run(f"setAircraftKinds({json.dumps(self._aircraft_kinds)})")
             if self._aircraft is not None:
                 self._run(f"setAircraft({json.dumps(self._aircraft[0])}, {json.dumps(self._aircraft[1])})")
             self._push_to_page()
@@ -811,6 +819,15 @@ const EMERGENCY_MARK = '#111111';
 // Yellow needs a dark outline to read on the light map; blue and red use white.
 const aircraftOutline = kind => kind === 'civil' ? '#3d3200' : '#ffffff';
 const aircraftKind = a => a.military ? 'military' : (a.medical ? 'medical' : 'civil');
+// Which types the Map filters show; an emergency squawk stays visible when "emergency" is on.
+let aircraftShown = {{civil: true, military: true, medical: true, emergency: true}};
+const aircraftVisible = a => (a.emergency && aircraftShown.emergency) || aircraftShown[aircraftKind(a)];
+function setAircraftKinds(kinds) {{
+  aircraftShown = Object.assign({{}}, aircraftShown, kinds);
+  if (overlayState.aircraft) aircraftLayer.redraw();
+  if (hoveredAircraft && !aircraftVisible(hoveredAircraft) && map.hasLayer(aircraftHover)) map.removeLayer(aircraftHover);
+  updateOverlayLegend();
+}}
 let aircraftList = [];
 let aircraftSource = '';
 let aircraftUpdated = null;
@@ -843,7 +860,7 @@ const AircraftCanvas = L.Layer.extend({{
     // Other traffic first, so military and emergencies draw on top.
     // Civilian first, then medevac and military; emergencies always on top.
     const order = a => (a.emergency ? 10 : 0) + {{civil: 0, medical: 1, military: 2}}[aircraftKind(a)];
-    const sorted = aircraftList.slice().sort((a, b) => order(a) - order(b));
+    const sorted = aircraftList.filter(aircraftVisible).sort((a, b) => order(a) - order(b));
     for (const a of sorted) {{
       const point = map.latLngToContainerPoint([a.lat, a.lon]);
       if (point.x < -30 || point.y < -30 || point.x > this._canvas.width / ratio + 30 || point.y > this._canvas.height / ratio + 30) continue;
@@ -903,6 +920,7 @@ map.on('mousemove', event => {{
   if (!overlayState.aircraft) return;
   let nearest = null, best = 12 * 12;
   for (const a of aircraftList) {{
+    if (!aircraftVisible(a)) continue;
     const point = map.latLngToContainerPoint([a.lat, a.lon]);
     const distance = (point.x - event.containerPoint.x) ** 2 + (point.y - event.containerPoint.y) ** 2;
     if (distance < best) {{ best = distance; nearest = a; }}
@@ -976,10 +994,10 @@ function updateOverlayLegend() {{
     parts.push('<b>Aircraft (ADS-B)</b>' + (aircraftError ? '<div class="note">Unavailable: ' + escapeHtml(aircraftError) + '</div>' : ''));
     for (const kind of ['military', 'medical', 'civil']) {{
       parts.push('<div>' + swatch(AIRCRAFT_KINDS[kind][1], kind === 'civil' ? '#3d3200' : AIRCRAFT_KINDS[kind][1]) +
-                 AIRCRAFT_KINDS[kind][0] + ' <span>' + counts[kind] + '</span></div>');
+                 AIRCRAFT_KINDS[kind][0] + ' <span>' + (aircraftShown[kind] ? counts[kind] : 'hidden') + '</span></div>');
     }}
     parts.push('<div><i style="background:transparent;border:3px solid ' + EMERGENCY_MARK + ';border-radius:50%;box-sizing:border-box"></i>' +
-               'Emergency squawk (black ring) <span>' + emergencies + '</span></div>');
+               'Emergency squawk (black ring) <span>' + (aircraftShown.emergency ? emergencies : 'follow type') + '</span></div>');
     const focus = [...focusRegions].sort((a, b) => a - b).map(region => 'R' + region).join(', ');
     parts.push('<div class="note">All U.S. traffic, including general aviation and helicopters' +
                ' (refreshed every 3 min' + (focus ? '; focus regions ' + focus + ' every minute' : '') + ').' +

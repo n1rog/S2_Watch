@@ -297,9 +297,9 @@ class MainWindow(QMainWindow):
             ("greyline", "Show day / night (grey line)",
              "Shades the night side of the Earth; HF propagation changes along the grey line."),
             ("aircraft", "Show aircraft (ADS-B)",
-             "Military aircraft and emergency squawks (7500/7600/7700) everywhere; all traffic, including general "
-             "aviation, helicopters and air ambulances, in your focus regions and when zoomed in. "
-             "Free community ADS-B data (adsb.lol, adsb.fi); needs internet."),
+             "All U.S. traffic at every zoom level: general aviation, airliners, helicopters, air ambulances, "
+             "military and emergency squawks (7500/7600/7700). Free community ADS-B data (adsb.lol, adsb.fi); "
+             "needs internet, about 3-4 GB a day while civilian or medevac aircraft are shown."),
         ):
             checkbox = QCheckBox(label)
             checkbox.setToolTip(tooltip)
@@ -307,6 +307,26 @@ class MainWindow(QMainWindow):
             checkbox.stateChanged.connect(lambda _state, overlay=overlay: self.map_overlay_changed(overlay))
             self.map_overlay_filters[overlay] = checkbox
             map_filter_layout.addWidget(checkbox)
+        # Aircraft types, indented under "Show aircraft", each remembered.
+        self.aircraft_kind_filters: dict[str, QCheckBox] = {}
+        aircraft_kinds = QVBoxLayout()
+        aircraft_kinds.setContentsMargins(24, 0, 0, 0)
+        aircraft_kinds.setSpacing(2)
+        for kind, label, tooltip in (
+            ("civil", "Civilian (yellow)", "Airliners, general aviation, helicopters and other civil traffic."),
+            ("military", "Military (blue)", "Aircraft flagged military in the ADS-B data."),
+            ("medical", "Medevac (red)", "Air ambulances: medical callsigns or registered to air-medical operators."),
+            ("emergency", "Emergencies (black ring) — always show",
+             "Squawk 7500/7600/7700 or a declared emergency; shown even when the aircraft's type is hidden. "
+             "Off: emergencies follow their type."),
+        ):
+            checkbox = QCheckBox(label)
+            checkbox.setToolTip(tooltip)
+            checkbox.setChecked(self.store.get_setting(f"map.aircraft.kind.{kind}", "1") == "1")
+            checkbox.stateChanged.connect(self.aircraft_kinds_changed)
+            self.aircraft_kind_filters[kind] = checkbox
+            aircraft_kinds.addWidget(checkbox)
+        map_filter_layout.addLayout(aircraft_kinds)
         self.nws_poller = NwsAlertsPoller(parent=self)
         self.nws_poller.alerts_ready.connect(self.map_view.set_nws_alerts)
         # Alerts are fetched all the time (not only when the NWS layer is shown) to
@@ -1129,12 +1149,25 @@ class MainWindow(QMainWindow):
         self.store.set_setting("map.regions.visible", "1" if visible else "0")
         self.map_view.set_regions_visible(visible)
 
+    def aircraft_kinds_changed(self) -> None:
+        kinds = {kind: checkbox.isChecked() for kind, checkbox in self.aircraft_kind_filters.items()}
+        for kind, shown in kinds.items():
+            self.store.set_setting(f"map.aircraft.kind.{kind}", "1" if shown else "0")
+        aircraft_on = self.map_overlay_filters["aircraft"].isChecked()
+        for checkbox in self.aircraft_kind_filters.values():
+            checkbox.setEnabled(aircraft_on)
+        self.map_view.set_aircraft_kinds(kinds)
+        # Civilian and medevac aircraft come only from the general-traffic sweeps; with
+        # both hidden, fetch just military and emergencies (saves most of the data).
+        self.aircraft_poller.set_general_traffic(kinds["civil"] or kinds["medical"])
+
     def map_overlay_changed(self, overlay: str) -> None:
         visible = self.map_overlay_filters[overlay].isChecked()
         self.store.set_setting(f"map.{overlay}.visible", "1" if visible else "0")
         self.map_view.set_overlay_visible(overlay, visible)
         if overlay == "aircraft":
             self.aircraft_poller.set_enabled(visible)
+            self.aircraft_kinds_changed()
 
     def update_news_label(self) -> None:
         # The table holds reports from the review window read at startup plus new traffic.

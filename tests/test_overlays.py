@@ -146,3 +146,24 @@ def test_air_ambulances_flying_under_tail_numbers_are_medevac() -> None:
     for name in ("LOS ANGELES INTERNATIONAL AIRPORT", "ANGEL AVIATION INC", "COLUMBINE ANIMAL HOSPITAL INC",
                  "CORPORATE HOSPITALITY AVIATION LLC", "PORTLAND METRO AVIATION & FLYING CLUB"):
         assert not is_air_medical_operator(name), name
+
+
+def test_hiding_civilian_and_medevac_skips_the_traffic_sweeps(monkeypatch) -> None:
+    import threading
+    from PySide6.QtCore import QCoreApplication
+
+    import s2_watch.overlays as overlays
+
+    QCoreApplication.instance() or QCoreApplication([])
+    calls = []
+    monkeypatch.setattr(overlays, "_fetch_part", lambda part, view: (calls.append(part), ([], "test"))[1])
+    monkeypatch.setattr(threading, "Thread", lambda target, daemon, **_: type("T", (), {"start": staticmethod(target)})())
+    monkeypatch.setattr(overlays, "focus_tiles", lambda regions: [(40.0, -100.0, 250)])
+    poller = overlays.AircraftPoller()
+    poller.set_general_traffic(False)
+    poller.fetch()
+    assert calls == ["military", "squawks"]
+    calls.clear()
+    poller.set_general_traffic(True)   # starts fetching the sweeps (timer not running here)
+    poller.fetch()
+    assert calls == ["national"]

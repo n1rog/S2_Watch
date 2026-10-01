@@ -426,6 +426,7 @@ class AircraftPoller(QObject):
         self.focus: list[tuple[float, float, float]] = []   # query circles covering the focus regions
         self.focus_regions: set[int] = set()
         self.national: list[tuple[float, float, float]] = []   # computed on first use
+        self.general_traffic = True   # False: only military and emergencies are wanted
         self._parts: dict[str, tuple[float, list[dict]]] = {}   # part -> (fetched at, records)
         self._source = ""
         self._backoff_until = 0.0
@@ -438,6 +439,13 @@ class AircraftPoller(QObject):
         elif not enabled:
             self._timer.stop()
             self._view_timer.stop()
+
+    def set_general_traffic(self, wanted: bool) -> None:
+        """Fetch all traffic (True) or only military aircraft and emergency squawks."""
+        if wanted != self.general_traffic:
+            self.general_traffic = wanted
+            if self._timer.isActive():
+                self.fetch()
 
     def set_view(self, lat: float, lon: float, radius_nm: float) -> None:
         """The zoomed-in map area to show all traffic for; radius 0 means zoomed out."""
@@ -462,8 +470,9 @@ class AircraftPoller(QObject):
     def fetch(self) -> None:
         if not self.national:
             self.national = focus_tiles(range(1, 11)) + OUTSIDE_LOWER_48_TILES
-        wanted = {"military": True, "squawks": True, "local": bool(self.view), "focus": bool(self.focus),
-                  "national": True}
+        general = self.general_traffic
+        wanted = {"military": True, "squawks": True, "local": general and bool(self.view),
+                  "focus": general and bool(self.focus), "national": general}
         for part, keep in wanted.items():
             if not keep:
                 self._parts.pop(part, None)
