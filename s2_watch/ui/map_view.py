@@ -498,49 +498,94 @@ let radarFrames = [];            // [{{path, time}}], oldest first
 let radarFrameIndex = 0;
 let radarAnimation = null;
 let radarRefresh = null;
-const radarBitmaps = new Map();  // "path|z/x/y" -> Promise<ImageBitmap|null>
+const radarBitmaps = new Map();  // "path|z/x/y" -> ImageBitmap, or 'queued' / 'loading'
+// RainViewer allows 100 requests a minute per IP (2026). Requests wait in a queue paced
+// under that, the shown frame first; tiles moved off screen leave the queue; refusals
+// pause it for a minute. 512-pixel tiles need a quarter of the requests of 256 ones.
+const RADAR_REQUESTS_PER_MINUTE = 80;
+const RADAR_TILE = 512;
+const radarQueue = [];           // [{{key, url, tileKey}}]
+let radarPausedUntil = 0;
+let radarRefusals = 0;
 const RadarLayer = L.GridLayer.extend({{
   createTile(coords) {{
     const canvas = document.createElement('canvas');
-    canvas.width = canvas.height = 256;
+    canvas.width = canvas.height = RADAR_TILE;
     canvas.coords = coords;
     drawRadarTile(canvas);
     return canvas;
   }},
 }});
 // RainViewer's free tiles stop at zoom 7 (past that each tile reads "Zoom Level Not
-// Supported"); closer in, Leaflet enlarges the zoom-7 radar.
+// Supported"); closer in, Leaflet enlarges the zoom-7 radar. A 512-pixel tile at map
+// zoom z is RainViewer's tile at z - 1.
 const RADAR_MAX_ZOOM = 7;
-const radarLayer = new RadarLayer({{opacity:0.55, maxNativeZoom:RADAR_MAX_ZOOM, attribution:'Radar © RainViewer'}});
+const radarLayer = new RadarLayer({{opacity:0.55, tileSize:RADAR_TILE, minNativeZoom:1,
+  maxNativeZoom:RADAR_MAX_ZOOM + 1, attribution:'Radar © RainViewer'}});
+const radarTileKey = coords => coords.x + ':' + coords.y + ':' + coords.z;
 radarLayer.on('tileunload', event => {{
-  const suffix = '|' + event.coords.z + '/' + event.coords.x + '/' + event.coords.y;
+  const suffix = '|' + radarTileKey(event.coords);
   for (const [key, bitmap] of radarBitmaps) {{
     if (key.endsWith(suffix)) {{
-      bitmap.then(image => image && image.close());
-      radarBitmaps.delete(key);
+      if (bitmap instanceof ImageBitmap) bitmap.close();
+      radarBitmaps.delete(key);   // a queued request for it is skipped
     }}
   }}
 }});
-function radarBitmap(path, coords) {{
-  const key = path + '|' + coords.z + '/' + coords.x + '/' + coords.y;
-  if (!radarBitmaps.has(key)) {{
+function requestRadar(path, coords, first) {{
+  const key = path + '|' + radarTileKey(coords);
+  if (radarBitmaps.has(key)) return radarBitmaps.get(key);
+  radarBitmaps.set(key, 'queued');
+  const url = radarHost + path + '/' + RADAR_TILE + '/' + (coords.z - 1) + '/' + coords.x + '/' + coords.y + '/2/1_1.png';
+  const entry = {{key, url, tileKey: radarTileKey(coords)}};
+  if (first) radarQueue.unshift(entry); else radarQueue.push(entry);
+  return 'queued';
+}}
+function radarPump() {{
+  if (!radarVisible || Date.now() < radarPausedUntil) return;
+  while (radarQueue.length) {{
+    const entry = radarQueue.shift();
+    if (radarBitmaps.get(entry.key) !== 'queued' || !(radarLayer._tiles || {{}})[entry.tileKey]) continue;
+    radarBitmaps.set(entry.key, 'loading');
     const image = new Image();
     image.crossOrigin = 'anonymous';
-    image.src = radarHost + path + '/256/' + coords.z + '/' + coords.x + '/' + coords.y + '/2/1_1.png';
-    radarBitmaps.set(key, image.decode().then(() => createImageBitmap(image)).catch(() => null));
+    image.src = entry.url;
+    image.decode().then(() => createImageBitmap(image)).then(bitmap => {{
+      radarRefusals = 0;
+      if (radarBitmaps.get(entry.key) !== 'loading') {{ bitmap.close(); return; }}   // tile gone meanwhile
+      radarBitmaps.set(entry.key, bitmap);
+      const tile = (radarLayer._tiles || {{}})[entry.tileKey];
+      if (tile) drawRadarTile(tile.el);
+      updateRadarStamp();
+    }}).catch(() => {{
+      radarBitmaps.delete(entry.key);   // asked for again on a later frame step
+      if (++radarRefusals >= 3) {{ radarPausedUntil = Date.now() + 60000; radarRefusals = 0; updateRadarStamp(); }}
+    }});
+    return;   // one request per tick
   }}
-  return radarBitmaps.get(key);
 }}
+setInterval(radarPump, 60000 / RADAR_REQUESTS_PER_MINUTE);
 function drawRadarTile(canvas) {{
   const frame = radarFrames[radarFrameIndex];
   if (!frame) return;
-  radarFrames.forEach(other => radarBitmap(other.path, canvas.coords));  // decode every frame once
-  radarBitmap(frame.path, canvas.coords).then(bitmap => {{
-    if (radarFrames[radarFrameIndex] !== frame) return;
+  const bitmap = requestRadar(frame.path, canvas.coords, true);
+  radarFrames.forEach(other => requestRadar(other.path, canvas.coords, false));
+  // Until this frame arrives the tile keeps its last picture rather than going blank.
+  if (bitmap instanceof ImageBitmap) {{
     const context = canvas.getContext('2d');
-    context.clearRect(0, 0, 256, 256);
-    if (bitmap) context.drawImage(bitmap, 0, 0);
-  }});
+    context.clearRect(0, 0, RADAR_TILE, RADAR_TILE);
+    context.drawImage(bitmap, 0, 0, RADAR_TILE, RADAR_TILE);
+  }}
+}}
+function radarProgress() {{
+  const tiles = Object.values(radarLayer._tiles || {{}});
+  const wanted = tiles.length * radarFrames.length;
+  if (!wanted) return 1;
+  let ready = 0;
+  for (const tile of tiles) for (const frame of radarFrames) {{
+    if (radarBitmaps.get(frame.path + '|' + radarTileKey(tile.coords)) instanceof ImageBitmap) ready += 1;
+  }}
+  return ready / wanted;
 }}
 function drawRadarFrame() {{
   for (const tile of Object.values(radarLayer._tiles || {{}})) drawRadarTile(tile.el);
@@ -561,9 +606,12 @@ function updateRadarStamp() {{
   const minutes = Math.max(0, Math.round((Date.now() - when.getTime()) / 60000));
   const stamp = when.toLocaleString([], {{weekday:'short', month:'short', day:'numeric', hour:'2-digit', minute:'2-digit', timeZoneName:'short'}});
   const latest = radarFrameIndex === radarFrames.length - 1;
+  const progress = radarProgress();
+  const status = Date.now() < radarPausedUntil ? ' · RainViewer busy, retrying shortly'
+    : progress < 1 ? ' · loading ' + Math.floor(progress * 100) + '%' : '';
   element.innerHTML = '<b>Radar</b> ' + escapeHtml(stamp) + ' <span>' +
     (latest ? '(latest' + (minutes ? ', ' + minutes + ' min ago' : '') + ')' : '(' + minutes + ' min ago)') +
-    '</span> <span class="radar-step">' + (radarFrameIndex + 1) + '/' + radarFrames.length + '</span>';
+    '</span> <span class="radar-step">' + (radarFrameIndex + 1) + '/' + radarFrames.length + escapeHtml(status) + '</span>';
 }}
 function stepRadar() {{
   if (!radarFrames.length) return;
@@ -583,7 +631,7 @@ async function refreshRadarFrames() {{
     radarHost = data.host;
     const keep = new Set(frames.map(frame => frame.path));
     for (const [key, bitmap] of radarBitmaps) {{
-      if (!keep.has(key.split('|')[0])) {{ bitmap.then(image => image && image.close()); radarBitmaps.delete(key); }}
+      if (!keep.has(key.split('|')[0])) {{ if (bitmap instanceof ImageBitmap) bitmap.close(); radarBitmaps.delete(key); }}
     }}
     const showingLatest = radarFrameIndex >= radarFrames.length - 1;
     radarFrames = frames.map(frame => ({{path: frame.path, time: frame.time}}));
@@ -611,8 +659,9 @@ function setRadarVisible(visible) {{
   clearInterval(radarRefresh);
   map.removeLayer(radarLayer);
   radarStamp.remove();
-  for (const bitmap of radarBitmaps.values()) bitmap.then(image => image && image.close());
+  for (const bitmap of radarBitmaps.values()) if (bitmap instanceof ImageBitmap) bitmap.close();
   radarBitmaps.clear();
+  radarQueue.length = 0;
   radarFrames = [];
 }}
 // ---- Optional overlays: NWS alerts, station coverage, day/night (grey line) ----
