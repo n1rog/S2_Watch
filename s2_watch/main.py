@@ -1,6 +1,7 @@
 import argparse
 import os
 import signal
+import sqlite3
 import sys
 
 from PySide6.QtWidgets import QApplication
@@ -22,11 +23,32 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
     return arguments
 
 
+def apply_map_rendering(database: str) -> None:
+    """Software map rendering, when chosen (Display settings), must be set before Qt starts.
+
+    Some graphics drivers (seen with Intel Iris Xe on Linux) lose the map's markers, aircraft
+    and region outlines while zooming; drawing the map without the GPU avoids it.
+    """
+    try:
+        connection = sqlite3.connect(f"file:{database}?mode=ro", uri=True)
+        try:
+            row = connection.execute("SELECT value FROM settings WHERE key = 'map.rendering'").fetchone()
+        finally:
+            connection.close()
+    except sqlite3.Error:   # no database yet
+        return
+    if row and row[0] == "software":
+        flags = os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", "")
+        if "--disable-gpu" not in flags.split():
+            os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = f"{flags} --disable-gpu".strip()
+
+
 def main() -> int:
     arguments = parse_arguments(sys.argv)
     if arguments.configure:
         from s2_watch.setup_wizard import run_wizard
         return run_wizard(arguments.database)
+    apply_map_rendering(arguments.database)
     app = QApplication(sys.argv)
     app.setApplicationName("s2-watch")
     app.setWindowIcon(app_icon())

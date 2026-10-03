@@ -409,6 +409,13 @@ class MainWindow(QMainWindow):
         display_layout.addRow(self.alerts_enabled)
         display_layout.addRow(self.alert_high_urgency)
         display_layout.addRow(self.geocoding_enabled)
+        self.software_rendering = QCheckBox("Software map rendering (if map icons vanish while zooming)")
+        self.software_rendering.setToolTip(
+            "Draws the map without the graphics card. Fixes markers, aircraft and regions disappearing "
+            "during zoom with some graphics drivers. Takes effect the next time S2 Watch starts.")
+        self.software_rendering.setChecked(self.store.get_setting("map.rendering", "hardware") == "software")
+        self.software_rendering.toggled.connect(self.map_rendering_changed)
+        display_layout.addRow(self.software_rendering)
         self.display_dialog = self.create_settings_dialog("Display", display_layout)
 
         sources_layout = QFormLayout()
@@ -707,6 +714,12 @@ class MainWindow(QMainWindow):
         self._report_items.clear()
         self.map_view.clear_locations()
         self.connect_js8call()
+
+    def map_rendering_changed(self, software: bool) -> None:
+        self.store.set_setting("map.rendering", "software" if software else "hardware")
+        QMessageBox.information(self, "Map rendering",
+                                "The map will use " + ("software" if software else "graphics-card")
+                                + " rendering the next time S2 Watch starts. Quit and start S2 Watch to apply it.")
 
     def time_zone_changed(self) -> None:
         self.store.set_setting("display.time_zone", str(self.time_zone.currentData()))
