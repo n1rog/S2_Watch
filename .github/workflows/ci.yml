@@ -63,7 +63,10 @@ jobs:
           bash S2Watch-*-installer/install.sh --yes --no-wizard
           launcher="$HOME/.local/bin/s2-watch"
           [ "$RUNNER_OS" = macOS ] && launcher="$HOME/Library/Application Support/S2 Watch/bin/s2-watch"
-          yes '' | head -200 | "$launcher" --configure
+          # Every default answer, from a file: a pipe such as "yes '' | head" fails the step
+          # under GitHub's pipefail when its writer is cut off.
+          printf '\n%.0s' $(seq 200) > "$RUNNER_TEMP/answers.txt"
+          "$launcher" --configure < "$RUNNER_TEMP/answers.txt"
       - name: Install (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
