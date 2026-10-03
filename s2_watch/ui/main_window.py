@@ -403,7 +403,7 @@ class MainWindow(QMainWindow):
         self.watch_forms_dialog = self.create_settings_dialog("Watch Forms", watch_forms_layout)
 
         display_layout = QFormLayout()
-        display_layout.addRow("Display time zone:", self.time_zone)
+        display_layout.addRow("Time Format:", self.time_zone)
         self.news_rows.setToolTip("Reports marked Of interest or Follow-up are always shown")
         display_layout.addRow("Newsworthiness rows shown:", self.news_rows)
         display_layout.addRow(self.alerts_enabled)
@@ -466,6 +466,26 @@ class MainWindow(QMainWindow):
         self._backup_timer.start(60 * 60 * 1000)
         QTimer.singleShot(60_000, self.back_up_database)
         help_menu = self.menuBar().addMenu("Help")
+        # Current date/time in the chosen format, top right, with a Local/Zulu switch.
+        # Kept on self: PySide doesn't take ownership of a menu-bar corner widget.
+        self.clock_corner = QWidget()
+        clock_layout = QHBoxLayout(self.clock_corner)
+        clock_layout.setContentsMargins(0, 0, 6, 0)
+        clock_layout.setSpacing(8)
+        self.clock_label = QLabel()
+        clock_font = QFont(self.clock_label.font())
+        clock_font.setBold(True)
+        self.clock_label.setFont(clock_font)
+        self.clock_button = QToolButton()
+        self.clock_button.setToolTip("Switch all times between Local and Zulu (UTC)")
+        self.clock_button.clicked.connect(self.toggle_time_format)
+        clock_layout.addWidget(self.clock_label)
+        clock_layout.addWidget(self.clock_button)
+        self.menuBar().setCornerWidget(self.clock_corner, Qt.Corner.TopRightCorner)
+        self._clock_timer = QTimer(self)
+        self._clock_timer.timeout.connect(self.update_clock)
+        self._clock_timer.start(1000)
+        self.update_clock()
         about_action = help_menu.addAction("About S2 Watch")
         about_action.triggered.connect(self.show_about)
         self.statusBar().addWidget(self.status, 1)
@@ -691,6 +711,19 @@ class MainWindow(QMainWindow):
     def time_zone_changed(self) -> None:
         self.store.set_setting("display.time_zone", str(self.time_zone.currentData()))
         self.refresh_display_times()
+        self.update_clock()
+
+    def toggle_time_format(self) -> None:
+        self.time_zone.setCurrentIndex(self.time_zone.findData("local" if self.time_zone.currentData() == "utc" else "utc"))
+
+    def update_clock(self) -> None:
+        if not hasattr(self, "clock_label"):
+            return
+        zulu = self.time_zone.currentData() == "utc"
+        now = datetime.now(timezone.utc) if zulu else datetime.now().astimezone()
+        zone = "Z" if zulu else f"L ({now.tzname()})"
+        self.clock_label.setText(f"{now:%a %b-%d-%y %H:%M:%S} {zone}")
+        self.clock_button.setText("Show Local" if zulu else "Show Zulu")
 
     def news_rows_changed(self, value: int) -> None:
         self.store.set_setting("news.rows", str(value))
