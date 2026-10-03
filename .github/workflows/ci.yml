@@ -51,8 +51,13 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      # Only to build the package ("python3" isn't a working command on Windows runners);
+      # the installer finds or installs its own Python.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
       - name: Build the installer package
-        run: python3 tools/make_installer_package.py
+        run: python tools/make_installer_package.py
         shell: bash
       # Install from the package, the way a user would (its own Python check, dependencies,
       # launchers), then run the setup wizard with every default answer.

@@ -3,6 +3,7 @@ import os
 import signal
 import sqlite3
 import sys
+from pathlib import Path
 
 from PySide6.QtWidgets import QApplication
 
@@ -30,7 +31,8 @@ def apply_map_rendering(database: str) -> None:
     and region outlines while zooming; drawing the map without the GPU avoids it.
     """
     try:
-        connection = sqlite3.connect(f"file:{database}?mode=ro", uri=True)
+        # A file: URI (file:///C:/... on Windows) so read-only mode never creates a database.
+        connection = sqlite3.connect(Path(database).resolve().as_uri() + "?mode=ro", uri=True)
         try:
             row = connection.execute("SELECT value FROM settings WHERE key = 'map.rendering'").fetchone()
         finally:

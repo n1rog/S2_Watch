@@ -134,7 +134,7 @@ def test_air_ambulances_flying_under_tail_numbers_are_medevac() -> None:
 
     from s2_watch.overlays import compact_aircraft, is_air_medical_operator
 
-    registered = json.loads((Path(__file__).parent.parent / "s2_watch" / "data" / "air_ambulance.json").read_text())
+    registered = json.loads((Path(__file__).parent.parent / "s2_watch" / "data" / "air_ambulance.json").read_text(encoding="utf-8"))
     hex_code, operator = next(iter(registered.items()))
     base = {"lat": 39.7, "lon": -104.9, "dbFlags": 0, "t": "EC35", "category": "A7"}
     tail_number = compact_aircraft(dict(base, hex=hex_code, flight="N203HA"))

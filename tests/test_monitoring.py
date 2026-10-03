@@ -18,10 +18,10 @@ from s2_watch.forms_io import forms_from_json, forms_to_json
 
 def test_text_log_adapter_reads_only_new_lines(tmp_path: Path) -> None:
     log = tmp_path / "js8.log"
-    log.write_text("first\n")
+    log.write_text("first\n", encoding="utf-8")
     adapter = TextLogAdapter(log)
     assert [m.raw_content for m in adapter.read_messages()] == ["first"]
-    log.write_text("first\nsecond\n")
+    log.write_text("first\nsecond\n", encoding="utf-8")
     assert [m.raw_content for m in adapter.read_messages()] == ["second"]
 
 
@@ -274,7 +274,7 @@ def test_flmsg_file_adapter_reads_new_message_files(tmp_path: Path) -> None:
     message_file = tmp_path / "report.k2s"
     message_file.write_text(
         "<flmsg>4.0.23\n:hdr_fm:12 \nN0CALL 20260101000000\n"
-        ":mg:40 CUSTOM_FORM,emergency.html\nFire near town\n"
+        ":mg:40 CUSTOM_FORM,emergency.html\nFire near town\n", encoding="utf-8"
     )
     adapter = FLMSGFileAdapter(tmp_path)
     messages = adapter.read_messages()
@@ -350,7 +350,7 @@ def test_flmsg_message_time_is_when_the_file_arrived(tmp_path: Path) -> None:
     import os
     from datetime import datetime, timezone
     message_file = tmp_path / "report.k2s"
-    message_file.write_text("<flmsg>4.0.23\n:mg:12 Fire near town\n")
+    message_file.write_text("<flmsg>4.0.23\n:mg:12 Fire near town\n", encoding="utf-8")
     arrived = datetime(2026, 9, 28, 2, 59, 48, tzinfo=timezone.utc)
     os.utime(message_file, (arrived.timestamp(), arrived.timestamp()))
     assert FLMSGFileAdapter(tmp_path).read_messages()[0].received_at == arrived
