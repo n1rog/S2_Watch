@@ -111,7 +111,7 @@ install_python() {
         sudo apt-get update
         local version
         for version in 3.13 3.12 3.11; do
-            if apt-cache policy "python$version" 2>/dev/null | grep -q 'Candidate: [0-9]'; then
+            if grep -q 'Candidate: [0-9]' <<< "$(apt-cache policy "python$version" 2>/dev/null)"; then
                 sudo apt-get install -y "python$version" "python$version-venv"
                 return
             fi
@@ -148,11 +148,14 @@ fi
 bold "3/7  Checking the system libraries S2 Watch's window and map need"
 if [ "$OS" = "Linux" ]; then
     missing=()
+    # Read the list once: piping it into 'grep -q' under pipefail fails whenever grep stops
+    # early, which made present libraries look missing.
+    libraries="$(ldconfig -p 2>/dev/null || /sbin/ldconfig -p 2>/dev/null || true)"
     for library in libxcb-cursor.so.0 libnss3.so libxkbcommon-x11.so.0 libEGL.so.1 libGL.so.1 libasound.so.2 \
                    libfontconfig.so.1 libdbus-1.so.3 libxcb-icccm.so.4 libxcb-keysyms.so.1 libxcb-image.so.0 \
                    libxcb-render-util.so.0 libxcb-shape.so.0 libXcomposite.so.1 libXdamage.so.1 libXrandr.so.2 \
                    libXtst.so.6 libxkbfile.so.1; do
-        ldconfig -p 2>/dev/null | grep -q "$library" || missing+=("$library")
+        grep -qF "$library" <<< "$libraries" || missing+=("$library")
     done
     if [ ${#missing[@]} -eq 0 ]; then
         info "OK: all present."
@@ -161,7 +164,7 @@ if [ "$OS" = "Linux" ]; then
         packages=()
         if command -v apt-get >/dev/null 2>&1; then
             asound=libasound2
-            apt-cache policy libasound2t64 2>/dev/null | grep -q 'Candidate: [0-9]' && asound=libasound2t64
+            grep -q 'Candidate: [0-9]' <<< "$(apt-cache policy libasound2t64 2>/dev/null)" && asound=libasound2t64
             packages=(libxcb-cursor0 libnss3 libxkbcommon-x11-0 libegl1 libgl1 "$asound" libfontconfig1 libdbus-1-3
                       libxcb-icccm4 libxcb-keysyms1 libxcb-image0 libxcb-render-util0 libxcb-shape0 libxcomposite1
                       libxdamage1 libxrandr2 libxtst6 libxkbfile1)
