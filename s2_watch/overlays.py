@@ -24,6 +24,7 @@ from PySide6.QtCore import QObject, QTimer, Signal
 
 from s2_watch import __version__
 from s2_watch.geo import maidenhead_to_coordinates
+from s2_watch.icao_countries import registration_country
 from s2_watch.models import Message
 
 NWS_ALERTS_URL = "https://api.weather.gov/alerts/active?status=actual"
@@ -268,6 +269,7 @@ def compact_aircraft(record: dict) -> dict | None:
                         or air_ambulance_operator(record.get("hex", ""))
                         or is_air_medical_operator(record.get("ownOp") or "")),
         "operator": air_ambulance_operator(record.get("hex", "")) or (record.get("ownOp") or "").strip(),
+        "country": registration_country(record.get("hex", "")),
         # Drawing shape: helicopter, light aircraft (general aviation), or airliner-size.
         "shape": "helicopter" if (record.get("category") == "A7" or (record.get("t") or "") in HELICOPTER_TYPES)
                  else "light" if record.get("category") in ("A1", "A2", "B1", "B4") else "plane",

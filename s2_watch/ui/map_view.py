@@ -912,7 +912,8 @@ function aircraftTooltip(a) {{
     (a.shape === 'helicopter' ? ' · helicopter' : (a.shape === 'light' ? ' · light aircraft' : '')) +
     (a.emergency ? '<br><b style="color:#b3261e">Squawk ' + escapeHtml(a.squawk) + ': ' + escapeHtml(a.emergency) + '</b>' : '') +
     '<br>' + escapeHtml(altitude) + (a.speed != null ? ' · ' + a.speed + ' kt' : '') + (a.track != null ? ' · heading ' + a.track + '°' : '') +
-    (a.registration ? '<br>Reg. ' + escapeHtml(a.registration) : '') +
+    (a.registration || a.country ? '<br>' + (a.registration ? 'Reg. ' + escapeHtml(a.registration) : 'Registered') +
+      (a.country ? (a.registration ? ' · ' : ' in ') + escapeHtml(a.country) : '') : '') +
     (a.operator ? '<br>' + escapeHtml(a.operator) : '') + '<br><span style="color:#555">ICAO ' + escapeHtml(a.hex.toUpperCase()) +
     (a.squawk && !a.emergency ? ' · squawk ' + escapeHtml(a.squawk) : '') + '</span>';
 }}

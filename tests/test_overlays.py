@@ -167,3 +167,19 @@ def test_hiding_civilian_and_medevac_skips_the_traffic_sweeps(monkeypatch) -> No
     poller.set_general_traffic(True)   # starts fetching the sweeps (timer not running here)
     poller.fetch()
     assert calls == ["national"]
+
+
+def test_country_of_registration_from_the_icao_address() -> None:
+    from s2_watch.icao_countries import registration_country
+    from s2_watch.overlays import compact_aircraft
+
+    assert registration_country("a1b2c3") == "United States"
+    assert registration_country("AE4D4D") == "United States"      # US military block
+    assert registration_country("c03a5f") == "Canada"
+    assert registration_country("3c6589") == "Germany"
+    assert registration_country("43c6f0") == "United Kingdom"
+    assert registration_country("0d0abc") == "Mexico"
+    assert registration_country("~2a4f10") == "" and registration_country("") == ""
+    assert registration_country("f00001") == ""                    # not a state block
+    plane = compact_aircraft({"hex": "c03a5f", "lat": 49.2, "lon": -123.1})
+    assert plane["country"] == "Canada"
