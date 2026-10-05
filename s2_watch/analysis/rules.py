@@ -127,6 +127,12 @@ class RuleBasedNewsAnalyzer(NewsAnalyzer):
         rule, _ = max(matches, key=lambda item: rule_by_priority[item[0].urgency])
         terms = tuple(dict.fromkeys(term for _, term in matches))
         confidence = min(0.95, 0.55 + 0.1 * len(terms) + (0.1 if message.fields else 0))
+        urgency = rule.urgency
+        # A largely contained wildfire is no longer urgent (NIFC reports "92% contained").
+        contained = re.search(r"(\d{1,3})% contained", message.raw_content)
+        if contained and rule.urgency == "high":
+            percent = int(contained.group(1))
+            urgency = "low" if percent >= 90 else "medium" if percent >= 50 else urgency
         summary = message.raw_content
         if message.fields.get("type") == "ALERTS" and message.fields.get("severity"):
             summary = f"MagCommstat alert (severity {message.fields['severity']}): {summary}"
@@ -135,7 +141,7 @@ class RuleBasedNewsAnalyzer(NewsAnalyzer):
         return AnalysisResult(
             True,
             rule.category,
-            rule.urgency,
+            urgency,
             summary,
             confidence,
             terms,

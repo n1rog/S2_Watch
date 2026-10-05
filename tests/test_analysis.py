@@ -109,3 +109,14 @@ def test_category_vocabulary_ignores_common_false_friends() -> None:
         "WILL DEPLOY THE EFHW ANTENNA TONIGHT",
     ):
         assert not analyzer.analyze(Message("JS8Call", text)).newsworthy, text
+
+
+def test_contained_wildfires_are_less_urgent() -> None:
+    from s2_watch.analysis.rules import RuleBasedNewsAnalyzer
+    from s2_watch.models import Message
+
+    rules = RuleBasedNewsAnalyzer()
+    urgency = lambda text: rules.analyze(Message("OSINT", text)).urgency
+    assert urgency("NIFC wildfire: Bouquet Fire — California; 1,000 acres, 0% contained") == "high"
+    assert urgency("NIFC wildfire: Bull Fire — Nevada; 1,529 acres, 60% contained") == "medium"
+    assert urgency("NIFC wildfire: Hagen Fire — Oregon; 61,380 acres, 99% contained") == "low"

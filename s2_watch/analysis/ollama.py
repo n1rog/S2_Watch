@@ -26,10 +26,12 @@ About the traffic:
 - "MR01".."MR10" are MARS regions (FEMA regions 1-10).
 - Briefings often list items that did NOT change. A topic named after "NO CHANGE", "no reports of", "none", "negative" or "all quiet" is NOT news.
 - Routine traffic (net check-ins, signal reports, "ALL GREEN", tests, greetings) is not newsworthy.
+- Chat and questions about past events or personal experience ("have you ever...", "how often do you...") are not news.
+- For a briefing with several topics, judge only the items that report a change; categorise by those items, not by topics listed as unchanged.
 
 Decide whether the message reports a real, current event the officer should know about.
 category: the best fit from: {categories}.
-urgency: high = threat to life or major infrastructure now; medium = significant developing event; low = minor or informational.
+urgency: high ONLY for an imminent threat to life or a major infrastructure failure happening now; medium = significant developing event; low = minor, distant, contained or informational.
 summary: one plain headline, at most 15 words, with the place if known. Do not add facts that are not in the message.
 matched_terms: the few words that show the event.
 confidence: 0 to 1.
@@ -159,6 +161,11 @@ class HybridNewsAnalyzer(NewsAnalyzer):
         first = self.rules.analyze(message)
         if not first.newsworthy and not first.matched_terms:
             return first
+        # Official feeds (OSINT) are structured and arrive in bursts (20+ wildfires in one
+        # update); at several seconds a message on a CPU they would hold up radio traffic,
+        # and the model adds little to them. The model reads the radio messages.
+        if message.source_application == "OSINT":
+            return first
         try:
             result = self.model.analyze(message, hint=first)
             self.last_error = None
@@ -192,7 +199,8 @@ class FallbackNewsAnalyzer(NewsAnalyzer):
 ASSESSMENT_PROMPT = """You help an amateur-radio emergency-net operator write a follow-up report.
 Below is their draft. Write two things, using only facts in the draft:
 SUBJECT: one clear headline (at most 12 words, with the place).
-ASSESSMENT: two to four short sentences: what happened, where, how serious, whether official sources confirm it, and what to watch for next. Do not invent facts, numbers or sources.
+ASSESSMENT: two to four short sentences: what happened, where, how serious, whether official sources confirm it, and what to watch for next.
+Rules: copy numbers exactly as written (no "over" or "about"); do not add advice, instructions, causes, names or sources that are not in the draft.
 
 Draft:
 {report}
@@ -205,14 +213,18 @@ ASSESSMENT: ..."""
 def draft_assessment(report: str, endpoint: str, model: str, timeout: float = 120.0) -> tuple[str, str]:
     """(subject, assessment) suggested by the model for a follow-up report draft."""
     text = ollama_generate(endpoint, model, ASSESSMENT_PROMPT.format(report=report), timeout)
-    subject = assessment = ""
-    for line in text.splitlines():
-        if line.strip().upper().startswith("SUBJECT:"):
-            subject = line.split(":", 1)[1].strip()
-        elif line.strip().upper().startswith("ASSESSMENT:"):
-            assessment = line.split(":", 1)[1].strip()
-        elif assessment and line.strip():
-            assessment += " " + line.strip()
+    subject, parts, in_assessment = "", [], False
+    for raw in text.splitlines():
+        line = raw.strip().strip("*").strip()   # models sometimes add **bold** labels
+        label = line.split(":", 1)[0].strip("* ").upper() if ":" in line else ""
+        if label == "SUBJECT":
+            subject, in_assessment = line.split(":", 1)[1].strip(" *"), False
+        elif label == "ASSESSMENT":
+            in_assessment = True
+            parts.append(line.split(":", 1)[1].strip(" *"))
+        elif in_assessment and line:
+            parts.append(line)   # the assessment can continue on the following lines
+    assessment = " ".join(part for part in parts if part)
     if not assessment:
         raise OllamaError("Ollama's reply had no assessment")
     return subject, assessment

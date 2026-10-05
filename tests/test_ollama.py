@@ -102,3 +102,26 @@ def test_assessment_suggestion_replaces_subject_and_assessment() -> None:
     updated = replace_section(report, "Flooding closes roads in Tulsa", "River over its banks; NWS confirms.")
     assert "SUBJECT: Flooding closes roads in Tulsa" in updated
     assert updated.endswith("ASSESSMENT:\nRiver over its banks; NWS confirms.") and "LOCATION: Tulsa" in updated
+
+
+def test_assessment_reply_layouts_are_understood(monkeypatch) -> None:
+    import s2_watch.analysis.ollama as ollama
+
+    for reply in ("SUBJECT: Bouquet Fire grows\n\nASSESSMENT: Fire at 1,000 acres. NIFC confirms.",
+                  "**SUBJECT:** Bouquet Fire grows\n**ASSESSMENT:**\nFire at 1,000 acres.\nNIFC confirms."):
+        monkeypatch.setattr(ollama, "ollama_generate", lambda *args, reply=reply, **kwargs: reply)
+        assert ollama.draft_assessment("draft", "http://x", "m") == ("Bouquet Fire grows", "Fire at 1,000 acres. NIFC confirms.")
+
+
+def test_official_items_stay_with_the_rules() -> None:
+    from s2_watch.analysis.ollama import HybridNewsAnalyzer
+
+    class NeverCalled:
+        name = "ollama:test"
+
+        def analyze(self, message, hint=None):
+            raise AssertionError("the model should not read OSINT items")
+
+    result = HybridNewsAnalyzer(NeverCalled(), RuleBasedNewsAnalyzer()).analyze(
+        Message("OSINT", "NIFC wildfire: Bouquet Fire — California; 1,000 acres, 0% contained"))
+    assert result.newsworthy
