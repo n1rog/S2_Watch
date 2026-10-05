@@ -2,20 +2,38 @@
 
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 
+from PySide6.QtCore import Signal
 from PySide6.QtGui import QFontDatabase, QGuiApplication
 from PySide6.QtWidgets import (
     QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QPlainTextEdit,
     QPushButton, QTabWidget, QVBoxLayout, QWidget,
 )
 
+from s2_watch.analysis.ollama import draft_assessment
 from s2_watch.followup import JS8CALL_TARGET, FollowUpFacts, dtg, flmsg_text, full_report, js8call_text
 
 
+def replace_section(report: str, subject: str, assessment: str) -> str:
+    """The report with a new SUBJECT line and everything after "ASSESSMENT:" replaced."""
+    lines = report.splitlines()
+    if subject:
+        lines = [f"SUBJECT: {subject}" if line.startswith("SUBJECT:") else line for line in lines]
+    if "ASSESSMENT:" in lines:
+        lines = lines[:lines.index("ASSESSMENT:") + 1] + [assessment]
+    else:
+        lines += ["", "ASSESSMENT:", assessment]
+    return "\n".join(lines)
+
+
 class FollowUpDialog(QDialog):
-    def __init__(self, facts: FollowUpFacts, store, parent=None) -> None:
+    suggestion_ready = Signal(str, str, str)   # subject, assessment, error (from a thread)
+
+    def __init__(self, facts: FollowUpFacts, store, parent=None, ollama: tuple[str, str] | None = None) -> None:
         super().__init__(parent)
+        self.ollama = ollama   # (endpoint, model) when Ollama is the analysis mode
         self.setWindowTitle("Draft follow-up report")
         self.resize(760, 640)
         self.facts = facts
@@ -54,6 +72,12 @@ class FollowUpDialog(QDialog):
         buttons = QDialogButtonBox()
         copy = buttons.addButton("Copy this tab", QDialogButtonBox.ButtonRole.ActionRole)
         copy.clicked.connect(self._copy)
+        self.suggest = buttons.addButton("Suggest subject && assessment (Ollama)", QDialogButtonBox.ButtonRole.ActionRole)
+        self.suggest.setToolTip("Your local Ollama model drafts the subject and assessment from this report; "
+                                "check and edit them before you send anything.")
+        self.suggest.setVisible(ollama is not None)
+        self.suggest.clicked.connect(self._suggest)
+        self.suggestion_ready.connect(self._suggested)
         self.mark = buttons.addButton("Mark report “Follow-up created”", QDialogButtonBox.ButtonRole.ActionRole)
         self.mark.clicked.connect(self._mark)
         buttons.addButton(QDialogButtonBox.StandardButton.Close).clicked.connect(self.accept)
@@ -109,6 +133,33 @@ class FollowUpDialog(QDialog):
         path, _ = QFileDialog.getSaveFileName(self, "Save FLMSG text", str(Path.home() / name), "Text files (*.txt)")
         if path:
             Path(path).write_text(self.flmsg.toPlainText(), encoding="ascii", errors="replace")
+
+    def _suggest(self) -> None:
+        if not self.ollama:
+            return
+        endpoint, model = self.ollama
+        report = self.full.toPlainText()
+        self.suggest.setEnabled(False)
+        self.suggest.setText("Ollama is writing…")
+
+        def work() -> None:
+            try:
+                subject, assessment = draft_assessment(report, endpoint, model)
+                self.suggestion_ready.emit(subject, assessment, "")
+            except Exception as error:
+                self.suggestion_ready.emit("", "", str(error))
+
+        threading.Thread(target=work, daemon=True, name="s2-watch-assessment").start()
+
+    def _suggested(self, subject: str, assessment: str, error: str) -> None:
+        self.suggest.setEnabled(True)
+        self.suggest.setText("Suggest subject && assessment (Ollama)")
+        if error:
+            self.suggest.setToolTip(f"Ollama could not help: {error}")
+            self.suggest.setText("Ollama unavailable — try again")
+            return
+        self.full.setPlainText(replace_section(self.full.toPlainText(), subject, assessment))
+        self.tabs.setCurrentIndex(0)
 
     def _mark(self) -> None:
         self.marked = True

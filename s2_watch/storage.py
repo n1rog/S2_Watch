@@ -116,6 +116,11 @@ class SQLiteStore:
             # can be shown and mapped again at launch without re-reading its source.
             self.connection.execute("ALTER TABLE messages ADD COLUMN fields_json TEXT NOT NULL DEFAULT ''")
         self.connection.execute("CREATE INDEX IF NOT EXISTS messages_report_id ON messages(report_id)")
+        analysis_columns = {row[1] for row in self.connection.execute("PRAGMA table_info(analysis_results)")}
+        if "analyzer" not in analysis_columns:
+            # Which analyzer produced the result ("rules", "ollama:<model>"), so a message
+            # read again isn't analysed again by the same one.
+            self.connection.execute("ALTER TABLE analysis_results ADD COLUMN analyzer TEXT NOT NULL DEFAULT ''")
         self._remove_repeated_messages()
         self.connection.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS messages_source_key ON messages(source_key)"
@@ -422,18 +427,19 @@ class SQLiteStore:
         ).fetchone()
         return int(row[0])
 
-    def save_analysis(self, message_id: int, result: AnalysisResult) -> None:
+    def save_analysis(self, message_id: int, result: AnalysisResult, analyzer: str = "") -> None:
         self.connection.execute(
             """INSERT INTO analysis_results(
-                 message_id, newsworthy, category, urgency, summary, confidence, matched_terms
-               ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                 message_id, newsworthy, category, urgency, summary, confidence, matched_terms, analyzer
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(message_id) DO UPDATE SET
                  newsworthy = excluded.newsworthy,
                  category = excluded.category,
                  urgency = excluded.urgency,
                  summary = excluded.summary,
                  confidence = excluded.confidence,
-                 matched_terms = excluded.matched_terms""",
+                 matched_terms = excluded.matched_terms,
+                 analyzer = excluded.analyzer""",
             (
                 message_id,
                 int(result.newsworthy),
@@ -442,9 +448,31 @@ class SQLiteStore:
                 result.summary,
                 result.confidence,
                 "\x1f".join(result.matched_terms),
+                analyzer,
             ),
         )
         self.connection.commit()
+
+    def find_message_id(self, source_key: str, legacy_key: str | None = None) -> int | None:
+        """The saved message with this key (or the key an earlier version used), if any."""
+        for key in (source_key, legacy_key):
+            if key:
+                row = self.connection.execute("SELECT id FROM messages WHERE source_key = ?", (key,)).fetchone()
+                if row:
+                    return int(row[0])
+        return None
+
+    def saved_analysis(self, message_id: int, analyzer: str) -> AnalysisResult | None:
+        """The analysis this analyzer already made of a message, so it needn't run again."""
+        row = self.connection.execute(
+            """SELECT newsworthy, category, urgency, summary, confidence, matched_terms FROM analysis_results
+               WHERE message_id = ? AND analyzer = ?""", (message_id, analyzer),
+        ).fetchone()
+        if not row:
+            return None
+        newsworthy, category, urgency, summary, confidence, terms = row
+        return AnalysisResult(bool(newsworthy), category, urgency, summary, float(confidence),
+                              tuple(term for term in (terms or "").split("\x1f") if term))
 
     def count_analysis_results(self) -> int:
         row = self.connection.execute("SELECT COUNT(*) FROM analysis_results").fetchone()

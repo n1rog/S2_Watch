@@ -9,6 +9,11 @@ from s2_watch.models import ANY_APPLICATION, Message, WatchForm
 from s2_watch.storage import SQLiteStore
 
 
+def analyzer_name(analyzer) -> str:
+    """Identifies an analyzer's results ("rules", "ollama:llama3.2"...)."""
+    return getattr(analyzer, "name", type(analyzer).__name__) if analyzer is not None else ""
+
+
 def message_key(message: Message) -> str:
     """Identity of a source message across re-reads and restarts (FLMSG files have no timestamp).
 
@@ -90,7 +95,15 @@ class Monitor:
         if not matching:
             return False
         matched = replace(message, form_name=matching[0].name)
-        result = self.analyzer.analyze(matched) if self.analyzer else None
+        result = None
+        if self.analyzer:
+            # A message read again (every launch) reuses this analyzer's saved result: an AI
+            # model takes seconds per message, so only new messages are sent to it.
+            known = self.store.find_message_id(message_key(message), legacy_message_key(message))
+            if known is not None:
+                result = self.store.saved_analysis(known, analyzer_name(self.analyzer))
+            if result is None:
+                result = self.analyzer.analyze(matched)
         if result is not None and result.newsworthy:
             # Credit the form named after the report's category (the category forms), not
             # simply the first form in the list that happened to match.
@@ -103,7 +116,7 @@ class Monitor:
         matched = replace(matched, received_at=self.store.earliest_received_at(message_id, matched.received_at))
         self.on_match(matched)
         if result is not None:
-            self.store.save_analysis(message_id, result)
+            self.store.save_analysis(message_id, result, analyzer_name(self.analyzer))
         if self.on_saved:
             self.on_saved(message_id, matched, result)
         if result is not None and self.on_analysis:

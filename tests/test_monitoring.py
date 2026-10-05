@@ -11,7 +11,7 @@ from s2_watch.adapters.flmsg_files import FLMSGFileAdapter
 from s2_watch.adapters.js8superspotter_sqlite import JS8SuperSpotterSQLiteAdapter
 from s2_watch.adapters.text_log import TextLogAdapter
 from s2_watch.models import Message, WatchForm
-from s2_watch.monitoring import Monitor
+from s2_watch.monitoring import Monitor, message_key
 from s2_watch.storage import SQLiteStore
 from s2_watch.forms_io import forms_from_json, forms_to_json
 
@@ -375,3 +375,30 @@ def test_message_read_again_keeps_its_first_time(tmp_path: Path) -> None:
         Monitor([Source()], [form], store, shown.append).poll()
     assert [message.received_at for message in shown] == [first_seen, first_seen, first_seen - timedelta(hours=1)]
     assert datetime.fromisoformat(store.search_history(text="FLOODING")[0][0]) == first_seen - timedelta(hours=1)
+
+
+def test_a_message_read_again_is_not_analysed_again(tmp_path: Path) -> None:
+    from s2_watch.analysis.rules import RuleBasedNewsAnalyzer
+
+    class CountingAnalyzer(RuleBasedNewsAnalyzer):
+        name = "ollama:test"
+        calls = 0
+
+        def analyze(self, message):
+            CountingAnalyzer.calls += 1
+            return super().analyze(message)
+
+    class Source:
+        application_name = "JS8Call"
+
+        def read_messages(self):
+            return [Message("JS8Call", "FLOODING IN TULSA", fields={"message_id": "1"})]
+
+    store = SQLiteStore(tmp_path / "s2.db")
+    form = WatchForm("JS8Call", "All", "")
+    for _ in range(3):   # launch, relaunch, re-scan
+        Monitor([Source()], [form], store, lambda message: None, CountingAnalyzer()).poll()
+    assert CountingAnalyzer.calls == 1
+    # A different analyzer (switching modes) does analyse it again.
+    Monitor([Source()], [form], store, lambda message: None, RuleBasedNewsAnalyzer()).poll()
+    assert store.saved_analysis(store.find_message_id(message_key(Source().read_messages()[0])), "rules") is not None

@@ -108,6 +108,8 @@ class RuleBasedNewsAnalyzer(NewsAnalyzer):
     def __init__(self, rules: tuple[Rule, ...] = DEFAULT_RULES) -> None:
         self.rules = rules
 
+    name = "rules"
+
     def analyze(self, message: Message) -> AnalysisResult:
         structured = " ".join(
             value for key, value in message.fields.items()

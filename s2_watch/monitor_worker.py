@@ -16,7 +16,7 @@ from s2_watch.analysis.summary import is_placeholder_summary, summarize
 from s2_watch.geocoding import NominatimGeocoder
 from s2_watch.locating import LocationResolver, ResolvedLocation
 from s2_watch.models import Message, WatchForm
-from s2_watch.monitoring import Monitor
+from s2_watch.monitoring import Monitor, analyzer_name
 from s2_watch.overlays import CoverageTracker
 from s2_watch.storage import ReportInfo, SQLiteStore
 
@@ -152,7 +152,7 @@ class MonitorWorker(QObject):
             # The offline analyzer's summary repeats the message; write a headline instead
             # (an AI analyzer's own summary is kept).
             result = replace(result, summary=summarize(message, result, processed.locations))
-            self.store.save_analysis(message_id, result)
+            self.store.save_analysis(message_id, result, analyzer_name(self.monitor.analyzer if self.monitor else None))
         processed.result = result
         # The report's area: the most specific location's state and MARS region.
         area = next((location for location in processed.locations if location.state or location.region), None)

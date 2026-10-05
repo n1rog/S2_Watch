@@ -48,7 +48,7 @@ from s2_watch.adapters.flmsg_files import FLMSGFileAdapter
 from s2_watch.adapters.js8superspotter_sqlite import JS8SuperSpotterSQLiteAdapter
 from s2_watch.analysis.base import AnalysisResult
 from s2_watch.analysis.base import NewsAnalyzer
-from s2_watch.analysis.ollama import FallbackNewsAnalyzer, OllamaNewsAnalyzer
+from s2_watch.analysis.ollama import HybridNewsAnalyzer, OllamaNewsAnalyzer
 from s2_watch.analysis.rules import RuleBasedNewsAnalyzer
 from s2_watch.analysis.categories import NEWS_CATEGORIES
 from s2_watch.models import ANY_APPLICATION, APPLICATIONS, Message, WatchForm
@@ -839,7 +839,8 @@ class MainWindow(QMainWindow):
         mode = self.analysis_mode.checkedAction().data()
         if mode == "rules":
             return RuleBasedNewsAnalyzer()
-        return FallbackNewsAnalyzer(
+        # Rules first; the model reads only the messages the rules flag.
+        return HybridNewsAnalyzer(
             OllamaNewsAnalyzer(
                 model=self.ollama_model.text().strip() or "llama3.2",
                 endpoint=self.ollama_endpoint.text().strip() or "http://127.0.0.1:11434",
@@ -966,8 +967,8 @@ class MainWindow(QMainWindow):
                 text = "No watch forms enabled — Configuration → Watch Forms… | " + text
             self.status.setText(text)
         analyzer = self._analyzer
-        if isinstance(analyzer, FallbackNewsAnalyzer) and analyzer.last_error:
-            self.status.setText(f"{self.status.text()}; AI fallback: {analyzer.last_error}")
+        if getattr(analyzer, "last_error", None):
+            self.status.setText(f"{self.status.text()}; Ollama unavailable, using rules: {analyzer.last_error}")
 
     def update_application_status(self) -> None:
         adapters = {
@@ -1020,6 +1021,9 @@ class MainWindow(QMainWindow):
             if shown is not None:
                 # Another copy of a report already on screen: count it, don't repeat it.
                 self.analysis.item(shown.row(), self.SEEN_COLUMN).setText(self.seen_text(report))
+                if processed.result and not processed.preloaded:
+                    # A fresh analysis (e.g. by Ollama after switching modes) replaces the shown one.
+                    self.update_analysis_row(shown.row(), processed.result)
                 continue
             self.map_view.add_message(processed.message, processed.locations,
                                       dimmed=bool(report and report.status == "ignored"))
@@ -1239,6 +1243,18 @@ class MainWindow(QMainWindow):
         self.apply_news_rows_limit()
         self.show_alerts([result] if self.should_alert(result) else [])
 
+    def update_analysis_row(self, row: int, result: AnalysisResult) -> None:
+        values = {"Result": "NEWSWORTHY" if result.newsworthy else "routine", "Category": result.category,
+                  "Urgency": result.urgency, "Confidence": f"{result.confidence:.0%}", "Summary": result.summary}
+        for column, value in values.items():
+            item = self.analysis.item(row, self.ANALYSIS_COLUMNS.index(column))
+            if item is not None and item.text() != value:
+                item.setText(value)
+        first = self.analysis.item(row, 0)
+        message = first.data(Qt.ItemDataRole.UserRole + 1) if first else None
+        if isinstance(message, Message):
+            self.map_view.set_message_category(message, result.category if result.newsworthy else "routine")
+
     def insert_analysis_row(self, message: Message, result: AnalysisResult, report=None,
                             locations=None) -> QTableWidgetItem:
         label = "NEWSWORTHY" if result.newsworthy else "routine"
@@ -1430,7 +1446,11 @@ class MainWindow(QMainWindow):
             official=self.analysis.item(row, self.OFFICIAL_COLUMN).text() if self.analysis.item(row, self.OFFICIAL_COLUMN) else "",
             note=info.note,
         )
-        dialog = FollowUpDialog(facts, self.store, self)
+        ollama = None
+        if self.analysis_mode.checkedAction().data() == "ollama":
+            ollama = (self.ollama_endpoint.text().strip() or "http://127.0.0.1:11434",
+                      self.ollama_model.text().strip() or "llama3.2")
+        dialog = FollowUpDialog(facts, self.store, self, ollama=ollama)
         dialog.exec()
         if dialog.marked:
             self.apply_report_status([report_id], "followup", info.note if info.status == "followup" else None)
