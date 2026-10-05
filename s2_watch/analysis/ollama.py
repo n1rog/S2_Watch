@@ -7,6 +7,7 @@ something unusable, the rules' result stands. Nothing leaves the computer.
 """
 
 import json
+import re
 from http.client import HTTPConnection, HTTPSConnection, RemoteDisconnected
 from typing import Any
 from urllib.parse import urlparse
@@ -39,6 +40,27 @@ confidence: 0 to 1.
 Answer with JSON only: {{"newsworthy": true|false, "category": "...", "urgency": "low|medium|high", "summary": "...", "confidence": 0.0, "matched_terms": ["..."]}}
 
 Message: {message}"""
+
+
+JS8_ROUTING = re.compile(r"^[A-Z0-9/]+:\s+(?:@?[A-Z0-9/]+\s+)?(?:MSG\s+|>\s*)?")
+
+
+def readable_text(message: Message) -> str:
+    """The words of a message: JS8Call messages arrive as its API record (CMD, DIAL, FREQ,
+    SNR, TEXT...), and the numbers confuse a small model, so only the TEXT is given."""
+    text = message.raw_content.strip()
+    if text.startswith("{"):
+        try:
+            record = json.loads(text)
+        except ValueError:
+            return text
+        if isinstance(record, dict):
+            words = record.get("TEXT") or record.get("VALUE") or record.get("text")
+            if isinstance(words, str) and words.strip():
+                text = words.replace("\u2662", "").strip()   # JS8Call's end-of-message mark
+    # "W0IFM: KL5OP MSG ..." / "N6KYL: @MR09 MSG ...": sender, addressee and command are
+    # routing; the body is what the model should judge.
+    return JS8_ROUTING.sub("", text, count=1) or text
 
 
 class OllamaError(RuntimeError):
@@ -99,12 +121,17 @@ class OllamaNewsAnalyzer(NewsAnalyzer):
         if hint is not None and hint.newsworthy:
             suggestion = (f'A keyword filter matched {", ".join(hint.matched_terms[:6]) or "some words"} and suggested '
                           f'"{hint.category}"; keywords can be wrong (negations, unrelated uses), so decide yourself.')
-        prompt = PROMPT.format(categories=", ".join(NEWS_CATEGORIES), hint=suggestion, message=message.raw_content)
+        prompt = PROMPT.format(categories=", ".join(NEWS_CATEGORIES), hint=suggestion, message=readable_text(message))
         text = ollama_generate(self.endpoint, self.model, prompt, self.timeout, json_format=True)
         try:
-            return self._validate_result(json.loads(text))
+            result = self._validate_result(json.loads(text))
         except (TypeError, ValueError) as error:
             raise OllamaError("Ollama returned invalid analysis JSON") from error
+        if result.summary.strip().lower() in {"", "none", "n/a", "null"}:
+            # No headline from the model: S2 Watch writes its own from the message.
+            result = AnalysisResult(result.newsworthy, result.category, result.urgency, message.raw_content,
+                                    result.confidence, result.matched_terms)
+        return result
 
     @staticmethod
     def _validate_result(result: Any) -> AnalysisResult:

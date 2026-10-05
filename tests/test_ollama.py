@@ -125,3 +125,13 @@ def test_official_items_stay_with_the_rules() -> None:
     result = HybridNewsAnalyzer(NeverCalled(), RuleBasedNewsAnalyzer()).analyze(
         Message("OSINT", "NIFC wildfire: Bouquet Fire — California; 1,000 acres, 0% contained"))
     assert result.newsworthy
+
+
+def test_the_model_reads_the_words_of_a_js8call_record() -> None:
+    from s2_watch.analysis.ollama import readable_text
+
+    record = '{"CMD": " MSG", "DIAL": 14115000, "FREQ": 14117330, "FROM": "W0IFM", "SNR": 13, "TEXT": "W0IFM: KL5OP MSG HELLO \\u2662 "}'
+    assert readable_text(Message("JS8Call", record)) == "HELLO"
+    assert readable_text(Message("JS8Call", "N6KYL: @MR09 MSG CA HEAT ADVISORY")) == "CA HEAT ADVISORY"
+    assert readable_text(Message("FLMSG", "FLOOD ON MAIN ST")) == "FLOOD ON MAIN ST"
+    assert readable_text(Message("JS8Call", "{not json")) == "{not json"

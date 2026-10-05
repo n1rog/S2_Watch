@@ -850,12 +850,19 @@ class MainWindow(QMainWindow):
 
     def analysis_mode_changed(self) -> None:
         self.store.set_setting("analysis.mode", str(self.analysis_mode.checkedAction().data()))
-        self.rebuild_monitor()
+        # Re-check the whole watch period with the new analyzer, not only new traffic;
+        # results it already made are reused, so this costs little after the first time.
+        self.rescan_sources()
 
     def analysis_settings_changed(self) -> None:
-        self.store.set_setting("ollama.model", self.ollama_model.text().strip())
-        self.store.set_setting("ollama.endpoint", self.ollama_endpoint.text().strip())
-        self.rebuild_monitor()
+        model, endpoint = self.ollama_model.text().strip(), self.ollama_endpoint.text().strip()
+        if (model, endpoint) == (self.store.get_setting("ollama.model", "llama3.2"),
+                                 self.store.get_setting("ollama.endpoint", "http://127.0.0.1:11434")):
+            return   # editing finished without a change
+        self.store.set_setting("ollama.model", model)
+        self.store.set_setting("ollama.endpoint", endpoint)
+        if self.analysis_mode.checkedAction().data() == "ollama":
+            self.rescan_sources()   # a different model re-checks the watch period
 
     def add_form(self) -> None:
         dialog = WatchFormDialog(self)
