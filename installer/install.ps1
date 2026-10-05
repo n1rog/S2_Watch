@@ -11,7 +11,11 @@ Options: -Yes (accept the installer's default answers)  -NoWizard (skip configur
 #>
 param([switch]$Yes, [switch]$NoWizard)
 
-$ErrorActionPreference = 'Stop'
+# 'Continue', not 'Stop': Windows PowerShell 5 turns anything a program (python, pip,
+# winget) writes to its error stream into an error when output is captured, and 'Stop'
+# would abort on pip's routine notices. Programs are judged by their exit codes; the
+# cmdlets that must succeed say -ErrorAction Stop.
+$ErrorActionPreference = 'Continue'
 $ProgressPreference = 'SilentlyContinue'   # much faster downloads with Invoke-WebRequest
 
 $ScriptDir = $PSScriptRoot
@@ -28,6 +32,12 @@ $VenvPython = Join-Path $Venv 'Scripts\python.exe'
 $VenvPythonW = Join-Path $Venv 'Scripts\pythonw.exe'
 $PythonVersion = '3.12.7'
 
+function Invoke-PythonScript($python, $script, [string[]]$arguments = @()) {
+    # From a file: Windows PowerShell 5 garbles double quotes inside a "-c" argument.
+    $file = Join-Path $env:TEMP "s2watch-installer-$PID.py"
+    [System.IO.File]::WriteAllText($file, $script, (New-Object System.Text.UTF8Encoding $false))
+    try { & $python $file @arguments } finally { Remove-Item $file -ErrorAction SilentlyContinue }
+}
 function Heading($text) { Write-Host ''; Write-Host $text -ForegroundColor Cyan }
 function Info($text) { Write-Host "  $text" }
 function Warn($text) { Write-Host "  ! $text" -ForegroundColor Yellow }
@@ -47,7 +57,7 @@ Info "Data:     $Data"
 # ---- 1. Internet ---------------------------------------------------------------------------
 Heading '1/7  Checking the internet connection'
 try {
-    Invoke-WebRequest -Uri 'https://pypi.org/simple/pyside6/' -UseBasicParsing -TimeoutSec 20 | Out-Null
+    Invoke-WebRequest -Uri 'https://pypi.org/simple/pyside6/' -UseBasicParsing -TimeoutSec 20 -ErrorAction Stop | Out-Null
     Info 'OK: can reach the Python package index.'
 } catch { Fail 'cannot reach https://pypi.org. The installer downloads Python packages (~400 MB); connect and try again.' }
 
@@ -94,7 +104,7 @@ if ($Python) {
         $file = "python-$PythonVersion-$arch.exe"
         $installer = Join-Path $env:TEMP $file
         Info "Downloading $file from python.org..."
-        Invoke-WebRequest -Uri "https://www.python.org/ftp/python/$PythonVersion/$file" -OutFile $installer -UseBasicParsing
+        Invoke-WebRequest -Uri "https://www.python.org/ftp/python/$PythonVersion/$file" -OutFile $installer -UseBasicParsing -ErrorAction Stop
         Info 'Installing it...'
         Start-Process -FilePath $installer -ArgumentList '/quiet', 'InstallAllUsers=0', 'PrependPath=1', 'Include_launcher=1', 'Include_test=0' -Wait
         Remove-Item $installer -ErrorAction SilentlyContinue
@@ -114,7 +124,7 @@ if (Test-Path $runtime) {
     if (Confirm 'Install it now (Windows will ask for permission)?') {
         $arch = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'arm64' } else { 'x64' }
         $vcInstaller = Join-Path $env:TEMP "vc_redist.$arch.exe"
-        Invoke-WebRequest -Uri "https://aka.ms/vs/17/release/vc_redist.$arch.exe" -OutFile $vcInstaller -UseBasicParsing
+        Invoke-WebRequest -Uri "https://aka.ms/vs/17/release/vc_redist.$arch.exe" -OutFile $vcInstaller -UseBasicParsing -ErrorAction Stop
         Start-Process -FilePath $vcInstaller -ArgumentList '/install', '/quiet', '/norestart' -Verb RunAs -Wait
         Remove-Item $vcInstaller -ErrorAction SilentlyContinue
     } else { Warn 'S2 Watch may not start without it.' }
@@ -122,7 +132,7 @@ if (Test-Path $runtime) {
 
 # ---- 4. Program and Python packages --------------------------------------------------------
 Heading "4/7  Installing S2 Watch $Version and its Python packages"
-New-Item -ItemType Directory -Force -Path $Prefix, $DataDir | Out-Null
+New-Item -ItemType Directory -Force -Path $Prefix, $DataDir -ErrorAction Stop | Out-Null
 if ((Test-Path $VenvPython) -and -not ((& $VenvPython -c 'import sys; print(sys.version_info >= (3, 11))') -eq 'True')) {
     Info 'Replacing an environment built with an older Python...'
     Remove-Item -Recurse -Force $Venv
@@ -143,7 +153,7 @@ for module in ("s2_watch", "s2_watch.ui.main_window", "PySide6.QtWebEngineWidget
 import s2_watch
 print(f"  OK: S2 Watch {s2_watch.__version__} and the map engine load.")
 '@
-& $VenvPython -c $checkScript
+Invoke-PythonScript $VenvPython $checkScript
 if ($LASTEXITCODE -ne 0) { Fail "S2 Watch's packages did not load. See the messages above." }
 
 # ---- 6. Data and shortcuts -----------------------------------------------------------------
@@ -194,7 +204,7 @@ image = QImage(256, 256, QImage.Format.Format_ARGB32); image.fill(Qt.GlobalColor
 painter = QPainter(image); QSvgRenderer(str(icons / "s2-watch.svg")).render(painter, QRectF(0, 0, 256, 256)); painter.end()
 image.save(sys.argv[1])
 '@
-& $VenvPython -c $iconScript $iconFile
+Invoke-PythonScript $VenvPython $iconScript @($iconFile)
 $shell = New-Object -ComObject WScript.Shell
 function New-Shortcut($path, $target, $arguments, $description) {
     $shortcut = $shell.CreateShortcut($path)
@@ -206,7 +216,7 @@ function New-Shortcut($path, $target, $arguments, $description) {
     $shortcut.Save()
 }
 $startMenu = Join-Path ([Environment]::GetFolderPath('Programs')) 'S2 Watch'
-New-Item -ItemType Directory -Force -Path $startMenu | Out-Null
+New-Item -ItemType Directory -Force -Path $startMenu -ErrorAction Stop | Out-Null
 $runArguments = "-m s2_watch.main --database `"$Data`""
 New-Shortcut (Join-Path $startMenu 'S2 Watch.lnk') $VenvPythonW $runArguments 'Monitor radio messaging applications for newsworthy reports'
 New-Shortcut (Join-Path $startMenu 'S2 Watch Setup.lnk') $VenvPython "$runArguments --configure" 'Change S2 Watch settings'
