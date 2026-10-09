@@ -43,6 +43,36 @@ At launch the Newsworthiness table and map are rebuilt from the saved reports in
 the watch period, so reports, labels and notes don't depend on a feeder still
 having the original message.
 
+## Events
+
+The **Events** tab groups reports — radio and official — that describe one real-world
+happening: a StatRep, a JS8Call message, an NWS warning and a FEMA declaration about one
+flood are one event. Reports join an event when they are the same category and kind of
+hazard, within 48 hours of its latest report and about 100 km (150 km for earthquakes),
+or in the same state when only the state is known. A named official incident (a NIFC
+fire, a USGS quake, an FAA restriction) is one event however long it lasts. Stories
+without a physical hazard (crime, politics...) also need distinctive wording in common.
+Each event shows its sources, official confirmation and how far ahead radio reported it;
+select one for its timeline, or **Show on map**.
+
+## Shift briefings
+
+**Reports → Draft Shift Briefing…** (or the button on the Events tab) drafts a briefing
+from the events in the Events tab's period: priority items (focus regions first, then by
+urgency, radio-reported events ahead of official-only ones), activity by MARS region and
+category, quiet categories, and what is new since the briefing you last marked sent. Edit
+it, then copy or save the FLMSG and JS8Call versions; with Ollama, **Suggest assessment**
+drafts the assessment.
+
+## Possible misses (Ollama)
+
+Watch forms keep only messages with news keywords. In Ollama mode, S2 Watch also reads
+the radio traffic they didn't keep — slowly, in the background, newest first, each message
+once — and lists what the model thinks is news in the **Possible Misses** tab, to add as a
+report or dismiss. It skips heartbeats, CQs and signal reports, uses the computer at most a
+third of the time and waits while it is busy. Turn it off under Configuration → Analysis
+Mode.
+
 ## Follow-up reports
 
 Right-click a Newsworthiness report and choose **Draft follow-up report…**. Edit

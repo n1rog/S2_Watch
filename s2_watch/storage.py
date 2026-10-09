@@ -27,6 +27,10 @@ class ReportInfo:
     region: int | None = None  # MARS region, when known
 
 
+# OSINT senders that are official (government) sources; news sites are not.
+OFFICIAL_SENDERS = {"USGS", "NIFC", "NOAA SPC", "FEMA", "FAA", "U.S. Department of State", "NWS"}
+
+
 def utc_iso(value: datetime) -> str:
     if value.tzinfo is None:
         value = value.replace(tzinfo=timezone.utc)
@@ -106,6 +110,46 @@ class SQLiteStore:
             if column not in report_columns:
                 self.connection.execute(f"ALTER TABLE reports ADD COLUMN {column} TEXT NOT NULL DEFAULT ''")
         self.connection.execute("CREATE INDEX IF NOT EXISTS reports_first_seen ON reports(first_seen)")
+        # Where a report is (its most specific point) and the event it belongs to.
+        for column, kind in (("lat", "REAL"), ("lon", "REAL"), ("place_level", "TEXT NOT NULL DEFAULT ''"),
+                             ("event_id", "INTEGER")):
+            if column not in report_columns:
+                self.connection.execute(f"ALTER TABLE reports ADD COLUMN {column} {kind}")
+        self.connection.execute(
+            """CREATE TABLE IF NOT EXISTS events (
+                id INTEGER PRIMARY KEY,
+                title TEXT NOT NULL,
+                category TEXT NOT NULL,
+                hazards TEXT NOT NULL DEFAULT '',
+                state TEXT NOT NULL DEFAULT '',
+                region INTEGER,
+                lat REAL,
+                lon REAL,
+                first_seen TEXT NOT NULL,
+                last_seen TEXT NOT NULL,
+                incident TEXT NOT NULL DEFAULT '',
+                terms TEXT NOT NULL DEFAULT ''
+            )"""
+        )
+        self.connection.execute("CREATE INDEX IF NOT EXISTS events_last_seen ON events(last_seen)")
+        # Radio traffic no watch form kept, read by the model in the background (missed_news).
+        self.connection.execute(
+            """CREATE TABLE IF NOT EXISTS missed_checks (
+                key TEXT PRIMARY KEY,
+                checked_at TEXT NOT NULL,
+                source_application TEXT NOT NULL,
+                raw_content TEXT NOT NULL,
+                received_at TEXT NOT NULL,
+                fields_json TEXT NOT NULL DEFAULT '',
+                newsworthy INTEGER NOT NULL,
+                category TEXT NOT NULL,
+                urgency TEXT NOT NULL,
+                summary TEXT NOT NULL,
+                confidence REAL NOT NULL,
+                status TEXT NOT NULL
+            )"""
+        )
+        self.connection.execute("CREATE INDEX IF NOT EXISTS reports_event_id ON reports(event_id)")
         message_columns = {row[1] for row in self.connection.execute("PRAGMA table_info(messages)")}
         if "source_key" not in message_columns:
             self.connection.execute("ALTER TABLE messages ADD COLUMN source_key TEXT")
@@ -390,6 +434,214 @@ class SQLiteStore:
     def set_corroboration(self, report_id: int, text: str) -> None:
         self.connection.execute("UPDATE reports SET corroboration = ? WHERE id = ?", (text, report_id))
         self.connection.commit()
+
+    # -- possible misses ---------------------------------------------------------------
+
+    def missed_checked(self, key: str) -> bool:
+        return self.connection.execute("SELECT 1 FROM missed_checks WHERE key = ?", (key,)).fetchone() is not None
+
+    def save_missed_check(self, key: str, message: Message, result: AnalysisResult, status: str) -> None:
+        self.connection.execute(
+            """INSERT OR REPLACE INTO missed_checks(key, checked_at, source_application, raw_content, received_at,
+                 fields_json, newsworthy, category, urgency, summary, confidence, status)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (key, utc_iso(datetime.now(timezone.utc)), message.source_application, message.raw_content,
+             message.received_at.isoformat(), json.dumps(message.fields) if message.fields else "",
+             int(result.newsworthy), result.category, result.urgency, result.summary, result.confidence, status),
+        )
+        self.connection.commit()
+
+    def possible_misses(self, status: str = "new") -> list[tuple[str, Message, AnalysisResult]]:
+        """Messages the model thinks are news though no watch form kept them, newest first."""
+        rows = self.connection.execute(
+            """SELECT key, source_application, raw_content, received_at, fields_json, newsworthy, category, urgency,
+                      summary, confidence FROM missed_checks WHERE status = ? ORDER BY received_at DESC""",
+            (status,),
+        ).fetchall()
+        misses = []
+        for key, application, raw, received, fields_json, newsworthy, category, urgency, summary, confidence in rows:
+            try:
+                fields = json.loads(fields_json) if fields_json else {}
+            except ValueError:
+                fields = {}
+            when = datetime.fromisoformat(received)
+            message = Message(application, raw, received_at=when if when.tzinfo else when.replace(tzinfo=timezone.utc),
+                              fields={str(k): str(v) for k, v in fields.items()})
+            misses.append((key, message, AnalysisResult(bool(newsworthy), category, urgency, summary, float(confidence))))
+        return misses
+
+    def set_missed_status(self, key: str, status: str) -> None:
+        self.connection.execute("UPDATE missed_checks SET status = ? WHERE key = ?", (status, key))
+        self.connection.commit()
+
+    def missed_counts(self) -> dict[str, int]:
+        return dict(self.connection.execute("SELECT status, COUNT(*) FROM missed_checks GROUP BY status").fetchall())
+
+    # -- events ----------------------------------------------------------------------
+
+    def assign_event(self, report_id: int, category: str, hazards: set[str], place, title: str,
+                     incident: str = "", terms: set[str] | None = None) -> int:
+        """Put a newsworthy report in its event (an existing one, or a new one); the event id."""
+        from s2_watch.events import EVENT_GAP, INCIDENT_GAP, EventCandidate, Place, choose_event, clean_title
+
+        terms = terms or set()
+        title = clean_title(title, place)
+
+        row = self.connection.execute(
+            "SELECT event_id, first_seen, last_seen FROM reports WHERE id = ?", (report_id,)).fetchone()
+        if row is None:
+            raise KeyError(report_id)
+        event_id, first_seen, last_seen = row
+        if event_id is not None:   # another copy of a report already placed: keep the event current
+            self.connection.execute("UPDATE events SET last_seen = MAX(last_seen, ?) WHERE id = ?", (last_seen, event_id))
+            self.connection.commit()
+            return int(event_id)
+        seen = datetime.fromisoformat(first_seen)
+        self.connection.execute("UPDATE reports SET lat = ?, lon = ?, place_level = ? WHERE id = ?",
+                                (place.lat, place.lon, place.level, report_id))
+        rows = self.connection.execute(
+            """SELECT id, category, hazards, state, region, lat, lon, first_seen, last_seen, incident, terms FROM events
+               WHERE category = ? AND ((last_seen >= ? AND first_seen <= ?)
+                                       OR (incident != '' AND incident = ? AND last_seen >= ?))""",
+            (category, utc_iso(seen - EVENT_GAP), utc_iso(seen + EVENT_GAP), incident, utc_iso(seen - INCIDENT_GAP)),
+        ).fetchall()
+        candidates = [EventCandidate(row[0], row[1], {h for h in row[2].split(",") if h},
+                                     Place(row[5], row[6], "", row[3], row[4]),
+                                     datetime.fromisoformat(row[7]), datetime.fromisoformat(row[8]),
+                                     row[9], {t for t in row[10].split(",") if t}) for row in rows]
+        chosen = choose_event(candidates, category, hazards, place, seen, incident, terms)
+        if chosen is None:
+            cursor = self.connection.execute(
+                """INSERT INTO events(title, category, hazards, state, region, lat, lon, first_seen, last_seen,
+                                     incident, terms)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (title, category, ",".join(sorted(hazards)), place.state, place.region, place.lat, place.lon,
+                 first_seen, last_seen, incident, ",".join(sorted(terms))),
+            )
+            event_id = cursor.lastrowid
+        else:
+            event_id = chosen.event_id
+            merged = ",".join(sorted(chosen.hazards | hazards))
+            # An official incident's latest update gives the event its title (acres, containment).
+            if incident and chosen.incident == incident:
+                self.connection.execute("UPDATE events SET title = ? WHERE id = ?", (title, event_id))
+            self.connection.execute(
+                """UPDATE events SET hazards = ?, first_seen = MIN(first_seen, ?), last_seen = MAX(last_seen, ?),
+                     state = CASE WHEN state = '' THEN ? ELSE state END,
+                     region = COALESCE(region, ?),
+                     lat = COALESCE(lat, ?), lon = COALESCE(lon, ?),
+                     incident = CASE WHEN incident = '' THEN ? ELSE incident END,
+                     terms = ?
+                   WHERE id = ?""",
+                (merged, first_seen, last_seen, place.state, place.region, place.lat, place.lon, incident,
+                 ",".join(sorted(chosen.terms or terms)), event_id),   # the first report's words: a growing
+                                                                        # set would match ever more stories
+            )
+        self.connection.execute("UPDATE reports SET event_id = ? WHERE id = ?", (event_id, report_id))
+        self.connection.commit()
+        return int(event_id)
+
+    def reports_needing_events(self, since: datetime) -> list[tuple[int, Message, str, str]]:
+        """Newsworthy reports since ``since`` not yet in an event: (id, first copy, category, summary)."""
+        rows = self.connection.execute(
+            """SELECT r.id, m.source_application, m.raw_content, m.received_at, m.fields_json, r.category,
+                      COALESCE(a.summary, '')
+               FROM reports r
+               JOIN messages m ON m.id = (SELECT MIN(id) FROM messages WHERE report_id = r.id)
+               LEFT JOIN analysis_results a ON a.message_id = m.id
+               WHERE r.newsworthy = 1 AND r.event_id IS NULL AND r.first_seen >= ?
+               ORDER BY r.first_seen""",
+            (utc_iso(since),),
+        ).fetchall()
+        result = []
+        for report_id, application, raw, received, fields_json, category, summary in rows:
+            try:
+                fields = json.loads(fields_json) if fields_json else {}
+            except ValueError:
+                fields = {}
+            when = datetime.fromisoformat(received)
+            message = Message(application, raw, received_at=when if when.tzinfo else when.replace(tzinfo=timezone.utc),
+                              fields={str(k): str(v) for k, v in fields.items()})
+            result.append((int(report_id), message, category, summary))
+        return result
+
+    def events_since(self, since: datetime, regions: set[int] | None = None):
+        """Events active since ``since``, newest activity first, with their reports summarised."""
+        from s2_watch.events import EventSummary
+
+        rows = self.connection.execute(
+            """SELECT e.id, e.title, e.category, e.state, e.region, e.first_seen, e.last_seen,
+                      r.first_seen, r.sources, r.first_source, r.urgency, r.corroboration, r.status, r.lat, r.lon,
+                      r.sender
+               FROM events e JOIN reports r ON r.event_id = e.id
+               WHERE e.last_seen >= ? ORDER BY e.last_seen DESC, r.first_seen""",
+            (utc_iso(since),),
+        ).fetchall()
+        rank = {"low": 1, "medium": 2, "high": 3}
+        events: dict[int, dict] = {}
+        for (event_id, title, category, state, region, first, last, seen, sources, first_source, urgency,
+             corroboration, status, lat, lon, sender) in rows:
+            event = events.setdefault(event_id, {
+                "title": title, "category": category, "state": state, "region": region,
+                "first": datetime.fromisoformat(first), "last": datetime.fromisoformat(last),
+                "reports": 0, "sources": [], "urgency": "low", "official": "", "radio": None,
+                "official_time": None, "lead": None, "statuses": [], "points": []})
+            event["reports"] += 1
+            for source in sources.split(","):
+                if source and source not in event["sources"]:
+                    event["sources"].append(source)
+            if rank.get(urgency, 0) > rank.get(event["urgency"], 0):
+                event["urgency"] = urgency
+            when = datetime.fromisoformat(seen)
+            if first_source == "OSINT" and sender in OFFICIAL_SENDERS:
+                event["official"] = event["official"] or sender
+                if event["official_time"] is None or when < event["official_time"]:
+                    event["official_time"] = when
+            elif first_source == "OSINT":
+                pass   # news coverage: open-source, but not official confirmation
+            else:
+                if event["radio"] is None or when < event["radio"]:
+                    event["radio"] = when
+                if corroboration:
+                    text = corroboration.lstrip("✓ ").split(" · ")[0].split(" +")[0]
+                    event["official"] = event["official"] or text
+                    if "radio " in corroboration and " min earlier" in corroboration:
+                        try:
+                            minutes = int(corroboration.split("radio ", 1)[1].split(" min", 1)[0])
+                            event["lead"] = max(event["lead"] or 0, minutes)
+                        except ValueError:
+                            pass
+            if status and status not in event["statuses"]:
+                event["statuses"].append(status)
+            if lat is not None and lon is not None:
+                event["points"].append((lat, lon))
+        summaries = []
+        for event_id, event in events.items():
+            if regions and event["region"] not in regions:
+                continue
+            lead = event["lead"]
+            if event["radio"] is not None and event["official_time"] is not None and event["radio"] < event["official_time"]:
+                lead = max(lead or 0, int((event["official_time"] - event["radio"]).total_seconds() // 60))
+            summaries.append(EventSummary(
+                event_id, event["title"], event["category"], event["state"], event["region"], event["first"],
+                event["last"], event["reports"], tuple(event["sources"]), event["urgency"], event["official"], lead,
+                tuple(event["statuses"]), event["points"]))
+        return summaries
+
+    def event_reports(self, event_id: int) -> list[dict]:
+        """An event's reports in time order (its timeline)."""
+        rows = self.connection.execute(
+            """SELECT r.id, r.first_seen, r.last_seen, r.copies, r.sources, r.first_source, r.sender, r.urgency,
+                      r.corroboration, r.status, r.lat, r.lon, COALESCE(a.summary, ''), m.raw_content
+               FROM reports r
+               JOIN messages m ON m.id = (SELECT MIN(id) FROM messages WHERE report_id = r.id)
+               LEFT JOIN analysis_results a ON a.message_id = m.id
+               WHERE r.event_id = ? ORDER BY r.first_seen""",
+            (event_id,),
+        ).fetchall()
+        keys = ("report_id", "first_seen", "last_seen", "copies", "sources", "source", "sender", "urgency",
+                "corroboration", "status", "lat", "lon", "summary", "text")
+        return [dict(zip(keys, row)) for row in rows]
 
     def report_times(self, report_id: int) -> tuple[datetime | None, datetime | None]:
         """When a report was first and last heard (UTC)."""

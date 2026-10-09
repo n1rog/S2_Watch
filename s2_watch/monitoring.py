@@ -47,6 +47,7 @@ class Monitor:
         on_analysis: Callable[[Message, AnalysisResult], None] | None = None,
         on_saved: Callable[[int, Message, AnalysisResult | None], None] | None = None,
         on_read: Callable[[Message], None] | None = None,
+        on_unmatched: Callable[[Message], None] | None = None,
     ) -> None:
         self.adapters = list(adapters)
         self.forms = list(forms)
@@ -60,6 +61,7 @@ class Monitor:
         self.on_saved = on_saved
         # Called with every message read, matched or not (e.g. for station coverage).
         self.on_read = on_read
+        self.on_unmatched = on_unmatched   # messages no watch form kept
 
     def poll(self) -> None:
         active_applications = {
@@ -93,6 +95,8 @@ class Monitor:
         """Match, analyse, save and report one message; True if a watch form matched it."""
         matching = [form for form in self.forms if form.matches(message)]
         if not matching:
+            if self.on_unmatched:
+                self.on_unmatched(message)
             return False
         matched = replace(message, form_name=matching[0].name)
         result = None

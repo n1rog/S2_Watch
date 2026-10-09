@@ -187,6 +187,11 @@ class MapView(QWidget):
         self._focus_regions = list(regions)
         self._run(f"setFocusRegions({json.dumps(self._focus_regions)}, {str(fit).lower()})")
 
+    def show_area(self, points: list[tuple[float, float]]) -> None:
+        """Zoom the map to these points (an event's reports)."""
+        if points:
+            self._run(f"showArea({json.dumps([[lat, lon] for lat, lon in points])})")
+
     def set_coverage(self, cells: list[dict]) -> None:
         self._coverage = cells
         self._run(f"setCoverage({json.dumps(cells)})")
@@ -461,6 +466,10 @@ marsRegions.features.forEach(f => (f.properties.labels || []).forEach(point => {
   label.region = f.properties.region;
   regionLabels.push(label);
 }}));
+function showArea(points) {{
+  if (points.length === 1) map.setView(points[0], Math.max(map.getZoom(), 9));
+  else map.fitBounds(L.latLngBounds(points).pad(0.4), {{maxZoom: 10}});
+}}
 function setFocusRegions(regions, fit) {{
   focusRegions = new Set(regions);
   regionShapes.setStyle(regionStyle);

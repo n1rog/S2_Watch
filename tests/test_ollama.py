@@ -90,8 +90,11 @@ def test_model_results_for_plain_traffic_need_no_category() -> None:
     plain = OllamaNewsAnalyzer._validate_result(
         {"newsworthy": False, "category": "none", "urgency": "Low", "summary": "Check-in", "confidence": 0.9, "matched_terms": []})
     assert (plain.category, plain.urgency) == ("routine", "low")
+    synonym = OllamaNewsAnalyzer._validate_result({"newsworthy": True, "category": "Weather", "urgency": "high",
+                                                   "summary": "x", "confidence": 0.5, "matched_terms": []})
+    assert synonym.category == "Climate / Environment"
     with pytest.raises(OllamaError):
-        OllamaNewsAnalyzer._validate_result({"newsworthy": True, "category": "Weather", "urgency": "high",
+        OllamaNewsAnalyzer._validate_result({"newsworthy": True, "category": "Sports", "urgency": "high",
                                              "summary": "x", "confidence": 0.5, "matched_terms": []})
 
 

@@ -1,6 +1,7 @@
 import sqlite3
 from html import escape
 from pathlib import Path
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
 from PySide6.QtCore import QByteArray, QMetaObject, QThread, QTimer, QUrl, Qt, Signal
@@ -15,7 +16,13 @@ from PySide6.QtWidgets import (
 
 from s2_watch import REPOSITORY_URL, __version__ as APP_VERSION
 from s2_watch.backups import back_up_in_background, backup_folder
+from s2_watch.briefing import briefing_report, js8_briefing
 from s2_watch.followup import FollowUpFacts
+from s2_watch.ui.events_view import EventsView
+from s2_watch.ui.misses_view import MissesView
+from s2_watch.missed_news import MissedNewsScanner
+from s2_watch.events import incident_key, key_terms, place_from_locations, report_hazards
+from s2_watch.monitoring import legacy_message_key, message_key
 from s2_watch.ui.followup_dialog import FollowUpDialog
 
 
@@ -48,7 +55,7 @@ from s2_watch.adapters.flmsg_files import FLMSGFileAdapter
 from s2_watch.adapters.js8superspotter_sqlite import JS8SuperSpotterSQLiteAdapter
 from s2_watch.analysis.base import AnalysisResult
 from s2_watch.analysis.base import NewsAnalyzer
-from s2_watch.analysis.ollama import HybridNewsAnalyzer, OllamaNewsAnalyzer
+from s2_watch.analysis.ollama import HybridNewsAnalyzer, OllamaNewsAnalyzer, draft_briefing_assessment, readable_text
 from s2_watch.analysis.rules import RuleBasedNewsAnalyzer
 from s2_watch.analysis.categories import NEWS_CATEGORIES
 from s2_watch.models import ANY_APPLICATION, APPLICATIONS, Message, WatchForm
@@ -437,6 +444,12 @@ class MainWindow(QMainWindow):
         analysis_menu.addAction("Ollama settings…").triggered.connect(
             lambda: self.open_settings_dialog(self.ollama_dialog)
         )
+        self.missed_check_action = analysis_menu.addAction("Check unmatched radio traffic in the background (Ollama)")
+        self.missed_check_action.setCheckable(True)
+        self.missed_check_action.setChecked(self.store.get_setting("missed.enabled", "1") == "1")
+        self.missed_check_action.setToolTip("Lets the model read the radio messages no watch form kept, slowly, "
+                                            "and list possible news in the Possible Misses tab.")
+        self.missed_check_action.toggled.connect(self.missed_check_changed)
         theme_menu = configuration_menu.addMenu("Theme")
         theme_menu.addActions(self.theme.actions())
         focus_menu = configuration_menu.addMenu("Focus Regions")
@@ -472,6 +485,9 @@ class MainWindow(QMainWindow):
         self._backup_timer.timeout.connect(self.back_up_database)
         self._backup_timer.start(60 * 60 * 1000)
         QTimer.singleShot(60_000, self.back_up_database)
+        reports_menu = self.menuBar().addMenu("Reports")
+        reports_menu.addAction("Draft Shift Briefing…").triggered.connect(lambda: self.draft_briefing())
+        reports_menu.addAction("Show Events").triggered.connect(lambda: self.tabs.setCurrentWidget(self.events_view))
         help_menu = self.menuBar().addMenu("Help")
         # Current date/time in the chosen format, top right, with a Local/Zulu switch.
         # Kept on self: PySide doesn't take ownership of a menu-bar corner widget.
@@ -549,6 +565,17 @@ class MainWindow(QMainWindow):
             tab = QWidget()
             tab.setLayout(tab_layout)
             tabs.addTab(tab, title)
+        # Events: reports (radio and official) grouped by the happening they describe.
+        self.events_view = EventsView(self.store, self.format_display_time)
+        self.events_view.show_on_map.connect(self.show_event_on_map)
+        self.events_view.draft_briefing.connect(self.draft_briefing)
+        tabs.insertTab(1, self.events_view, "Events")
+        self.misses_view = MissesView(self.store, self.format_display_time)
+        self.misses_view.add_requested.connect(self.add_missed_report)
+        self.misses_view.count_changed.connect(
+            lambda count: tabs.setTabText(tabs.indexOf(self.misses_view),
+                                          f"Possible Misses ({count})" if count else "Possible Misses"))
+        tabs.insertTab(2, self.misses_view, "Possible Misses")
         self.metrics_view = MetricsView(self.store)
         tabs.addTab(self.metrics_view, "Metrics")
         self.tabs = tabs
@@ -583,10 +610,14 @@ class MainWindow(QMainWindow):
         self._worker_thread = QThread(self)
         self._worker = MonitorWorker(str(database_path))
         self._worker.moveToThread(self._worker_thread)
+        # Reads the radio traffic no watch form kept, in the background (Ollama mode only).
+        self.missed_scanner = MissedNewsScanner(str(database_path), self)
+        self._worker.unmatched_sink = self.missed_scanner.offer
         self._worker_thread.started.connect(self._worker.start)
         self.worker_config.connect(self._worker.configure)
         self._worker.batch_ready.connect(self.handle_batch)
         self._worker.coverage_ready.connect(self.map_view.set_coverage)
+        self._worker.events_changed.connect(self.events_view.data_changed)
         self._worker_thread.start()
         self.refresh_forms()
         self.search_history()
@@ -598,6 +629,11 @@ class MainWindow(QMainWindow):
             self.map_overlay_changed(overlay)
         self.apply_focus(fit_map=True)
         self.nws_poller.set_enabled(True)
+        self.missed_scanner.found.connect(self.misses_view.refresh)
+        self.missed_scanner.progress.connect(self.missed_progress)
+        self.misses_view.refresh()
+        self.misses_view.show_progress(0, 0)
+        self.configure_missed_check()
         self.restore_window_state()
         self.map_regions_changed()
         self.map_online_tiles_changed()
@@ -850,6 +886,7 @@ class MainWindow(QMainWindow):
 
     def analysis_mode_changed(self) -> None:
         self.store.set_setting("analysis.mode", str(self.analysis_mode.checkedAction().data()))
+        self.configure_missed_check()
         # Re-check the whole watch period with the new analyzer, not only new traffic;
         # results it already made are reused, so this costs little after the first time.
         self.rescan_sources()
@@ -861,6 +898,7 @@ class MainWindow(QMainWindow):
             return   # editing finished without a change
         self.store.set_setting("ollama.model", model)
         self.store.set_setting("ollama.endpoint", endpoint)
+        self.configure_missed_check()
         if self.analysis_mode.checkedAction().data() == "ollama":
             self.rescan_sources()   # a different model re-checks the watch period
 
@@ -1061,6 +1099,7 @@ class MainWindow(QMainWindow):
         self.show_alerts(alerts)
         if any(processed.report for processed in batch):
             self.metrics_view.data_changed()
+            self.events_view.data_changed()
 
     def shown_report_item(self, report_id: int) -> QTableWidgetItem | None:
         item = self._report_items.get(report_id)
@@ -1383,6 +1422,7 @@ class MainWindow(QMainWindow):
         self.map_view.set_focus_regions(sorted(self.focus_regions), fit_map)
         self.aircraft_poller.set_focus(self.focus_regions)
         self.metrics_view.set_focus_regions(self.focus_regions)
+        self.events_view.set_focus_regions(self.focus_regions)
         focus = ", ".join(f"R{region}" for region in sorted(self.focus_regions))
         self.update_news_label()
         self.setWindowTitle(f"S2 Watch {APP_VERSION}" + (f" — focus {focus}" if focus else ""))
@@ -1432,6 +1472,64 @@ class MainWindow(QMainWindow):
         draft.setEnabled(len(rows) == 1)
         draft.triggered.connect(lambda: self.draft_followup(rows[0][0], rows[0][1]))
         menu.exec(self.analysis.viewport().mapToGlobal(position))
+
+    def configure_missed_check(self) -> None:
+        ollama = self.analysis_mode.checkedAction().data() == "ollama"
+        self.missed_check_action.setEnabled(ollama)
+        self.missed_scanner.configure(ollama and self.missed_check_action.isChecked(),
+                                      self.ollama_model.text().strip() or "llama3.2",
+                                      self.ollama_endpoint.text().strip() or "http://127.0.0.1:11434")
+
+    def missed_check_changed(self, enabled: bool) -> None:
+        self.store.set_setting("missed.enabled", "1" if enabled else "0")
+        self.configure_missed_check()
+
+    def missed_progress(self, checked: int, waiting: int) -> None:
+        self.misses_view.show_progress(checked, waiting, self.missed_scanner.last_error)
+
+    def add_missed_report(self, key: str, message: Message, result: AnalysisResult) -> None:
+        """Save a possible miss the operator confirmed as a report, and show it."""
+        matched = replace(message, form_name="Ollama find")
+        message_id = self.store.save_message(matched, message_key(message), legacy_message_key(message))
+        self.store.save_analysis(message_id, result, "ollama-find")
+        locations = self._official_resolver.resolve(matched)
+        area = next((location for location in locations if location.state or location.region), None)
+        report = self.store.assign_report(message_id, matched, result, state=(area.state or "") if area else "",
+                                          region=area.region if area else None)
+        text = f"{readable_text(message)} {result.summary}"
+        self.store.assign_event(report.report_id, result.category, report_hazards(text),
+                                place_from_locations(locations), result.summary, incident_key(message), key_terms(text))
+        self.store.set_missed_status(key, "added")
+        self.handle_batch([ProcessedMessage(matched, result, locations, report)])
+
+    def show_event_on_map(self, points) -> None:
+        self.tabs.setCurrentIndex(0)
+        self.map_view.show_area(points)
+
+    def draft_briefing(self) -> None:
+        """A shift briefing from the events in the Events tab's period (and focus filter)."""
+        hours = self.events_view.period_hours()
+        last = self.store.get_setting("briefing.last", "")
+        try:
+            last_briefing = datetime.fromisoformat(last) if last else None
+        except ValueError:
+            last_briefing = None
+        now = datetime.now(timezone.utc)
+        text = briefing_report(self.events_view.visible_events(), now, hours,
+                               self.store.get_setting("operator.callsign", ""), self.focus_regions, last_briefing)
+        ollama = None
+        if self.analysis_mode.checkedAction().data() == "ollama":
+            ollama = (self.ollama_endpoint.text().strip() or "http://127.0.0.1:11434",
+                      self.ollama_model.text().strip() or "llama3.2")
+        dialog = FollowUpDialog(
+            None, self.store, self, ollama=ollama, text=text, js8=js8_briefing, title="Draft shift briefing",
+            file_prefix="S2-BRIEFING", suggest_fn=draft_briefing_assessment,
+            suggest_label="Suggest assessment (Ollama)", mark_label="Mark briefing sent",
+            marked_label="Briefing marked sent", callsign=self.store.get_setting("operator.callsign", ""),
+        )
+        dialog.exec()
+        if dialog.marked:   # the next briefing flags what is new since this one
+            self.store.set_setting("briefing.last", now.isoformat())
 
     def draft_followup(self, row: int, report_id: int) -> None:
         item = self.analysis.item(row, 0)
@@ -1623,6 +1721,7 @@ class MainWindow(QMainWindow):
         QMetaObject.invokeMethod(self._worker, "stop", Qt.ConnectionType.BlockingQueuedConnection)
         self._worker_thread.quit()
         self._worker_thread.wait(5000)
+        self.missed_scanner.stop()
         self.tray.hide()
         self.store.close()
         event.accept()

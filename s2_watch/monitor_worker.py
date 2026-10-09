@@ -7,12 +7,14 @@ the window in batches through the ``batch_ready`` signal.
 """
 
 from dataclasses import dataclass, field, replace
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from PySide6.QtCore import QObject, QTimer, Signal, Slot
 
 from s2_watch.analysis.base import AnalysisResult, NewsAnalyzer
+from s2_watch.analysis.ollama import readable_text
 from s2_watch.analysis.summary import is_placeholder_summary, summarize
+from s2_watch.events import incident_key, key_terms, place_from_locations, report_hazards
 from s2_watch.geocoding import NominatimGeocoder
 from s2_watch.locating import LocationResolver, ResolvedLocation
 from s2_watch.models import Message, WatchForm
@@ -45,11 +47,14 @@ class ProcessedMessage:
 
 class MonitorWorker(QObject):
     batch_ready = Signal(object)  # list[ProcessedMessage]
+    events_changed = Signal()     # reports were grouped into events (the Events tab refreshes)
     coverage_ready = Signal(object)  # list[dict] from CoverageTracker.snapshot()
 
     def __init__(self, database_path: str) -> None:
         super().__init__()
         self.database_path = database_path
+        # Receives each message no watch form kept (the background missed-news check).
+        self.unmatched_sink = None
         self.store: SQLiteStore | None = None
         self.monitor: Monitor | None = None
         self.adapters: list = []
@@ -67,6 +72,23 @@ class MonitorWorker(QObject):
         self._coverage_timer = QTimer(self)
         self._coverage_timer.timeout.connect(self._emit_coverage)
         self._coverage_timer.start(30_000)
+        QTimer.singleShot(0, self._group_earlier_reports)
+
+    def _group_earlier_reports(self) -> None:
+        """Put the last 30 days' newsworthy reports that aren't in an event yet into events
+        (all of them the first time, after that only stragglers)."""
+        if not self.store:
+            return
+        since = datetime.now(timezone.utc) - timedelta(days=30)
+        grouped = 0
+        for report_id, message, category, summary in self.store.reports_needing_events(since):
+            locations = self.resolver.resolve(message)
+            text = f"{readable_text(message)} {summary}"
+            self.store.assign_event(report_id, category, report_hazards(text), place_from_locations(locations),
+                                    summary or message.raw_content[:120], incident_key(message), key_terms(text))
+            grouped += 1
+        if grouped:
+            self.events_changed.emit()
 
     @Slot(object)
     def configure(self, config: MonitorConfig) -> None:
@@ -80,7 +102,7 @@ class MonitorWorker(QObject):
         )
         self.monitor = Monitor(
             self.adapters, config.forms, self.store, self._matched, config.analyzer, self._analysed,
-            self._saved, self.coverage.add,
+            self._saved, self.coverage.add, on_unmatched=self._unmatched,
         ) if self.adapters and self.store else None
         if self.store and config.preload_since is not None:
             self._preload(config)
@@ -137,6 +159,11 @@ class MonitorWorker(QObject):
             self.store.close()
             self.store = None
 
+    def _unmatched(self, message: Message) -> None:
+        sink = self.unmatched_sink
+        if sink is not None:
+            sink(message)
+
     def _matched(self, message: Message) -> None:
         # A whole digest gets no markers of its own: its items carry their own places.
         locations = [] if message.fields.get("digest_parent") else self.resolver.resolve(message)
@@ -161,6 +188,12 @@ class MonitorWorker(QObject):
             state=area.state or "" if area else "",
             region=area.region if area else None,
         )
+        if result is not None and result.newsworthy:
+            text = f"{readable_text(message)} {result.summary}"
+            self.store.assign_event(
+                processed.report.report_id, result.category, report_hazards(text),
+                place_from_locations(processed.locations), result.summary, incident_key(message), key_terms(text),
+            )
 
     def _analysed(self, message: Message, result: AnalysisResult) -> None:
         # _saved has already stored the result, with its headline summary.

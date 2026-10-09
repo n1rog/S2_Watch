@@ -1,8 +1,10 @@
-"""Draft a follow-up: edit the full report, then copy or save its FLMSG and JS8Call versions."""
+"""Draft a follow-up or a briefing: edit the full report, then copy or save its FLMSG and
+JS8Call versions (made from the full report as it is edited)."""
 
 from __future__ import annotations
 
 import threading
+from datetime import datetime, timezone
 from pathlib import Path
 
 from PySide6.QtCore import Signal
@@ -31,23 +33,33 @@ def replace_section(report: str, subject: str, assessment: str) -> str:
 class FollowUpDialog(QDialog):
     suggestion_ready = Signal(str, str, str)   # subject, assessment, error (from a thread)
 
-    def __init__(self, facts: FollowUpFacts, store, parent=None, ollama: tuple[str, str] | None = None) -> None:
+    def __init__(self, facts: FollowUpFacts | None, store, parent=None, ollama: tuple[str, str] | None = None, *,
+                 text: str | None = None, js8=js8call_text, title: str = "Draft follow-up report",
+                 file_prefix: str = "S2-FOLLOWUP", suggest_fn=draft_assessment,
+                 suggest_label: str = "Suggest subject && assessment (Ollama)",
+                 mark_label: str = "Mark report “Follow-up created”", marked_label: str = "Marked “Follow-up created”",
+                 callsign: str = "") -> None:
         super().__init__(parent)
         self.ollama = ollama   # (endpoint, model) when Ollama is the analysis mode
-        self.setWindowTitle("Draft follow-up report")
+        self.setWindowTitle(title)
         self.resize(760, 640)
         self.facts = facts
         self.store = store
         self.marked = False
+        self.js8 = js8
+        self.file_prefix = file_prefix
+        self.suggest_fn = suggest_fn
+        self.suggest_label = suggest_label
+        self.marked_label = marked_label
         fixed = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont)
 
-        self.callsign = QLineEdit(facts.callsign)
+        self.callsign = QLineEdit(facts.callsign if facts else callsign)
         self.callsign.setPlaceholderText("e.g. N1ROG")
         self.callsign.editingFinished.connect(self._callsign_changed)
         top = QFormLayout()
         top.addRow("Your callsign", self.callsign)
 
-        self.full = QPlainTextEdit(full_report(facts))
+        self.full = QPlainTextEdit(text if text is not None else full_report(facts))
         self.full.setFont(fixed)
         self.full.textChanged.connect(self._derive)
         self.flmsg = QPlainTextEdit(readOnly=True)
@@ -72,13 +84,13 @@ class FollowUpDialog(QDialog):
         buttons = QDialogButtonBox()
         copy = buttons.addButton("Copy this tab", QDialogButtonBox.ButtonRole.ActionRole)
         copy.clicked.connect(self._copy)
-        self.suggest = buttons.addButton("Suggest subject && assessment (Ollama)", QDialogButtonBox.ButtonRole.ActionRole)
+        self.suggest = buttons.addButton(suggest_label, QDialogButtonBox.ButtonRole.ActionRole)
         self.suggest.setToolTip("Your local Ollama model drafts the subject and assessment from this report; "
                                 "check and edit them before you send anything.")
         self.suggest.setVisible(ollama is not None)
         self.suggest.clicked.connect(self._suggest)
         self.suggestion_ready.connect(self._suggested)
-        self.mark = buttons.addButton("Mark report “Follow-up created”", QDialogButtonBox.ButtonRole.ActionRole)
+        self.mark = buttons.addButton(mark_label, QDialogButtonBox.ButtonRole.ActionRole)
         self.mark.clicked.connect(self._mark)
         buttons.addButton(QDialogButtonBox.StandardButton.Close).clicked.connect(self.accept)
 
@@ -119,7 +131,7 @@ class FollowUpDialog(QDialog):
     def _derive(self) -> None:
         report = self.full.toPlainText()
         self.flmsg.setPlainText(flmsg_text(report))
-        message = js8call_text(report)
+        message = self.js8(report)
         self.js8call.setPlainText(message)
         over = len(message) > JS8CALL_TARGET
         self.js8call_count.setText(f"{len(message)} characters" + (" — consider shortening the subject" if over else ""))
@@ -129,7 +141,8 @@ class FollowUpDialog(QDialog):
         QGuiApplication.clipboard().setText(editor.toPlainText())
 
     def _save_flmsg(self) -> None:
-        name = "S2-FOLLOWUP-" + dtg(self.facts.now or self.facts.message.received_at).replace(" ", "-") + ".txt"
+        when = (self.facts.now or self.facts.message.received_at) if self.facts else datetime.now(timezone.utc)
+        name = f"{self.file_prefix}-" + dtg(when).replace(" ", "-") + ".txt"
         path, _ = QFileDialog.getSaveFileName(self, "Save FLMSG text", str(Path.home() / name), "Text files (*.txt)")
         if path:
             Path(path).write_text(self.flmsg.toPlainText(), encoding="ascii", errors="replace")
@@ -144,7 +157,7 @@ class FollowUpDialog(QDialog):
 
         def work() -> None:
             try:
-                subject, assessment = draft_assessment(report, endpoint, model)
+                subject, assessment = self.suggest_fn(report, endpoint, model)
                 self.suggestion_ready.emit(subject, assessment, "")
             except Exception as error:
                 self.suggestion_ready.emit("", "", str(error))
@@ -153,7 +166,7 @@ class FollowUpDialog(QDialog):
 
     def _suggested(self, subject: str, assessment: str, error: str) -> None:
         self.suggest.setEnabled(True)
-        self.suggest.setText("Suggest subject && assessment (Ollama)")
+        self.suggest.setText(self.suggest_label)
         if error:
             self.suggest.setToolTip(f"Ollama could not help: {error}")
             self.suggest.setText("Ollama unavailable — try again")
@@ -164,4 +177,4 @@ class FollowUpDialog(QDialog):
     def _mark(self) -> None:
         self.marked = True
         self.mark.setEnabled(False)
-        self.mark.setText("Marked “Follow-up created”")
+        self.mark.setText(self.marked_label)

@@ -63,6 +63,20 @@ def readable_text(message: Message) -> str:
     return JS8_ROUTING.sub("", text, count=1) or text
 
 
+CATEGORY_ALIASES = {
+    "weather": "Climate / Environment", "climate": "Climate / Environment", "environment": "Climate / Environment",
+    "natural disaster": "Climate / Environment", "disaster": "Climate / Environment",
+    "fire": "Climate / Environment", "wildfire": "Climate / Environment",
+    "accident": "Infrastructure", "traffic": "Infrastructure", "transportation": "Infrastructure",
+    "power": "Infrastructure", "utilities": "Infrastructure", "communications": "Infrastructure",
+    "health": "Health / Wellness", "medical": "Health / Wellness", "public health": "Health / Wellness",
+    "unrest": "Civil Unrest", "protest": "Civil Unrest", "protests": "Civil Unrest",
+    "military": "Military Conflict", "war": "Military Conflict", "security": "Terrorism",
+    "economic": "Economy", "finance": "Economy", "supply": "Supply Chain", "logistics": "Supply Chain",
+    "government": "Politics", "political": "Politics", "law enforcement": "Crime",
+}
+
+
 class OllamaError(RuntimeError):
     """Raised when Ollama cannot provide a valid analysis."""
 
@@ -145,6 +159,9 @@ class OllamaNewsAnalyzer(NewsAnalyzer):
         terms = result.get("matched_terms", [])
         if newsworthy is False and category not in NEWS_CATEGORIES:
             category = "routine"   # plain traffic needs no category
+        elif isinstance(category, str) and category not in NEWS_CATEGORIES:
+            # Small models sometimes answer with a near-synonym of a category.
+            category = CATEGORY_ALIASES.get(category.strip().lower(), category)
         if (
             not isinstance(newsworthy, bool)
             or (category not in NEWS_CATEGORIES and category != "routine")
@@ -255,3 +272,32 @@ def draft_assessment(report: str, endpoint: str, model: str, timeout: float = 12
     if not assessment:
         raise OllamaError("Ollama's reply had no assessment")
     return subject, assessment
+
+
+BRIEFING_PROMPT = """You help an amateur-radio emergency-net operator write the assessment for a shift briefing.
+Below is their draft briefing. Write ASSESSMENT: three to five short sentences: the overall situation, the most
+significant items and why, what official sources confirm, and what to watch during the next shift.
+Rules: use only facts in the draft; copy numbers exactly; do not add advice, causes, names or sources.
+
+Draft:
+{report}
+
+Answer in exactly this form:
+ASSESSMENT: ..."""
+
+
+def draft_briefing_assessment(report: str, endpoint: str, model: str, timeout: float = 180.0) -> tuple[str, str]:
+    """("", assessment) suggested by the model for a briefing draft (no subject line)."""
+    text = ollama_generate(endpoint, model, BRIEFING_PROMPT.format(report=report), timeout)
+    parts, in_assessment = [], False
+    for raw in text.splitlines():
+        line = raw.strip().strip("*").strip()
+        if line.split(":", 1)[0].strip("* ").upper() == "ASSESSMENT" and ":" in line:
+            in_assessment = True
+            parts.append(line.split(":", 1)[1].strip(" *"))
+        elif in_assessment and line:
+            parts.append(line)
+    assessment = " ".join(part for part in parts if part) or text.strip()
+    if not assessment:
+        raise OllamaError("Ollama's reply had no assessment")
+    return "", assessment

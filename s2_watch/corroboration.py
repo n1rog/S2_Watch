@@ -10,28 +10,38 @@ noted: early reporting is the point of an S2 network.
 """
 
 import math
+import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 from s2_watch.locating import _point_in_polygon, load_gazetteer
 
-# Hazard families, recognised in report text and in NWS event names.
+# Hazard families, recognised in report text and in NWS event names. Words match whole
+# words (plurals allowed); a trailing "*" matches any word starting so ("snow*": snowfall),
+# so "shot" isn't heat and "police" isn't ice.
 HAZARDS = {
-    "flood": ("flood", "flash flood", "high water", "rising water"),
-    "heat": ("heat", "triple digit", "hot "),
-    "fire": ("fire", "red flag", "smoke", "burn"),
-    "winter": ("winter", "snow", "blizzard", "ice ", "icy", "freez", "frost", "cold", "chill", "sleet"),
-    "wind": ("wind", "gust", "dust", "derecho"),
-    "tornado": ("tornado", "funnel"),
-    "thunderstorm": ("thunderstorm", "tstorm", "t-storm", "hail", "lightning", "severe storm", "severe weather"),
-    "tropical": ("hurricane", "tropical", "storm surge", "typhoon"),
-    "fog": ("fog", "visibility"),
-    "air": ("air quality", "smoke", "aqi"),
-    "coastal": ("surf", "rip current", "coastal", "tsunami"),
-    "earthquake": ("earthquake", "quake"),
-    "avalanche": ("avalanche",),
-    "security": ("security", "vip", "motorcade", "secret service", "presidential", "president", "flight restriction",
+    "flood": ("flood*", "flash flood*", "high water", "rising water"),
+    "heat": ("heat*", "triple digit*", "hot"),
+    "fire": ("fire", "wildfire*", "brushfire*", "grassfire*", "forest fire*", "red flag", "smoke*", "burn*"),
+    "winter": ("winter*", "snow*", "blizzard*", "ice", "icy", "freez*", "frost*", "cold", "chill*", "sleet*"),
+    "wind": ("wind", "windy", "gust*", "dust*", "derecho*"),
+    "tornado": ("tornado*", "funnel*"),
+    "thunderstorm": ("thunderstorm*", "tstorm*", "t-storm*", "hail", "hailstone*", "lightning", "severe storm*",
+                     "severe weather"),
+    "tropical": ("hurricane*", "tropical*", "storm surge*", "typhoon*"),
+    "fog": ("fog", "foggy", "visibility"),
+    "air": ("air quality", "smoke*", "aqi"),
+    "coastal": ("surf", "rip current*", "coastal*", "tsunami*"),
+    "earthquake": ("earthquake*", "quake*"),
+    "avalanche": ("avalanche*",),
+    "security": ("security", "vip", "motorcade*", "secret service", "presidential", "president", "flight restriction*",
                  "tfr", "no-fly", "no fly"),
+}
+_HAZARD_PATTERNS = {
+    family: re.compile("|".join(
+        r"\b" + re.escape(word[:-1]) if word.endswith("*") else r"\b" + re.escape(word) + r"(?:s|es)?\b"
+        for word in words))
+    for family, words in HAZARDS.items()
 }
 FEMA_HAZARDS = {
     "fire": {"fire", "air"}, "flood": {"flood"}, "severe storm": {"thunderstorm", "wind", "flood", "tornado"},
@@ -116,8 +126,8 @@ def official_items(messages, resolver=None) -> list[OfficialItem]:
 
 
 def hazards(text: str) -> set[str]:
-    lowered = f" {text.lower()} "
-    return {family for family, words in HAZARDS.items() if any(word in lowered for word in words)}
+    lowered = text.lower()
+    return {family for family, pattern in _HAZARD_PATTERNS.items() if pattern.search(lowered)}
 
 
 def _parse_time(value: str) -> datetime | None:
