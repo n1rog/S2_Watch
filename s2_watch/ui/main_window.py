@@ -11,14 +11,14 @@ from PySide6.QtWidgets import (
     QListWidgetItem, QMainWindow, QMessageBox, QPushButton, QSpinBox,
     QTableWidget, QTableWidgetItem,
     QFileDialog, QSystemTrayIcon, QTabWidget, QVBoxLayout, QHBoxLayout,
-    QWidget, QMenu, QToolButton, QWidgetAction, QAbstractItemView, QInputDialog,
+    QWidget, QMenu, QToolButton, QWidgetAction, QAbstractItemView, QInputDialog, QButtonGroup, QStackedWidget,
 )
 
 from s2_watch import REPOSITORY_URL, __version__ as APP_VERSION
 from s2_watch.backups import back_up_in_background, backup_folder
 from s2_watch.briefing import briefing_report, js8_briefing
 from s2_watch.followup import FollowUpFacts
-from s2_watch.ui.events_view import EventsView
+from s2_watch.ui.events_view import EventsTable, EventsView
 from s2_watch.ui.misses_view import MissesView
 from s2_watch.missed_news import MissedNewsScanner
 from s2_watch.events import incident_key, key_terms, place_from_locations, report_hazards
@@ -551,10 +551,52 @@ class MainWindow(QMainWindow):
         map_layout.addLayout(map_toolbar)
         self.map_view.setMinimumHeight(500)
         map_layout.addWidget(self.map_view, 3)
+        # Under the map: events (the default) or individual reports, switchable.
+        self.map_events = EventsTable(self.format_display_time)
+        self.map_events.menu_requested.connect(self.show_event_menu)
+        self.map_events.activated.connect(self.show_event_id_on_map)
+        self.event_actions: list[QAction] = []
+        for status, label, key in self.STATUS_ACTIONS:
+            action = QAction(label, self.map_events)
+            action.setShortcut(QKeySequence(key))
+            action.setShortcutContext(Qt.ShortcutContext.WidgetShortcut)
+            action.triggered.connect(lambda _checked=False, status=status: self.mark_reports(
+                self.selected_event_reports(), status))
+            self.map_events.addAction(action)
+            self.event_actions.append(action)
+        self.news_stack = QStackedWidget()
+        self.news_stack.addWidget(self.map_events)
+        self.news_stack.addWidget(self.analysis)
+        self.news_mode_buttons = {}
+        switch_row = QHBoxLayout()
         self.news_label = QLabel()
-        map_layout.addWidget(self.news_label)
+        switch_row.addWidget(self.news_label, 1)
+        switch_row.addWidget(QLabel("Show:"))
+        mode_group = QButtonGroup(self)
+        mode_group.setExclusive(True)
+        for mode, label, tip in (("events", "Events", "Reports grouped by the happening they describe"),
+                                 ("reports", "Reports", "Every newsworthy report on its own (labels, follow-ups)")):
+            button = QToolButton()
+            button.setText(label)
+            button.setToolTip(tip)
+            button.setCheckable(True)
+            button.clicked.connect(lambda _checked=False, mode=mode: self.set_news_mode(mode))
+            mode_group.addButton(button)
+            switch_row.addWidget(button)
+            self.news_mode_buttons[mode] = button
+        self.news_mode = self.store.get_setting("map.table", "events")
+        if self.news_mode not in self.news_mode_buttons:
+            self.news_mode = "events"
+        self.news_mode_buttons[self.news_mode].setChecked(True)
+        self.news_stack.setCurrentWidget(self.map_events if self.news_mode == "events" else self.analysis)
+        map_layout.addLayout(switch_row)
         self.update_news_label()
-        map_layout.addWidget(self.analysis, 2)
+        map_layout.addWidget(self.news_stack, 2)
+        # New reports arrive in bursts; the events list refreshes once a burst settles.
+        self._map_events_timer = QTimer(self)
+        self._map_events_timer.setSingleShot(True)
+        self._map_events_timer.setInterval(1000)
+        self._map_events_timer.timeout.connect(self.refresh_map_events)
 
         tabs = QTabWidget()
         for title, tab_layout in (
@@ -617,7 +659,7 @@ class MainWindow(QMainWindow):
         self.worker_config.connect(self._worker.configure)
         self._worker.batch_ready.connect(self.handle_batch)
         self._worker.coverage_ready.connect(self.map_view.set_coverage)
-        self._worker.events_changed.connect(self.events_view.data_changed)
+        self._worker.events_changed.connect(self.events_data_changed)
         self._worker_thread.start()
         self.refresh_forms()
         self.search_history()
@@ -740,6 +782,8 @@ class MainWindow(QMainWindow):
 
     def review_duration_changed(self) -> None:
         self.store.set_setting("review.hours", str(self.review_duration.currentData()))
+        if hasattr(self, "map_events"):
+            self.refresh_map_events()
         if hasattr(self, "map_watch_period"):
             self.map_watch_period.blockSignals(True)
             self.map_watch_period.setCurrentIndex(self.review_duration.currentIndex())
@@ -777,6 +821,80 @@ class MainWindow(QMainWindow):
     def news_rows_changed(self, value: int) -> None:
         self.store.set_setting("news.rows", str(value))
         self.apply_news_rows_limit()
+        self.map_events.apply_limit(value)
+
+    # -- events under the map ------------------------------------------------------------
+
+    def set_news_mode(self, mode: str) -> None:
+        self.news_mode = mode
+        self.store.set_setting("map.table", mode)
+        self.news_mode_buttons[mode].setChecked(True)
+        self.news_stack.setCurrentWidget(self.map_events if mode == "events" else self.analysis)
+        self.update_news_label()
+        if mode == "events":
+            self.refresh_map_events()
+
+    def events_data_changed(self) -> None:
+        self._map_events_timer.start()
+        self.events_view.data_changed()
+
+    def refresh_map_events(self) -> None:
+        since = datetime.now(timezone.utc) - timedelta(hours=int(self.review_duration.currentData()))
+        self.map_events.set_events(self.store.events_since(since), self.focus_regions, limit=self.news_rows.value())
+
+    def selected_event_reports(self) -> list[int]:
+        return [report["report_id"] for event_id in self.map_events.selected_events()
+                for report in self.store.event_reports(event_id)]
+
+    def show_event_menu(self, event_ids: list[int], position) -> None:
+        reports = {event_id: self.store.event_reports(event_id) for event_id in event_ids}
+        report_ids = [report["report_id"] for items in reports.values() for report in items]
+        menu = QMenu(self)
+        heading = menu.addAction(f"{len(event_ids)} event{'s' if len(event_ids) != 1 else ''} "
+                                 f"({len(report_ids)} report{'s' if len(report_ids) != 1 else ''}) selected")
+        heading.setEnabled(False)
+        mark = menu.addMenu("Mark all its reports as")
+        for status, label, _key in self.STATUS_ACTIONS:
+            mark.addAction(label).triggered.connect(
+                lambda _checked=False, status=status: self.mark_reports(report_ids, status))
+        menu.addAction("Edit note…").triggered.connect(lambda: self.edit_note(report_ids))
+        single = len(event_ids) == 1
+        if single:
+            items = reports[event_ids[0]]
+            # The follow-up starts from the newest radio report (the network's own), else the newest.
+            radio = [report for report in items if report["source"] != "OSINT"]
+            basis = (radio or items)[-1]["report_id"] if items else None
+            draft = menu.addAction("Draft follow-up report…")
+            draft.setEnabled(basis is not None)
+            draft.triggered.connect(lambda: self.draft_followup_for_report(basis))
+            menu.addAction("Show on map").triggered.connect(lambda: self.show_event_id_on_map(event_ids[0]))
+            menu.addAction("Open in Events tab (timeline)").triggered.connect(
+                lambda: (self.tabs.setCurrentWidget(self.events_view), self.events_view.table.select_event(event_ids[0])))
+        menu.addAction("Show its reports").triggered.connect(lambda: self.show_reports(report_ids))
+        menu.exec(position)
+
+    def show_event_id_on_map(self, event_id: int) -> None:
+        event = self.map_events.event_by_id(event_id) or self.events_view.table.event_by_id(event_id)
+        if event and event.points:
+            self.show_event_on_map(event.points)
+
+    def show_reports(self, report_ids) -> None:
+        """Switch to the Reports list and select these reports."""
+        self.set_news_mode("reports")
+        self.tabs.setCurrentIndex(0)
+        self.analysis.clearSelection()
+        wanted = set(report_ids)
+        first = None
+        for row in range(self.analysis.rowCount()):
+            item = self.analysis.item(row, 0)
+            if item is not None and item.data(self.REPORT_ROLE) in wanted:
+                self.analysis.setRowHidden(row, False)
+                self.analysis.selectionModel().select(
+                    self.analysis.model().index(row, 0),
+                    self.analysis.selectionModel().SelectionFlag.Select | self.analysis.selectionModel().SelectionFlag.Rows)
+                first = first or item
+        if first is not None:
+            self.analysis.scrollToItem(first)
 
     def apply_news_rows_limit(self) -> None:
         visible_rows = self.news_rows.value()
@@ -1099,7 +1217,7 @@ class MainWindow(QMainWindow):
         self.show_alerts(alerts)
         if any(processed.report for processed in batch):
             self.metrics_view.data_changed()
-            self.events_view.data_changed()
+            self.events_data_changed()
 
     def shown_report_item(self, report_id: int) -> QTableWidgetItem | None:
         item = self._report_items.get(report_id)
@@ -1268,8 +1386,9 @@ class MainWindow(QMainWindow):
     def update_news_label(self) -> None:
         # The table holds reports from the review window read at startup plus new traffic.
         focus = ", ".join(f"R{region}" for region in sorted(self.focus_regions))
+        kind = "Events" if getattr(self, "news_mode", "events") == "events" else "Reports"
         self.news_label.setText(
-            f"<b>Newsworthiness</b> — reports from the last {self.review_duration.currentText()}"
+            f"<b>Newsworthiness: {kind}</b> — from the last {self.review_duration.currentText()}"
             + (f", <b>focus {focus} first</b>, then the rest of the U.S." if focus else "")
             + " <span style='color:gray'>(focus: Configuration → Focus Regions)</span>"
         )
@@ -1423,6 +1542,7 @@ class MainWindow(QMainWindow):
         self.aircraft_poller.set_focus(self.focus_regions)
         self.metrics_view.set_focus_regions(self.focus_regions)
         self.events_view.set_focus_regions(self.focus_regions)
+        self.refresh_map_events()
         focus = ", ".join(f"R{region}" for region in sorted(self.focus_regions))
         self.update_news_label()
         self.setWindowTitle(f"S2 Watch {APP_VERSION}" + (f" — focus {focus}" if focus else ""))
@@ -1532,24 +1652,23 @@ class MainWindow(QMainWindow):
             self.store.set_setting("briefing.last", now.isoformat())
 
     def draft_followup(self, row: int, report_id: int) -> None:
-        item = self.analysis.item(row, 0)
-        message = item.data(Qt.ItemDataRole.UserRole + 1) if item else None
-        if not isinstance(message, Message):
+        self.draft_followup_for_report(report_id)
+
+    def draft_followup_for_report(self, report_id: int | None) -> None:
+        """Draft a follow-up from a saved report (from the Reports list or an event)."""
+        found = self.store.report_first_message(report_id) if report_id is not None else None
+        if found is None:
             return
-        text = lambda column: (self.analysis.item(row, self.ANALYSIS_COLUMNS.index(column)).text()
-                               if self.analysis.item(row, self.ANALYSIS_COLUMNS.index(column)) else "")
-        confidence = text("Confidence").rstrip("%")
-        result = AnalysisResult(text("Result") == "NEWSWORTHY", text("Category"), text("Urgency"), text("Summary"),
-                                float(confidence) / 100 if confidence.isdigit() else 0.0)
+        message, result, official = found
+        if result is None:
+            result = AnalysisResult(True, "routine", "low", message.raw_content, 0.0)
         info = self.store.report_info(report_id)
         first_seen, last_seen = self.store.report_times(report_id)
         facts = FollowUpFacts(
-            message, result, list(item.data(self.LOCATIONS_ROLE) or []),
+            message, result, self._official_resolver.resolve(message),
             callsign=self.store.get_setting("operator.callsign", ""),
             region=info.region, state=info.state, copies=info.copies, sources=info.sources,
-            first_seen=first_seen, last_seen=last_seen,
-            official=self.analysis.item(row, self.OFFICIAL_COLUMN).text() if self.analysis.item(row, self.OFFICIAL_COLUMN) else "",
-            note=info.note,
+            first_seen=first_seen, last_seen=last_seen, official=official, note=info.note,
         )
         ollama = None
         if self.analysis_mode.checkedAction().data() == "ollama":
@@ -1561,15 +1680,17 @@ class MainWindow(QMainWindow):
             self.apply_report_status([report_id], "followup", info.note if info.status == "followup" else None)
 
     def mark_selected_reports(self, status: str) -> None:
-        rows = self.selected_report_rows()
-        if not rows:
+        self.mark_reports([report_id for _row, report_id in self.selected_report_rows()], status)
+
+    def mark_reports(self, report_ids: list[int], status: str) -> None:
+        if not report_ids:
             return
         note = None  # keep existing notes
         if status == "followup":
-            existing = self.store.report_status(rows[0][1])[1] if len(rows) == 1 else ""
+            existing = self.store.report_status(report_ids[0])[1] if len(report_ids) == 1 else ""
             text, accepted = QInputDialog.getText(
                 self, "Follow-up created",
-                f"Optional note for {len(rows)} report{'s' if len(rows) != 1 else ''} "
+                f"Optional note for {len(report_ids)} report{'s' if len(report_ids) != 1 else ''} "
                 "(e.g. your follow-up report number):", text=existing,
             )
             if not accepted:
@@ -1577,27 +1698,32 @@ class MainWindow(QMainWindow):
             note = text.strip()
         elif status == "":
             note = ""
-        self.apply_report_status([report_id for _row, report_id in rows], status, note)
+        self.apply_report_status(report_ids, status, note)
 
     def edit_selected_note(self) -> None:
-        rows = self.selected_report_rows()
-        if not rows:
+        self.edit_note([report_id for _row, report_id in self.selected_report_rows()])
+
+    def edit_note(self, report_ids: list[int]) -> None:
+        if not report_ids:
             return
-        existing = self.store.report_status(rows[0][1])[1] if len(rows) == 1 else ""
+        existing = self.store.report_status(report_ids[0])[1] if len(report_ids) == 1 else ""
         text, accepted = QInputDialog.getText(self, "Report note", "Note:", text=existing)
         if not accepted:
             return
-        for _row, report_id in rows:
+        for report_id in report_ids:
             status = self.store.report_status(report_id)[0]
             self.store.set_report_status([report_id], status, text.strip())
-        self.refresh_report_rows({report_id for _row, report_id in rows})
+        self.refresh_report_rows(set(report_ids))
         self.analysis.resizeColumnToContents(self.STATUS_COLUMN)
+        self.events_data_changed()
 
     def apply_report_status(self, report_ids: list[int], status: str, note: str | None) -> None:
         self.store.set_report_status(report_ids, status, note)
         self.refresh_report_rows(set(report_ids))
         self.analysis.resizeColumnToContents(self.STATUS_COLUMN)
         self.metrics_view.data_changed()
+        self.refresh_map_events()            # labels show (and pin) at once
+        self.events_view.data_changed()
 
     def refresh_report_rows(self, report_ids: set[int]) -> None:
         for row in range(self.analysis.rowCount()):
@@ -1658,6 +1784,10 @@ class MainWindow(QMainWindow):
             if isinstance(message, Message) and str(id(message)) == message_id:
                 self.analysis.selectRow(row)
                 self.analysis.scrollToItem(item)
+                report_id = item.data(self.REPORT_ROLE)
+                event_id = self.store.event_of_report(int(report_id)) if report_id is not None else None
+                if event_id is not None:
+                    self.map_events.select_event(event_id)
                 break
 
     def alert_settings_changed(self) -> None:

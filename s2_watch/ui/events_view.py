@@ -1,11 +1,16 @@
-"""The Events tab: reports grouped by the real-world happening they describe."""
+"""Events: reports (radio and official) grouped by the happening they describe.
+
+``EventsTable`` is the list itself, used under the map (switchable with the Reports list)
+and in the Events tab, which adds its own period, filters and each event's timeline.
+"""
 
 from __future__ import annotations
 
+import time
 from datetime import datetime, timedelta, timezone
 
-from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QFont
+from PySide6.QtCore import QPoint, Qt, QTimer, Signal
+from PySide6.QtGui import QBrush, QColor, QFont, QPalette
 from PySide6.QtWidgets import (
     QAbstractItemView, QCheckBox, QComboBox, QHBoxLayout, QHeaderView, QLabel, QPushButton, QSplitter, QTableWidget,
     QTableWidgetItem, QVBoxLayout, QWidget,
@@ -13,6 +18,8 @@ from PySide6.QtWidgets import (
 
 PERIODS = (("24 hours", 24), ("48 hours", 48), ("7 days", 168), ("30 days", 720))
 URGENCY_RANK = {"high": 3, "medium": 2, "low": 1}
+PINNED_STATUSES = {"interest", "followup"}
+HIGHLIGHT_SECONDS = 15
 
 
 class SortKeyItem(QTableWidgetItem):
@@ -28,12 +35,157 @@ class SortKeyItem(QTableWidgetItem):
         return super().__lt__(other)
 
 
-class EventsView(QWidget):
-    show_on_map = Signal(object)      # [(lat, lon), ...]
-    draft_briefing = Signal()
+class EventsTable(QTableWidget):
+    """A list of events; right-click and double-click are handled by the window."""
+
+    menu_requested = Signal(object, QPoint)   # [event ids], global position
+    activated = Signal(int)                   # event id (double-click)
 
     COLUMNS = ("Last activity", "Event", "Category", "Area", "Reports", "Sources", "Urgency", "Official",
                "Radio lead", "Labels")
+    EVENT_ROLE = Qt.ItemDataRole.UserRole
+
+    def __init__(self, format_time, parent=None) -> None:
+        super().__init__(0, len(self.COLUMNS), parent)
+        self.format_time = format_time
+        self.events = []
+        self._seen: dict[int, datetime] = {}       # event id -> last activity at the previous fill
+        self._highlight_until: dict[int, float] = {}
+        self.setHorizontalHeaderLabels(self.COLUMNS)
+        self.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.setAlternatingRowColors(True)
+        self.setWordWrap(False)
+        header = self.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)   # the event's title gets the room
+        self.verticalHeader().setVisible(False)
+        self.setSortingEnabled(True)
+        self.sortItems(0, Qt.SortOrder.DescendingOrder)   # focus regions, then the latest activity first
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.customContextMenuRequested.connect(
+            lambda position: self.selected_events() and self.menu_requested.emit(
+                self.selected_events(), self.viewport().mapToGlobal(position)))
+        self.cellDoubleClicked.connect(lambda row, _column: self._activate(row))
+        self._highlight_timer = QTimer(self)
+        self._highlight_timer.setInterval(5000)
+        self._highlight_timer.timeout.connect(self._fade_highlights)
+
+    def set_events(self, events, focus: set[int] | None = None, limit: int | None = None) -> None:
+        """Show events: focus regions first, then the latest activity. With ``limit``, rows past
+        it are hidden, except events labelled Of interest or Follow-up."""
+        focus = set(focus or ())
+        selected = set(self.selected_events())
+        first_fill = not self._seen
+        now = time.monotonic()
+        for event in events:
+            previous = self._seen.get(event.event_id)
+            if not first_fill and (previous is None or event.last_seen > previous):
+                self._highlight_until[event.event_id] = now + HIGHLIGHT_SECONDS   # new, or a new report
+        self._seen = {event.event_id: event.last_seen for event in events}
+        self.events = list(events)
+        sorting = self.isSortingEnabled()
+        self.setSortingEnabled(False)
+        self.setRowCount(0)
+        muted = self.palette().color(QPalette.ColorRole.PlaceholderText)
+        for event in events:
+            row = self.rowCount()
+            self.insertRow(row)
+            area = ", ".join(part for part in (event.state, f"R{event.region}" if event.region else "") if part)
+            lead = f"{event.radio_lead_minutes} min" if event.radio_lead_minutes else ""
+            in_focus = bool(focus) and event.region in focus
+            cells = (
+                SortKeyItem(self.format_time(event.last_seen), (in_focus, event.last_seen.timestamp())),
+                QTableWidgetItem(event.title),
+                QTableWidgetItem(event.category),
+                QTableWidgetItem(area),
+                SortKeyItem(str(event.reports), event.reports),
+                QTableWidgetItem(", ".join(event.sources)),
+                SortKeyItem(event.urgency, URGENCY_RANK.get(event.urgency, 0)),
+                QTableWidgetItem(f"✓ {event.official}" if event.official else ""),
+                SortKeyItem(lead, event.radio_lead_minutes or 0),
+                QTableWidgetItem(", ".join(status for status in event.statuses if status)),
+            )
+            cells[0].setData(self.EVENT_ROLE, event.event_id)
+            cells[1].setToolTip(event.title)
+            ignored = bool(event.statuses) and set(event.statuses) == {"ignored"}
+            for column, item in enumerate(cells):
+                font = QFont(item.font())
+                font.setBold(column == 1 and event.reports > 1 or column == 9 and bool(PINNED_STATUSES & set(event.statuses)))
+                font.setItalic(ignored)
+                item.setFont(font)
+                if ignored:
+                    item.setForeground(QBrush(muted))
+                self.setItem(row, column, item)
+        self.setSortingEnabled(sorting)
+        if sorting:
+            header = self.horizontalHeader()
+            self.sortItems(header.sortIndicatorSection(), header.sortIndicatorOrder())
+        self.apply_limit(limit)
+        self._paint_highlights()
+        for event_id in selected:
+            self.select_event(event_id, clear=False)
+
+    def apply_limit(self, limit: int | None) -> None:
+        events = {event.event_id: event for event in self.events}
+        for row in range(self.rowCount()):
+            event = events.get(self.item(row, 0).data(self.EVENT_ROLE))
+            pinned = event is not None and bool(PINNED_STATUSES & set(event.statuses))
+            self.setRowHidden(row, limit is not None and row >= limit and not pinned)
+
+    def _paint_highlights(self) -> None:
+        now = time.monotonic()
+        tint = QColor(self.palette().color(QPalette.ColorRole.Highlight))
+        tint.setAlpha(55)
+        active = False
+        for row in range(self.rowCount()):
+            event_id = self.item(row, 0).data(self.EVENT_ROLE)
+            fresh = self._highlight_until.get(event_id, 0) > now
+            active = active or fresh
+            for column in range(self.columnCount()):
+                self.item(row, column).setBackground(QBrush(tint) if fresh else QBrush())
+        if active and not self._highlight_timer.isActive():
+            self._highlight_timer.start()
+        elif not active:
+            self._highlight_timer.stop()
+
+    def _fade_highlights(self) -> None:
+        now = time.monotonic()
+        self._highlight_until = {event_id: until for event_id, until in self._highlight_until.items() if until > now}
+        self._paint_highlights()
+
+    def selected_events(self) -> list[int]:
+        rows = sorted({index.row() for index in self.selectionModel().selectedRows()}) if self.selectionModel() else []
+        return [self.item(row, 0).data(self.EVENT_ROLE) for row in rows if self.item(row, 0) is not None]
+
+    def event_by_id(self, event_id):
+        return next((event for event in self.events if event.event_id == event_id), None)
+
+    def select_event(self, event_id: int, clear: bool = True) -> bool:
+        for row in range(self.rowCount()):
+            item = self.item(row, 0)
+            if item is not None and item.data(self.EVENT_ROLE) == event_id:
+                if clear:
+                    self.clearSelection()
+                self.setRowHidden(row, False)
+                self.selectRow(row)
+                self.scrollToItem(item)
+                return True
+        return False
+
+    def _activate(self, row: int) -> None:
+        item = self.item(row, 0)
+        if item is not None:
+            self.activated.emit(item.data(self.EVENT_ROLE))
+
+
+class EventsView(QWidget):
+    """The Events tab: the list with its own period and filters, and each event's timeline."""
+
+    show_on_map = Signal(object)      # [(lat, lon), ...]
+    draft_briefing = Signal()
+
     TIMELINE_COLUMNS = ("Heard", "Source", "From", "Urgency", "Report", "Official", "Label")
 
     def __init__(self, store, format_time, parent=None) -> None:
@@ -41,7 +193,6 @@ class EventsView(QWidget):
         self.store = store
         self.format_time = format_time
         self.focus_regions: set[int] = set()
-        self._events = []
 
         self.period = QComboBox()
         for label, hours in PERIODS:
@@ -69,25 +220,14 @@ class EventsView(QWidget):
         top.addWidget(self.count)
         top.addWidget(briefing)
 
-        self.table = QTableWidget(0, len(self.COLUMNS))
-        self.table.setHorizontalHeaderLabels(self.COLUMNS)
-        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.table.setAlternatingRowColors(True)
-        self.table.setWordWrap(False)
-        header = self.table.horizontalHeader()
-        header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)   # the event's title gets the room
-        self.table.verticalHeader().setVisible(False)
-        self.table.setSortingEnabled(True)
+        self.table = EventsTable(format_time)
         self.table.itemSelectionChanged.connect(self._selection_changed)
-        self.table.cellDoubleClicked.connect(lambda _row, _column: self._show_selected())
+        self.table.activated.connect(lambda event_id: self._show(event_id))
 
         self.heading = QLabel("Select an event to see its timeline.")
         self.map_button = QPushButton("Show on map")
         self.map_button.setEnabled(False)
-        self.map_button.clicked.connect(self._show_selected)
+        self.map_button.clicked.connect(lambda: self._show(self.selected_event()))
         detail_top = QHBoxLayout()
         detail_top.addWidget(self.heading, 1)
         detail_top.addWidget(self.map_button)
@@ -117,8 +257,6 @@ class EventsView(QWidget):
         self._refresh_timer.setInterval(3000)
         self._refresh_timer.timeout.connect(self.refresh)
 
-    # -- data --------------------------------------------------------------------------
-
     def data_changed(self) -> None:
         self._refresh_timer.start()
 
@@ -139,63 +277,18 @@ class EventsView(QWidget):
         return events
 
     def refresh(self) -> None:
-        selected = self.selected_event()
-        self._events = self.visible_events()
-        sorting = self.table.isSortingEnabled()
-        self.table.setSortingEnabled(False)
-        self.table.setRowCount(0)
-        for event in self._events:
-            row = self.table.rowCount()
-            self.table.insertRow(row)
-            area = ", ".join(part for part in (event.state, f"R{event.region}" if event.region else "") if part)
-            lead = f"{event.radio_lead_minutes} min" if event.radio_lead_minutes else ""
-            cells = (
-                SortKeyItem(self.format_time(event.last_seen), event.last_seen.timestamp()),
-                QTableWidgetItem(event.title),
-                QTableWidgetItem(event.category),
-                QTableWidgetItem(area),
-                SortKeyItem(str(event.reports), event.reports),
-                QTableWidgetItem(", ".join(event.sources)),
-                SortKeyItem(event.urgency, URGENCY_RANK.get(event.urgency, 0)),
-                QTableWidgetItem(f"✓ {event.official}" if event.official else ""),
-                SortKeyItem(lead, event.radio_lead_minutes or 0),
-                QTableWidgetItem(", ".join(status for status in event.statuses if status)),
-            )
-            cells[0].setData(Qt.ItemDataRole.UserRole, event.event_id)
-            if event.reports > 1:
-                font = QFont(cells[1].font())
-                font.setBold(True)
-                cells[1].setFont(font)
-            cells[1].setToolTip(event.title)
-            for column, item in enumerate(cells):
-                self.table.setItem(row, column, item)
-        self.table.setSortingEnabled(sorting)
-        multi = sum(event.reports > 1 for event in self._events)
-        self.count.setText(f"{len(self._events)} events, {multi} with several reports")
-        if selected is not None:
-            self.select_event(selected)
-
-    # -- selection ---------------------------------------------------------------------
+        events = self.visible_events()
+        self.table.set_events(events, self.focus_regions)
+        multi = sum(event.reports > 1 for event in events)
+        self.count.setText(f"{len(events)} events, {multi} with several reports")
+        self._selection_changed()
 
     def selected_event(self) -> int | None:
-        rows = self.table.selectionModel().selectedRows() if self.table.selectionModel() else []
-        if not rows:
-            return None
-        item = self.table.item(rows[0].row(), 0)
-        return item.data(Qt.ItemDataRole.UserRole) if item else None
-
-    def select_event(self, event_id: int) -> None:
-        for row in range(self.table.rowCount()):
-            item = self.table.item(row, 0)
-            if item is not None and item.data(Qt.ItemDataRole.UserRole) == event_id:
-                self.table.selectRow(row)
-                return
-
-    def _event(self, event_id):
-        return next((event for event in self._events if event.event_id == event_id), None)
+        selected = self.table.selected_events()
+        return selected[0] if selected else None
 
     def _selection_changed(self) -> None:
-        event = self._event(self.selected_event())
+        event = self.table.event_by_id(self.selected_event()) if self.selected_event() is not None else None
         self.timeline.setRowCount(0)
         self.map_button.setEnabled(bool(event and event.points))
         if event is None:
@@ -217,8 +310,8 @@ class EventsView(QWidget):
                 self.timeline.setItem(row, column, item)
         self.timeline.resizeColumnsToContents()
 
-    def _show_selected(self) -> None:
-        event = self._event(self.selected_event())
+    def _show(self, event_id) -> None:
+        event = self.table.event_by_id(event_id) if event_id is not None else None
         if event and event.points:
             self.show_on_map.emit(list(event.points))
 

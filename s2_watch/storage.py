@@ -1,5 +1,6 @@
 import json
 import sqlite3
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -42,7 +43,7 @@ class SQLiteStore:
         self.connection = sqlite3.connect(path, timeout=10)
         # The window and the polling thread each have a connection; WAL lets one read
         # while the other writes.
-        self.connection.execute("PRAGMA journal_mode=WAL")
+        self._use_wal()
         self.connection.execute(
             """CREATE TABLE IF NOT EXISTS messages (
                 id INTEGER PRIMARY KEY, source_application TEXT NOT NULL,
@@ -176,6 +177,20 @@ class SQLiteStore:
                     f"ALTER TABLE watch_forms ADD COLUMN {column} TEXT NOT NULL DEFAULT ''"
                 )
         self.connection.commit()
+
+    def _use_wal(self) -> None:
+        # Switching to WAL needs a moment of exclusive access and doesn't wait for it; the
+        # window, the polling thread and the background check open the database together.
+        # Once a database is in WAL mode it stays so, and there is nothing to switch.
+        for attempt in range(50):
+            try:
+                if self.connection.execute("PRAGMA journal_mode").fetchone()[0].lower() != "wal":
+                    self.connection.execute("PRAGMA journal_mode=WAL")
+                return
+            except sqlite3.OperationalError:
+                if attempt == 49:
+                    raise
+                time.sleep(0.1)
 
     def _remove_repeated_messages(self) -> None:
         """One-time cleanup: earlier versions saved a message again on every launch."""
@@ -627,6 +642,34 @@ class SQLiteStore:
                 event["last"], event["reports"], tuple(event["sources"]), event["urgency"], event["official"], lead,
                 tuple(event["statuses"]), event["points"]))
         return summaries
+
+    def event_of_report(self, report_id: int) -> int | None:
+        row = self.connection.execute("SELECT event_id FROM reports WHERE id = ?", (report_id,)).fetchone()
+        return int(row[0]) if row and row[0] is not None else None
+
+    def report_first_message(self, report_id: int) -> tuple[Message, AnalysisResult | None, str] | None:
+        """A report's first copy, its analysis and its official confirmation text."""
+        row = self.connection.execute(
+            """SELECT m.source_application, m.raw_content, m.received_at, m.fields_json, m.form_name,
+                      a.newsworthy, a.category, a.urgency, a.summary, a.confidence, r.corroboration
+               FROM reports r
+               JOIN messages m ON m.id = (SELECT MIN(id) FROM messages WHERE report_id = r.id)
+               LEFT JOIN analysis_results a ON a.message_id = m.id
+               WHERE r.id = ?""", (report_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        application, raw, received, fields_json, form, newsworthy, category, urgency, summary, confidence, official = row
+        try:
+            fields = json.loads(fields_json) if fields_json else {}
+        except ValueError:
+            fields = {}
+        when = datetime.fromisoformat(received)
+        message = Message(application, raw, received_at=when if when.tzinfo else when.replace(tzinfo=timezone.utc),
+                          form_name=form, fields={str(k): str(v) for k, v in fields.items()})
+        result = (AnalysisResult(bool(newsworthy), category, urgency, summary, float(confidence))
+                  if newsworthy is not None else None)
+        return message, result, official or ""
 
     def event_reports(self, event_id: int) -> list[dict]:
         """An event's reports in time order (its timeline)."""

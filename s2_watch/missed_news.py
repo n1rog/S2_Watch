@@ -13,6 +13,7 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+import sqlite3
 import threading
 import time
 from collections import deque
@@ -99,41 +100,63 @@ class MissedNewsScanner(QObject):
         with self._lock:
             return self._pending.pop() if self._pending else None
 
+    def _open_store(self) -> SQLiteStore | None:
+        # At startup the window and the polling thread set up the same database; a
+        # simultaneous set-up can find it briefly locked, so try again rather than give up.
+        for _attempt in range(30):
+            try:
+                return SQLiteStore(self.database_path)
+            except sqlite3.OperationalError:
+                if self._stop.wait(2):
+                    return None
+        return None
+
     def _run(self) -> None:
-        store = SQLiteStore(self.database_path)
+        store = self._open_store()
+        if store is None:
+            self.last_error = "could not open the database"
+            return
         try:
             while not self._stop.is_set():
-                analyzer = self.analyzer
-                if not self.enabled or analyzer is None or computer_busy():
-                    self._stop.wait(30)
-                    continue
-                message = self._next()
-                if message is None:
-                    self._stop.wait(15)
-                    continue
-                key = check_key(message)
-                if store.missed_checked(key):
-                    continue
-                started = time.monotonic()
                 try:
-                    result = analyzer.analyze(message)
-                except OllamaError as error:
-                    if str(error).startswith(("Unable to contact", "Ollama returned HTTP")):
-                        self.last_error = str(error)   # Ollama stopped or busy: try again later
-                        with self._lock:
-                            self._pending.append(message)
-                        self._stop.wait(120)
-                        continue
-                    # The model answered but not usably (an unknown category...): record and move on.
-                    result = AnalysisResult(False, "routine", "low", f"(model reply unusable: {error})", 0.0)
-                self.last_error = ""
-                worth = result.newsworthy and result.confidence >= MIN_CONFIDENCE
-                store.save_missed_check(key, message, result, "new" if worth else "routine")
-                self.checked += 1
-                self.progress.emit(self.checked, self.pending())
-                if worth:
-                    self.found.emit()
-                # Leave the computer free two thirds of the time.
-                self._stop.wait(max(2.0, 2 * (time.monotonic() - started)))
+                    self._check_one(store)
+                except sqlite3.OperationalError as error:   # the database briefly busy
+                    self.last_error = str(error)
+                    self._stop.wait(10)
         finally:
             store.close()
+
+    def _check_one(self, store: SQLiteStore) -> None:
+        """Read the newest waiting message (if the check is on and the computer free)."""
+        analyzer = self.analyzer
+        if not self.enabled or analyzer is None or computer_busy():
+            self._stop.wait(30)
+            return
+        message = self._next()
+        if message is None:
+            self._stop.wait(15)
+            return
+        key = check_key(message)
+        if store.missed_checked(key):
+            return
+        started = time.monotonic()
+        try:
+            result = analyzer.analyze(message)
+        except OllamaError as error:
+            if str(error).startswith(("Unable to contact", "Ollama returned HTTP")):
+                self.last_error = str(error)   # Ollama stopped or busy: try again later
+                with self._lock:
+                    self._pending.append(message)
+                self._stop.wait(120)
+                return
+            # The model answered but not usably (an unknown category...): record and move on.
+            result = AnalysisResult(False, "routine", "low", f"(model reply unusable: {error})", 0.0)
+        self.last_error = ""
+        worth = result.newsworthy and result.confidence >= MIN_CONFIDENCE
+        store.save_missed_check(key, message, result, "new" if worth else "routine")
+        self.checked += 1
+        self.progress.emit(self.checked, self.pending())
+        if worth:
+            self.found.emit()
+        # Leave the computer free two thirds of the time.
+        self._stop.wait(max(2.0, 2 * (time.monotonic() - started)))

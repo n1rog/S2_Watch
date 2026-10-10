@@ -55,6 +55,13 @@ without a physical hazard (crime, politics...) also need distinctive wording in 
 Each event shows its sources, official confirmation and how far ahead radio reported it;
 select one for its timeline, or **Show on map**.
 
+Under the map, **Show: Events | Reports** switches the Newsworthiness list between events
+(the default) and individual reports. Right-click events to label all their reports,
+edit a note, draft a follow-up (from the newest radio report), show them on the map, or
+list their reports; the I/F/X-style shortcuts work there too. Clicking a map marker
+selects its event; new and updated events are highlighted briefly; the row limit applies,
+with events labelled Of interest or Follow-up always shown.
+
 ## Shift briefings
 
 **Reports → Draft Shift Briefing…** (or the button on the Events tab) drafts a briefing
