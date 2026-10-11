@@ -264,7 +264,16 @@ class SQLiteStore:
             "SELECT report_id FROM messages WHERE id = ?", (message_id,)
         ).fetchone()
         if row and row[0] is not None:
-            return self._report_info(int(row[0]), new_report=False)
+            report_id = int(row[0])
+            if result is not None:
+                # The report follows the latest analysis of its first copy (a later, better
+                # analyzer such as Ollama can find a rules match was routine chat).
+                self.connection.execute(
+                    """UPDATE reports SET newsworthy = ?, category = ?, urgency = ?
+                       WHERE id = ? AND (SELECT MIN(id) FROM messages WHERE report_id = ?) = ?""",
+                    (int(result.newsworthy), result.category, result.urgency, report_id, report_id, message_id))
+                self.connection.commit()
+            return self._report_info(report_id, new_report=False)
         text = report_text(message.raw_content)
         seen = message.received_at if message.received_at.tzinfo else message.received_at.replace(tzinfo=timezone.utc)
         low, high = utc_iso(seen - DUPLICATE_WINDOW), utc_iso(seen + DUPLICATE_WINDOW)
@@ -589,7 +598,8 @@ class SQLiteStore:
                       r.first_seen, r.sources, r.first_source, r.urgency, r.corroboration, r.status, r.lat, r.lon,
                       r.sender
                FROM events e JOIN reports r ON r.event_id = e.id
-               WHERE e.last_seen >= ? ORDER BY e.last_seen DESC, r.first_seen""",
+               WHERE e.last_seen >= ? AND r.newsworthy = 1
+               ORDER BY e.last_seen DESC, r.first_seen""",
             (utc_iso(since),),
         ).fetchall()
         rank = {"low": 1, "medium": 2, "high": 3}
@@ -675,16 +685,24 @@ class SQLiteStore:
         """An event's reports in time order (its timeline)."""
         rows = self.connection.execute(
             """SELECT r.id, r.first_seen, r.last_seen, r.copies, r.sources, r.first_source, r.sender, r.urgency,
-                      r.corroboration, r.status, r.lat, r.lon, COALESCE(a.summary, ''), m.raw_content
+                      r.corroboration, r.status, r.lat, r.lon, COALESCE(a.summary, ''), m.raw_content, m.fields_json
                FROM reports r
                JOIN messages m ON m.id = (SELECT MIN(id) FROM messages WHERE report_id = r.id)
                LEFT JOIN analysis_results a ON a.message_id = m.id
-               WHERE r.event_id = ? ORDER BY r.first_seen""",
+               WHERE r.event_id = ? AND r.newsworthy = 1 ORDER BY r.first_seen""",
             (event_id,),
         ).fetchall()
         keys = ("report_id", "first_seen", "last_seen", "copies", "sources", "source", "sender", "urgency",
                 "corroboration", "status", "lat", "lon", "summary", "text")
-        return [dict(zip(keys, row)) for row in rows]
+        reports = []
+        for row in rows:
+            report = dict(zip(keys, row[:-1]))
+            try:
+                report["fields"] = json.loads(row[-1]) if row[-1] else {}
+            except ValueError:
+                report["fields"] = {}
+            reports.append(report)
+        return reports
 
     def report_times(self, report_id: int) -> tuple[datetime | None, datetime | None]:
         """When a report was first and last heard (UTC)."""

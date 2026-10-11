@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
 
 from s2_watch import REPOSITORY_URL, __version__ as APP_VERSION
 from s2_watch.backups import back_up_in_background, backup_folder
-from s2_watch.briefing import briefing_report, js8_briefing
+from s2_watch.s2_report import DEFAULT_MAGCON, briefing_report as s2_briefing_report, followup_report as s2_followup_report, js8_report
 from s2_watch.followup import FollowUpFacts
 from s2_watch.ui.events_view import EventsTable, EventsView
 from s2_watch.ui.misses_view import MissesView
@@ -55,7 +55,7 @@ from s2_watch.adapters.flmsg_files import FLMSGFileAdapter
 from s2_watch.adapters.js8superspotter_sqlite import JS8SuperSpotterSQLiteAdapter
 from s2_watch.analysis.base import AnalysisResult
 from s2_watch.analysis.base import NewsAnalyzer
-from s2_watch.analysis.ollama import HybridNewsAnalyzer, OllamaNewsAnalyzer, draft_briefing_assessment, readable_text
+from s2_watch.analysis.ollama import HybridNewsAnalyzer, OllamaNewsAnalyzer, draft_s2_assessment, readable_text
 from s2_watch.analysis.rules import RuleBasedNewsAnalyzer
 from s2_watch.analysis.categories import NEWS_CATEGORIES
 from s2_watch.models import ANY_APPLICATION, APPLICATIONS, Message, WatchForm
@@ -486,7 +486,8 @@ class MainWindow(QMainWindow):
         self._backup_timer.start(60 * 60 * 1000)
         QTimer.singleShot(60_000, self.back_up_database)
         reports_menu = self.menuBar().addMenu("Reports")
-        reports_menu.addAction("Draft Shift Briefing…").triggered.connect(lambda: self.draft_briefing())
+        reports_menu.addAction("Draft Shift Briefing…").triggered.connect(
+            lambda: self.draft_briefing(int(self.review_duration.currentData())))
         reports_menu.addAction("Show Events").triggered.connect(lambda: self.tabs.setCurrentWidget(self.events_view))
         help_menu = self.menuBar().addMenu("Help")
         # Current date/time in the chosen format, top right, with a Local/Zulu switch.
@@ -547,6 +548,10 @@ class MainWindow(QMainWindow):
         map_toolbar.addWidget(QLabel("Watch period:"))
         map_toolbar.addWidget(self.map_watch_period)
         map_toolbar.addStretch(1)
+        map_briefing = QPushButton("Draft briefing…")
+        map_briefing.setToolTip("Draft a MAGNET S2 briefing from the events in the watch period")
+        map_briefing.clicked.connect(lambda: self.draft_briefing(int(self.review_duration.currentData())))
+        map_toolbar.addWidget(map_briefing)
         map_layout = QVBoxLayout()
         map_layout.addLayout(map_toolbar)
         self.map_view.setMinimumHeight(500)
@@ -1626,26 +1631,37 @@ class MainWindow(QMainWindow):
         self.tabs.setCurrentIndex(0)
         self.map_view.show_area(points)
 
-    def draft_briefing(self) -> None:
-        """A shift briefing from the events in the Events tab's period (and focus filter)."""
-        hours = self.events_view.period_hours()
+    def _s2_js8(self, text: str) -> str:
+        return js8_report(text, self.store.get_setting("operator.callsign", ""))
+
+    def draft_briefing(self, hours: int | None = None) -> None:
+        """A MAGNET S2 briefing: from the map, its watch period; from the Events tab, that tab's
+        period and filters."""
+        from_map = hours is not None
+        hours = hours if from_map else self.events_view.period_hours()
         last = self.store.get_setting("briefing.last", "")
         try:
             last_briefing = datetime.fromisoformat(last) if last else None
         except ValueError:
             last_briefing = None
         now = datetime.now(timezone.utc)
-        text = briefing_report(self.events_view.visible_events(), now, hours,
-                               self.store.get_setting("operator.callsign", ""), self.focus_regions, last_briefing)
+        if from_map:
+            events = self.store.events_since(now - timedelta(hours=hours))
+        else:
+            events = self.events_view.visible_events()
+        text = s2_briefing_report(events, now, hours, self.focus_regions, last_briefing,
+                                  magcon=self.store.get_setting("magcon.status", DEFAULT_MAGCON),
+                                  reports_of=self.store.event_reports)
         ollama = None
         if self.analysis_mode.checkedAction().data() == "ollama":
             ollama = (self.ollama_endpoint.text().strip() or "http://127.0.0.1:11434",
                       self.ollama_model.text().strip() or "llama3.2")
         dialog = FollowUpDialog(
-            None, self.store, self, ollama=ollama, text=text, js8=js8_briefing, title="Draft shift briefing",
-            file_prefix="S2-BRIEFING", suggest_fn=draft_briefing_assessment,
-            suggest_label="Suggest assessment (Ollama)", mark_label="Mark briefing sent",
+            None, self.store, self, ollama=ollama, text=text, js8=self._s2_js8, title="Draft MAGNET S2 briefing",
+            file_prefix="MAGNET_S2", suggest_fn=draft_s2_assessment,
+            suggest_label="Suggest assessment && gaps (Ollama)", mark_label="Mark briefing sent",
             marked_label="Briefing marked sent", callsign=self.store.get_setting("operator.callsign", ""),
+            export=True,
         )
         dialog.exec()
         if dialog.marked:   # the next briefing flags what is new since this one
@@ -1670,11 +1686,18 @@ class MainWindow(QMainWindow):
             region=info.region, state=info.state, copies=info.copies, sources=info.sources,
             first_seen=first_seen, last_seen=last_seen, official=official, note=info.note,
         )
+        # The MAGNET S2 report covers the report's whole event (its timeline and sources).
+        event_id = self.store.event_of_report(report_id)
+        members = self.store.event_reports(event_id) if event_id is not None else None
+        text = s2_followup_report(facts, members, magcon=self.store.get_setting("magcon.status", DEFAULT_MAGCON))
         ollama = None
         if self.analysis_mode.checkedAction().data() == "ollama":
             ollama = (self.ollama_endpoint.text().strip() or "http://127.0.0.1:11434",
                       self.ollama_model.text().strip() or "llama3.2")
-        dialog = FollowUpDialog(facts, self.store, self, ollama=ollama)
+        dialog = FollowUpDialog(facts, self.store, self, ollama=ollama, text=text, js8=self._s2_js8,
+                                title="Draft MAGNET S2 report", file_prefix="MAGNET_S2",
+                                suggest_fn=draft_s2_assessment, suggest_label="Suggest assessment && gaps (Ollama)",
+                                export=True)
         dialog.exec()
         if dialog.marked:
             self.apply_report_status([report_id], "followup", info.note if info.status == "followup" else None)

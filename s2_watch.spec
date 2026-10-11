@@ -1,7 +1,7 @@
 # Build with: pyinstaller --clean s2_watch.spec
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_submodules
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 
 project_root = Path(SPEC).parent
@@ -11,7 +11,8 @@ a = Analysis(
     [str(project_root / "s2_watch" / "main.py")],
     pathex=[str(project_root)],
     binaries=[],
-    datas=[(str(project_root / "s2_watch" / "data"), "s2_watch/data")],
+    # python-docx builds documents from its bundled Word templates.
+    datas=[(str(project_root / "s2_watch" / "data"), "s2_watch/data")] + collect_data_files("docx"),
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},

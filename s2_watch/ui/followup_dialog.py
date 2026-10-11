@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
 
 from s2_watch.analysis.ollama import draft_assessment
 from s2_watch.followup import JS8CALL_TARGET, FollowUpFacts, dtg, flmsg_text, full_report, js8call_text
+from s2_watch.s2_report import file_stem, parse_report
 
 
 def replace_section(report: str, subject: str, assessment: str) -> str:
@@ -31,18 +32,18 @@ def replace_section(report: str, subject: str, assessment: str) -> str:
 
 
 class FollowUpDialog(QDialog):
-    suggestion_ready = Signal(str, str, str)   # subject, assessment, error (from a thread)
+    suggestion_ready = Signal(str, str)   # the report with the suggestion in, error (from a thread)
 
     def __init__(self, facts: FollowUpFacts | None, store, parent=None, ollama: tuple[str, str] | None = None, *,
                  text: str | None = None, js8=js8call_text, title: str = "Draft follow-up report",
                  file_prefix: str = "S2-FOLLOWUP", suggest_fn=draft_assessment,
                  suggest_label: str = "Suggest subject && assessment (Ollama)",
                  mark_label: str = "Mark report “Follow-up created”", marked_label: str = "Marked “Follow-up created”",
-                 callsign: str = "") -> None:
+                 callsign: str = "", export: bool = False) -> None:
         super().__init__(parent)
         self.ollama = ollama   # (endpoint, model) when Ollama is the analysis mode
         self.setWindowTitle(title)
-        self.resize(760, 640)
+        self.resize(940, 700)
         self.facts = facts
         self.store = store
         self.marked = False
@@ -70,7 +71,9 @@ class FollowUpDialog(QDialog):
 
         self.tabs = QTabWidget()
         self.tabs.addTab(self._page(
-            "Write the full report first; the FLMSG and JS8Call versions are made from it as you edit.",
+            "Write the full report first; the FLMSG and JS8Call versions are made from it as you edit. "
+            "In the Word and web versions, \"time | event\" lines become the timeline, \"category | HIGH\" lines the "
+            "probability table, and lines in (parentheses) are prompts to replace.",
             self.full), "1. Full report")
         save = QPushButton("Save as text file…")
         save.clicked.connect(self._save_flmsg)
@@ -92,6 +95,13 @@ class FollowUpDialog(QDialog):
         self.suggestion_ready.connect(self._suggested)
         self.mark = buttons.addButton(mark_label, QDialogButtonBox.ButtonRole.ActionRole)
         self.mark.clicked.connect(self._mark)
+        if export:   # the MAGNET S2 report as a Word document or a web page
+            word = buttons.addButton("Save Word report…", QDialogButtonBox.ButtonRole.ActionRole)
+            word.setToolTip("Save in the MAGNET S2 Intelligence Report format (.docx)")
+            word.clicked.connect(lambda: self._export("docx"))
+            page = buttons.addButton("Save web page…", QDialogButtonBox.ButtonRole.ActionRole)
+            page.setToolTip("Save as a web page in the MAGNET template (for the website)")
+            page.clicked.connect(lambda: self._export("html"))
         buttons.addButton(QDialogButtonBox.StandardButton.Close).clicked.connect(self.accept)
 
         layout = QVBoxLayout(self)
@@ -155,26 +165,52 @@ class FollowUpDialog(QDialog):
         self.suggest.setEnabled(False)
         self.suggest.setText("Ollama is writing…")
 
+        self.full.setReadOnly(True)   # the suggestion is written into this text
+
         def work() -> None:
             try:
-                subject, assessment = self.suggest_fn(report, endpoint, model)
-                self.suggestion_ready.emit(subject, assessment, "")
+                result = self.suggest_fn(report, endpoint, model)
+                # A whole updated report, or (subject, assessment) for the older drafts.
+                text = result if isinstance(result, str) else replace_section(report, *result)
+                self.suggestion_ready.emit(text, "")
             except Exception as error:
-                self.suggestion_ready.emit("", "", str(error))
+                self.suggestion_ready.emit("", str(error))
 
         threading.Thread(target=work, daemon=True, name="s2-watch-assessment").start()
 
-    def _suggested(self, subject: str, assessment: str, error: str) -> None:
+    def _suggested(self, text: str, error: str) -> None:
+        self.full.setReadOnly(False)
         self.suggest.setEnabled(True)
         self.suggest.setText(self.suggest_label)
         if error:
             self.suggest.setToolTip(f"Ollama could not help: {error}")
             self.suggest.setText("Ollama unavailable — try again")
             return
-        self.full.setPlainText(replace_section(self.full.toPlainText(), subject, assessment))
+        self.full.setPlainText(text)
         self.tabs.setCurrentIndex(0)
 
+    def _remember_magcon(self) -> None:
+        magcon = parse_report(self.full.toPlainText()).fields.get("MAGCON STATUS", "").strip()
+        if magcon:
+            self.store.set_setting("magcon.status", magcon)   # the next report starts from it
+
+    def _export(self, kind: str) -> None:
+        report = parse_report(self.full.toPlainText())
+        name = f"{file_stem(report.subject, report.dtg)}.{kind}"
+        filters = "Word documents (*.docx)" if kind == "docx" else "Web pages (*.html)"
+        path, _ = QFileDialog.getSaveFileName(self, "Save MAGNET S2 report", str(Path.home() / name), filters)
+        if not path:
+            return
+        if kind == "docx":
+            from s2_watch.s2_docx import write_docx
+            write_docx(report, path)
+        else:
+            from s2_watch.s2_html import write_html
+            write_html(report, path)
+        self._remember_magcon()
+
     def _mark(self) -> None:
+        self._remember_magcon()
         self.marked = True
         self.mark.setEnabled(False)
         self.mark.setText(self.marked_label)

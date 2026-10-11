@@ -71,3 +71,13 @@ def test_hazard_words_match_whole_words() -> None:
     assert report_hazards("Freezing rain, snowfall") == {"winter"}
     assert report_hazards("Presidential motorcade") == set()     # security isn't an event hazard
     assert "ARKANSAS" not in key_terms("Tehran says US response in hand | The Arkansas Democrat-Gazette")
+
+
+def test_a_report_later_judged_routine_leaves_its_event(tmp_path: Path) -> None:
+    store = SQLiteStore(tmp_path / "s2.db")
+    event_id = add(store, "MagCommstat", "HOW OFTEN DO YOU FEEL THE EARTHQUAKES AROUND YOUR AREA?", T0, TULSA)
+    assert [e.event_id for e in store.events_since(T0 - timedelta(hours=1))] == [event_id]
+    message = Message("MagCommstat", "HOW OFTEN DO YOU FEEL THE EARTHQUAKES AROUND YOUR AREA?", received_at=T0)
+    message_id = store.save_message(message, message_key(message))
+    store.assign_report(message_id, message, AnalysisResult(False, "routine", "low", "chat", 0.9))   # Ollama's verdict
+    assert store.events_since(T0 - timedelta(hours=1)) == [] and store.event_reports(event_id) == []

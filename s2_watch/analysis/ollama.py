@@ -301,3 +301,44 @@ def draft_briefing_assessment(report: str, endpoint: str, model: str, timeout: f
     if not assessment:
         raise OllamaError("Ollama's reply had no assessment")
     return "", assessment
+
+
+S2_ASSESSMENT_PROMPT = """You help a MAGNET S2 (amateur-radio emergency network intelligence) analyst finish a report.
+Below is the draft. Write two parts, using ONLY facts in the draft:
+COMMENTS / ASSESSMENT: two to four short paragraphs of analysis in measured language (assessed, likely,
+indicates, suggests), the most significant indicator first. No new facts, numbers, names or sources.
+INTELLIGENCE GAPS: three to five open questions the reporting leaves unanswered, one per line starting with "- ".
+
+Draft:
+{report}
+
+Answer in exactly this form:
+COMMENTS / ASSESSMENT:
+...
+INTELLIGENCE GAPS:
+- ..."""
+
+
+def draft_s2_assessment(report: str, endpoint: str, model: str, timeout: float = 240.0) -> str:
+    """The draft report with the model's assessment and gaps filled in (the analyst edits them)."""
+    from s2_watch.s2_report import fill_assessment
+
+    text = ollama_generate(endpoint, model, S2_ASSESSMENT_PROMPT.format(report=report), timeout)
+    paragraphs, gaps, part = [], [], ""
+    for raw in text.splitlines():
+        line = raw.strip().strip("*").strip()
+        heading = line.rstrip(":").strip("* ").upper()
+        if heading.startswith("COMMENTS"):
+            part = "assessment"
+            rest = line.split(":", 1)[1].strip() if ":" in line else ""
+            if rest:
+                paragraphs.append(rest)
+        elif heading.startswith("INTELLIGENCE GAPS"):
+            part = "gaps"
+        elif part == "assessment" and line:
+            paragraphs.append(line)
+        elif part == "gaps" and line.startswith(("-", "•", "*")):
+            gaps.append(line.lstrip("-•* ").strip())
+    if not paragraphs:
+        raise OllamaError("Ollama's reply had no assessment")
+    return fill_assessment(report, paragraphs, gaps)

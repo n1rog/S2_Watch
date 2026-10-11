@@ -62,14 +62,23 @@ list their reports; the I/F/X-style shortcuts work there too. Clicking a map mar
 selects its event; new and updated events are highlighted briefly; the row limit applies,
 with events labelled Of interest or Follow-up always shown.
 
-## Shift briefings
+## MAGNET S2 reports and briefings
 
-**Reports → Draft Shift Briefing…** (or the button on the Events tab) drafts a briefing
-from the events in the Events tab's period: priority items (focus regions first, then by
-urgency, radio-reported events ahead of official-only ones), activity by MARS region and
-category, quiet categories, and what is new since the briefing you last marked sent. Edit
-it, then copy or save the FLMSG and JS8Call versions; with Ollama, **Suggest assessment**
-drafts the assessment.
+Follow-up reports (right-click a report or event → **Draft follow-up report…**) and shift
+briefings (**Draft briefing…** on the Map tab for the watch period, on the Events tab for
+its period, or **Reports → Draft Shift Briefing…**) are drafted as **MAGNET S2 Intelligence
+Reports**: the routing table (Subject, Purpose, DTG, Reporting Period, Geographic Focus,
+Precedence, MagCon Status, Sources), then Summary (BLUF), Background, Situation with a
+timeline, Comments / Assessment with a probability table, Intelligence Gaps, Mitigation
+Recommendations, MAGNET Guidance and the Source List with suggested Admiralty ratings.
+
+S2 Watch fills what its data supports (routing, BLUF, Situation, timeline, gaps, sources,
+up to 15 WordPress tags); the analysis sections start as prompts in parentheses. With
+Ollama, **Suggest assessment & gaps** drafts the assessment and adds gaps for the analyst
+to check. Edit the text, then **Save Word report…** (the MAGNET .docx format) or **Save web
+page…** (the MAGNET HTML template), named `MAGNET_S2_TOPIC_YYMMDD-HHMMZ`; the FLMSG and
+JS8Call versions are made from the same text. The MagCon status used is remembered for the
+next report.
 
 ## Possible misses (Ollama)
 
@@ -79,13 +88,6 @@ once — and lists what the model thinks is news in the **Possible Misses** tab,
 report or dismiss. It skips heartbeats, CQs and signal reports, uses the computer at most a
 third of the time and waits while it is busy. Turn it off under Configuration → Analysis
 Mode.
-
-## Follow-up reports
-
-Right-click a Newsworthiness report and choose **Draft follow-up report…**. Edit
-the full report first; the FLMSG (upper-case, wrapped for radio) and JS8Call
-(short) versions are made from it as you type. Copy or save them — nothing is
-sent — and mark the report *Follow-up created*.
 
 ## Aircraft (ADS-B)
 
