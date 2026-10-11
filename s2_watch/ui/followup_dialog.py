@@ -10,7 +10,7 @@ from pathlib import Path
 from PySide6.QtCore import Signal
 from PySide6.QtGui import QFontDatabase, QGuiApplication
 from PySide6.QtWidgets import (
-    QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QPlainTextEdit,
+    QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPlainTextEdit,
     QPushButton, QTabWidget, QVBoxLayout, QWidget,
 )
 
@@ -39,7 +39,8 @@ class FollowUpDialog(QDialog):
                  file_prefix: str = "S2-FOLLOWUP", suggest_fn=draft_assessment,
                  suggest_label: str = "Suggest subject && assessment (Ollama)",
                  mark_label: str = "Mark report “Follow-up created”", marked_label: str = "Marked “Follow-up created”",
-                 callsign: str = "", export: bool = False) -> None:
+                 callsign: str = "", export: bool = False, draft_kind: str = "",
+                 draft_id: int | None = None, report_id: int | None = None) -> None:
         super().__init__(parent)
         self.ollama = ollama   # (endpoint, model) when Ollama is the analysis mode
         self.setWindowTitle(title)
@@ -52,6 +53,11 @@ class FollowUpDialog(QDialog):
         self.suggest_fn = suggest_fn
         self.suggest_label = suggest_label
         self.marked_label = marked_label
+        # Saving inside S2 Watch: "briefing" or "report"; empty = not offered.
+        self.draft_kind = draft_kind
+        self.draft_id = draft_id
+        self.report_id = report_id
+        self._saved_text: str | None = None
         fixed = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont)
 
         self.callsign = QLineEdit(facts.callsign if facts else callsign)
@@ -102,13 +108,22 @@ class FollowUpDialog(QDialog):
             page = buttons.addButton("Save web page…", QDialogButtonBox.ButtonRole.ActionRole)
             page.setToolTip("Save as a web page in the MAGNET template (for the website)")
             page.clicked.connect(lambda: self._export("html"))
-        buttons.addButton(QDialogButtonBox.StandardButton.Close).clicked.connect(self.accept)
+        if draft_kind:
+            self.save_button = buttons.addButton("Save in S2 Watch", QDialogButtonBox.ButtonRole.ActionRole)
+            self.save_button.setToolTip("Keep this draft in S2 Watch (Reports → Saved Reports & Briefings); "
+                                        "saving again updates it")
+            self.save_button.clicked.connect(self.save_draft)
+        buttons.addButton(QDialogButtonBox.StandardButton.Close).clicked.connect(self.close)
 
         layout = QVBoxLayout(self)
         layout.addLayout(top)
         layout.addWidget(self.tabs)
         layout.addWidget(buttons)
         self._derive()
+        if draft_id is not None:
+            self._saved_text = self.full.toPlainText()   # reopened: nothing unsaved yet
+        self._update_save_button()
+        self.full.textChanged.connect(self._update_save_button)
 
     @staticmethod
     def _page(text: str, editor: QPlainTextEdit, extra: QWidget | None = None) -> QWidget:
@@ -166,6 +181,7 @@ class FollowUpDialog(QDialog):
         self.suggest.setText("Ollama is writing…")
 
         self.full.setReadOnly(True)   # the suggestion is written into this text
+        self._update_save_button()     # (saved once it has arrived)
 
         def work() -> None:
             try:
@@ -180,6 +196,7 @@ class FollowUpDialog(QDialog):
 
     def _suggested(self, text: str, error: str) -> None:
         self.full.setReadOnly(False)
+        self._update_save_button()
         self.suggest.setEnabled(True)
         self.suggest.setText(self.suggest_label)
         if error:
@@ -209,8 +226,49 @@ class FollowUpDialog(QDialog):
             write_html(report, path)
         self._remember_magcon()
 
+    # -- saving inside S2 Watch ---------------------------------------------------------
+
+    def unsaved(self) -> bool:
+        return bool(self.draft_kind) and self.full.toPlainText() != self._saved_text
+
+    def save_draft(self) -> None:
+        text = self.full.toPlainText()
+        self.draft_id = self.store.save_draft(self.draft_kind, text, self.draft_id, self.report_id)
+        self._saved_text = text
+        self._remember_magcon()
+        self._update_save_button()
+
+    def _update_save_button(self) -> None:
+        if not self.draft_kind:
+            return
+        if self.unsaved():
+            self.save_button.setText("Save in S2 Watch")
+            self.save_button.setEnabled(not self.full.isReadOnly())
+        else:
+            self.save_button.setText("Saved in S2 Watch ✓")
+            self.save_button.setEnabled(False)
+
+    def done(self, result: int) -> None:
+        # Closing with unsaved changes asks first (Close button, window close, Escape).
+        if self.unsaved() and not self.full.isReadOnly():
+            answer = QMessageBox.question(
+                self, "Unsaved draft", "Save this draft in S2 Watch before closing?",
+                QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Save)
+            if answer == QMessageBox.StandardButton.Cancel:
+                return
+            if answer == QMessageBox.StandardButton.Save:
+                self.save_draft()
+        super().done(result)
+
+    def closeEvent(self, event) -> None:
+        self.done(QDialog.DialogCode.Accepted)
+        event.ignore() if self.isVisible() else event.accept()
+
     def _mark(self) -> None:
         self._remember_magcon()
+        if self.draft_kind:
+            self.save_draft()   # what was sent (or followed up) is kept
         self.marked = True
         self.mark.setEnabled(False)
         self.mark.setText(self.marked_label)

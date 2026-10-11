@@ -133,6 +133,19 @@ class SQLiteStore:
             )"""
         )
         self.connection.execute("CREATE INDEX IF NOT EXISTS events_last_seen ON events(last_seen)")
+        # Briefings and reports the operator saved in S2 Watch (the draft text, to reopen).
+        self.connection.execute(
+            """CREATE TABLE IF NOT EXISTS drafts (
+                id INTEGER PRIMARY KEY,
+                kind TEXT NOT NULL,
+                subject TEXT NOT NULL,
+                dtg TEXT NOT NULL,
+                text TEXT NOT NULL,
+                report_id INTEGER,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )"""
+        )
         # Radio traffic no watch form kept, read by the model in the background (missed_news).
         self.connection.execute(
             """CREATE TABLE IF NOT EXISTS missed_checks (
@@ -457,6 +470,44 @@ class SQLiteStore:
 
     def set_corroboration(self, report_id: int, text: str) -> None:
         self.connection.execute("UPDATE reports SET corroboration = ? WHERE id = ?", (text, report_id))
+        self.connection.commit()
+
+    # -- saved reports and briefings ---------------------------------------------------
+
+    def save_draft(self, kind: str, text: str, draft_id: int | None = None, report_id: int | None = None) -> int:
+        """Save (or update) a briefing or report draft; its id."""
+        from s2_watch.s2_report import parse_report
+
+        report = parse_report(text)
+        now = utc_iso(datetime.now(timezone.utc))
+        if draft_id is not None and self.connection.execute("SELECT 1 FROM drafts WHERE id = ?", (draft_id,)).fetchone():
+            self.connection.execute(
+                "UPDATE drafts SET subject = ?, dtg = ?, text = ?, updated_at = ? WHERE id = ?",
+                (report.subject, report.dtg, text, now, draft_id))
+        else:
+            draft_id = self.connection.execute(
+                """INSERT INTO drafts(kind, subject, dtg, text, report_id, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (kind, report.subject, report.dtg, text, report_id, now, now)).lastrowid
+        self.connection.commit()
+        return int(draft_id)
+
+    def list_drafts(self) -> list[dict]:
+        rows = self.connection.execute(
+            "SELECT id, kind, subject, dtg, report_id, created_at, updated_at FROM drafts ORDER BY updated_at DESC"
+        ).fetchall()
+        keys = ("id", "kind", "subject", "dtg", "report_id", "created_at", "updated_at")
+        return [dict(zip(keys, row)) for row in rows]
+
+    def get_draft(self, draft_id: int) -> dict | None:
+        row = self.connection.execute(
+            "SELECT id, kind, subject, dtg, text, report_id, updated_at FROM drafts WHERE id = ?", (draft_id,)
+        ).fetchone()
+        keys = ("id", "kind", "subject", "dtg", "text", "report_id", "updated_at")
+        return dict(zip(keys, row)) if row else None
+
+    def delete_draft(self, draft_id: int) -> None:
+        self.connection.execute("DELETE FROM drafts WHERE id = ?", (draft_id,))
         self.connection.commit()
 
     # -- possible misses ---------------------------------------------------------------

@@ -18,6 +18,7 @@ from s2_watch import REPOSITORY_URL, __version__ as APP_VERSION
 from s2_watch.backups import back_up_in_background, backup_folder
 from s2_watch.s2_report import DEFAULT_MAGCON, briefing_report as s2_briefing_report, followup_report as s2_followup_report, js8_report
 from s2_watch.followup import FollowUpFacts
+from s2_watch.ui.drafts_dialog import DraftsDialog
 from s2_watch.ui.events_view import EventsTable, EventsView
 from s2_watch.ui.misses_view import MissesView
 from s2_watch.missed_news import MissedNewsScanner
@@ -488,6 +489,8 @@ class MainWindow(QMainWindow):
         reports_menu = self.menuBar().addMenu("Reports")
         reports_menu.addAction("Draft Shift Briefing…").triggered.connect(
             lambda: self.draft_briefing(int(self.review_duration.currentData())))
+        reports_menu.addAction("Saved Reports && Briefings…").triggered.connect(self.show_saved_drafts)
+        reports_menu.addSeparator()
         reports_menu.addAction("Show Events").triggered.connect(lambda: self.tabs.setCurrentWidget(self.events_view))
         help_menu = self.menuBar().addMenu("Help")
         # Current date/time in the chosen format, top right, with a Local/Zulu switch.
@@ -1661,11 +1664,45 @@ class MainWindow(QMainWindow):
             file_prefix="MAGNET_S2", suggest_fn=draft_s2_assessment,
             suggest_label="Suggest assessment && gaps (Ollama)", mark_label="Mark briefing sent",
             marked_label="Briefing marked sent", callsign=self.store.get_setting("operator.callsign", ""),
-            export=True,
+            export=True, draft_kind="briefing",
         )
         dialog.exec()
         if dialog.marked:   # the next briefing flags what is new since this one
             self.store.set_setting("briefing.last", now.isoformat())
+
+    def show_saved_drafts(self) -> None:
+        dialog = DraftsDialog(self.store, self.format_display_time, self)
+        dialog.open_requested.connect(self.open_saved_draft)
+        dialog.exec()
+
+    def open_saved_draft(self, draft_id: int) -> None:
+        """Reopen a saved briefing or report in the drafting editor (save updates it)."""
+        draft = self.store.get_draft(draft_id)
+        if draft is None:
+            return
+        ollama = None
+        if self.analysis_mode.checkedAction().data() == "ollama":
+            ollama = (self.ollama_endpoint.text().strip() or "http://127.0.0.1:11434",
+                      self.ollama_model.text().strip() or "llama3.2")
+        briefing = draft["kind"] == "briefing"
+        dialog = FollowUpDialog(
+            None, self.store, self, ollama=ollama, text=draft["text"], js8=self._s2_js8,
+            title=f"Saved MAGNET S2 {'briefing' if briefing else 'report'} — {draft['subject']}",
+            file_prefix="MAGNET_S2", suggest_fn=draft_s2_assessment,
+            suggest_label="Suggest assessment && gaps (Ollama)",
+            mark_label="Mark briefing sent" if briefing else "Mark report “Follow-up created”",
+            marked_label="Briefing marked sent" if briefing else "Marked “Follow-up created”",
+            callsign=self.store.get_setting("operator.callsign", ""), export=True,
+            draft_kind=draft["kind"], draft_id=draft_id, report_id=draft["report_id"],
+        )
+        if draft["report_id"] is None and not briefing:
+            dialog.mark.setVisible(False)
+        dialog.exec()
+        if dialog.marked:
+            if briefing:
+                self.store.set_setting("briefing.last", datetime.now(timezone.utc).isoformat())
+            elif draft["report_id"] is not None:
+                self.apply_report_status([draft["report_id"]], "followup", None)
 
     def draft_followup(self, row: int, report_id: int) -> None:
         self.draft_followup_for_report(report_id)
@@ -1697,7 +1734,7 @@ class MainWindow(QMainWindow):
         dialog = FollowUpDialog(facts, self.store, self, ollama=ollama, text=text, js8=self._s2_js8,
                                 title="Draft MAGNET S2 report", file_prefix="MAGNET_S2",
                                 suggest_fn=draft_s2_assessment, suggest_label="Suggest assessment && gaps (Ollama)",
-                                export=True)
+                                export=True, draft_kind="report", report_id=report_id)
         dialog.exec()
         if dialog.marked:
             self.apply_report_status([report_id], "followup", info.note if info.status == "followup" else None)

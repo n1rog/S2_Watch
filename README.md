@@ -80,6 +80,11 @@ page…** (the MAGNET HTML template), named `MAGNET_S2_TOPIC_YYMMDD-HHMMZ`; the 
 JS8Call versions are made from the same text. The MagCon status used is remembered for the
 next report.
 
+**Save in S2 Watch** keeps a draft inside S2 Watch at any point (for example after Ollama's
+suggestions); saving again updates it, closing with unsaved changes asks first, and marking a
+briefing sent or a report followed up saves it too. **Reports → Saved Reports & Briefings…**
+lists them to reopen (with every save and export option) or delete.
+
 ## Possible misses (Ollama)
 
 Watch forms keep only messages with news keywords. In Ollama mode, S2 Watch also reads
