@@ -119,3 +119,25 @@ def test_fields_are_added_to_messages_saved_before_they_were_kept(tmp_path: Path
     store.save_analysis(message_id, NEWS)
     store.save_message(Message("MagCommstat", "MO - FLOOD WATCH", received_at=T0, fields={"grid": "EM29RL"}), message_key(bare))
     assert store.recent_reports(T0 - timedelta(hours=1))[0][1].fields == {"grid": "EM29RL"}
+
+
+def test_connections_opening_a_new_database_together_dont_collide(tmp_path: Path) -> None:
+    # The window, the polling thread and the background check all open (and migrate) it at once.
+    import threading
+
+    for attempt in range(15):
+        path = tmp_path / f"s2-{attempt}.db"
+        errors = []
+
+        def open_store() -> None:
+            try:
+                SQLiteStore(path).connection.close()
+            except Exception as error:      # noqa: BLE001 - collected for the assert
+                errors.append(error)
+
+        threads = [threading.Thread(target=open_store) for _ in range(6)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        assert errors == []

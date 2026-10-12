@@ -110,13 +110,13 @@ class SQLiteStore:
         report_columns = {row[1] for row in self.connection.execute("PRAGMA table_info(reports)")}
         for column in ("status", "status_note", "status_changed", "corroboration"):
             if column not in report_columns:
-                self.connection.execute(f"ALTER TABLE reports ADD COLUMN {column} TEXT NOT NULL DEFAULT ''")
+                self._add_column(f"ALTER TABLE reports ADD COLUMN {column} TEXT NOT NULL DEFAULT ''")
         self.connection.execute("CREATE INDEX IF NOT EXISTS reports_first_seen ON reports(first_seen)")
         # Where a report is (its most specific point) and the event it belongs to.
         for column, kind in (("lat", "REAL"), ("lon", "REAL"), ("place_level", "TEXT NOT NULL DEFAULT ''"),
                              ("event_id", "INTEGER")):
             if column not in report_columns:
-                self.connection.execute(f"ALTER TABLE reports ADD COLUMN {column} {kind}")
+                self._add_column(f"ALTER TABLE reports ADD COLUMN {column} {kind}")
         self.connection.execute(
             """CREATE TABLE IF NOT EXISTS events (
                 id INTEGER PRIMARY KEY,
@@ -167,23 +167,23 @@ class SQLiteStore:
         missed_columns = {row[1] for row in self.connection.execute("PRAGMA table_info(missed_checks)")}
         for column, kind in (("matched_terms", "TEXT NOT NULL DEFAULT ''"), ("decided_at", "TEXT NOT NULL DEFAULT ''")):
             if column not in missed_columns:
-                self.connection.execute(f"ALTER TABLE missed_checks ADD COLUMN {column} {kind}")
+                self._add_column(f"ALTER TABLE missed_checks ADD COLUMN {column} {kind}")
         self.connection.execute("CREATE INDEX IF NOT EXISTS reports_event_id ON reports(event_id)")
         message_columns = {row[1] for row in self.connection.execute("PRAGMA table_info(messages)")}
         if "source_key" not in message_columns:
-            self.connection.execute("ALTER TABLE messages ADD COLUMN source_key TEXT")
+            self._add_column("ALTER TABLE messages ADD COLUMN source_key TEXT")
         if "report_id" not in message_columns:
-            self.connection.execute("ALTER TABLE messages ADD COLUMN report_id INTEGER")
+            self._add_column("ALTER TABLE messages ADD COLUMN report_id INTEGER")
         if "fields_json" not in message_columns:
             # The source's structured fields (grid, sender, coordinates...), so a report
             # can be shown and mapped again at launch without re-reading its source.
-            self.connection.execute("ALTER TABLE messages ADD COLUMN fields_json TEXT NOT NULL DEFAULT ''")
+            self._add_column("ALTER TABLE messages ADD COLUMN fields_json TEXT NOT NULL DEFAULT ''")
         self.connection.execute("CREATE INDEX IF NOT EXISTS messages_report_id ON messages(report_id)")
         analysis_columns = {row[1] for row in self.connection.execute("PRAGMA table_info(analysis_results)")}
         if "analyzer" not in analysis_columns:
             # Which analyzer produced the result ("rules", "ollama:<model>"), so a message
             # read again isn't analysed again by the same one.
-            self.connection.execute("ALTER TABLE analysis_results ADD COLUMN analyzer TEXT NOT NULL DEFAULT ''")
+            self._add_column("ALTER TABLE analysis_results ADD COLUMN analyzer TEXT NOT NULL DEFAULT ''")
         self._remove_repeated_messages()
         self.connection.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS messages_source_key ON messages(source_key)"
@@ -191,10 +191,19 @@ class SQLiteStore:
         columns = {row[1] for row in self.connection.execute("PRAGMA table_info(watch_forms)")}
         for column in ("message_type", "sender"):
             if column not in columns:
-                self.connection.execute(
+                self._add_column(
                     f"ALTER TABLE watch_forms ADD COLUMN {column} TEXT NOT NULL DEFAULT ''"
                 )
         self.connection.commit()
+
+    def _add_column(self, statement: str) -> None:
+        """Run an ALTER TABLE ... ADD COLUMN. The window and the background threads open the
+        database together, so another connection may have just added the same column."""
+        try:
+            self.connection.execute(statement)
+        except sqlite3.OperationalError as error:
+            if "duplicate column name" not in str(error):
+                raise
 
     def _use_wal(self) -> None:
         # Switching to WAL needs a moment of exclusive access and doesn't wait for it; the
