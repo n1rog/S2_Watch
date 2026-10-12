@@ -81,3 +81,35 @@ def test_a_report_later_judged_routine_leaves_its_event(tmp_path: Path) -> None:
     message_id = store.save_message(message, message_key(message))
     store.assign_report(message_id, message, AnalysisResult(False, "routine", "low", "chat", 0.9))   # Ollama's verdict
     assert store.events_since(T0 - timedelta(hours=1)) == [] and store.event_reports(event_id) == []
+
+
+def test_event_detail_shows_what_the_event_is_about(tmp_path: Path) -> None:
+    from s2_watch.ui.event_detail import EventDetail
+
+    store = SQLiteStore(tmp_path / "s2.db")
+    radio = add(store, "MagCommstat", "TULSA OK - RIVER FLOODING, ROADS CLOSED", T0, TULSA)
+    add(store, "OSINT", "FEMA: flood declaration Oklahoma", T0 + timedelta(hours=5), TULSA,
+        fields={"sender": "FEMA", "url": "https://www.fema.gov/disaster/1234"})
+    report_id = store.event_reports(radio)[0]["report_id"]
+    store.set_report_status([report_id], "followup", "FU-7 <sent>")
+    [event] = [e for e in store.events_since(T0 - timedelta(days=1)) if e.event_id == radio]
+    detail = EventDetail(store, lambda value: str(value)[:16])
+    detail.show_event(event)
+    text = detail.browser.toPlainText()
+    assert "TULSA OK - RIVER FLOODING, ROADS CLOSED" in text           # full report text
+    assert "Confirmed by FEMA" in text and "300 minutes" in text        # radio five hours ahead
+    assert "Follow-up created: FU-7 <sent>" in text                    # labels and notes, escaped
+    assert 'href="https://www.fema.gov/disaster/1234"' in detail.browser.toHtml()
+    received = []
+    detail.draft_followup.connect(received.append)
+    detail.draft_button.click()
+    assert received == [radio]
+    detail.show_event(None)
+    assert not detail.draft_button.isEnabled()
+
+
+def test_event_detail_drops_headlines_the_text_already_says() -> None:
+    from s2_watch.ui.event_detail import useful_headline
+
+    assert useful_headline("Tornado — Coordinates in report", "SPC storm report: Tornado — 5 WNW Oliver") == ""
+    assert useful_headline("Flooding — Tulsa, OK", "W5ABC: water over the road at 41st") == "Flooding — Tulsa, OK"

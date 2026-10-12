@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
     QListWidgetItem, QMainWindow, QMessageBox, QPushButton, QSpinBox,
     QTableWidget, QTableWidgetItem,
     QFileDialog, QSystemTrayIcon, QTabWidget, QVBoxLayout, QHBoxLayout,
-    QWidget, QMenu, QToolButton, QWidgetAction, QAbstractItemView, QInputDialog, QButtonGroup, QStackedWidget,
+    QWidget, QMenu, QToolButton, QWidgetAction, QAbstractItemView, QInputDialog, QButtonGroup, QStackedWidget, QSplitter,
 )
 
 from s2_watch import REPOSITORY_URL, __version__ as APP_VERSION
@@ -21,6 +21,7 @@ from s2_watch.backups import back_up_in_background, backup_folder
 from s2_watch.s2_report import DEFAULT_MAGCON, briefing_report as s2_briefing_report, followup_report as s2_followup_report, js8_report
 from s2_watch.followup import FollowUpFacts
 from s2_watch.ui.drafts_dialog import DraftsDialog
+from s2_watch.ui.event_detail import EventDetail
 from s2_watch.ui.events_view import EventsTable, EventsView
 from s2_watch.ui.misses_view import MissesView
 from s2_watch.missed_news import MissedNewsScanner
@@ -574,8 +575,23 @@ class MainWindow(QMainWindow):
                 self.selected_event_reports(), status))
             self.map_events.addAction(action)
             self.event_actions.append(action)
+        # Beside the events list: what the selected event is about.
+        self.map_event_detail = EventDetail(self.store, self.format_display_time)
+        self.connect_event_detail(self.map_event_detail)
+        self.map_events.itemSelectionChanged.connect(lambda: self.map_event_detail.show_event(
+            next((self.map_events.event_by_id(event_id) for event_id in self.map_events.selected_events()), None)))
+        self.map_events_page = QSplitter(Qt.Orientation.Horizontal)
+        self.map_events_page.addWidget(self.map_events)
+        self.map_events_page.addWidget(self.map_event_detail)
+        self.map_events_page.setStretchFactor(0, 3)
+        self.map_events_page.setStretchFactor(1, 2)
+        saved_split = self.store.get_setting("events.map.split", "")
+        if saved_split:
+            self.map_events_page.restoreState(QByteArray.fromBase64(saved_split.encode()))
+        self.map_events_page.splitterMoved.connect(lambda *_: self.store.set_setting(
+            "events.map.split", bytes(self.map_events_page.saveState().toBase64()).decode()))
         self.news_stack = QStackedWidget()
-        self.news_stack.addWidget(self.map_events)
+        self.news_stack.addWidget(self.map_events_page)
         self.news_stack.addWidget(self.analysis)
         self.news_mode_buttons = {}
         switch_row = QHBoxLayout()
@@ -598,7 +614,7 @@ class MainWindow(QMainWindow):
         if self.news_mode not in self.news_mode_buttons:
             self.news_mode = "events"
         self.news_mode_buttons[self.news_mode].setChecked(True)
-        self.news_stack.setCurrentWidget(self.map_events if self.news_mode == "events" else self.analysis)
+        self.news_stack.setCurrentWidget(self.map_events_page if self.news_mode == "events" else self.analysis)
         map_layout.addLayout(switch_row)
         self.update_news_label()
         map_layout.addWidget(self.news_stack, 2)
@@ -621,6 +637,7 @@ class MainWindow(QMainWindow):
         self.events_view = EventsView(self.store, self.format_display_time)
         self.events_view.show_on_map.connect(self.show_event_on_map)
         self.events_view.draft_briefing.connect(self.draft_briefing)
+        self.connect_event_detail(self.events_view.detail)
         tabs.insertTab(1, self.events_view, "Events")
         self.misses_view = MissesView(self.store, self.format_display_time,
                                       watch_hours=lambda: int(self.review_duration.currentData()))
@@ -841,7 +858,7 @@ class MainWindow(QMainWindow):
         self.news_mode = mode
         self.store.set_setting("map.table", mode)
         self.news_mode_buttons[mode].setChecked(True)
-        self.news_stack.setCurrentWidget(self.map_events if mode == "events" else self.analysis)
+        self.news_stack.setCurrentWidget(self.map_events_page if mode == "events" else self.analysis)
         self.update_news_label()
         if mode == "events":
             self.refresh_map_events()
@@ -873,17 +890,31 @@ class MainWindow(QMainWindow):
         single = len(event_ids) == 1
         if single:
             items = reports[event_ids[0]]
-            # The follow-up starts from the newest radio report (the network's own), else the newest.
-            radio = [report for report in items if report["source"] != "OSINT"]
-            basis = (radio or items)[-1]["report_id"] if items else None
             draft = menu.addAction("Draft follow-up report…")
-            draft.setEnabled(basis is not None)
-            draft.triggered.connect(lambda: self.draft_followup_for_report(basis))
+            draft.setEnabled(bool(items))
+            draft.triggered.connect(lambda: self.draft_followup_for_event(event_ids[0]))
             menu.addAction("Show on map").triggered.connect(lambda: self.show_event_id_on_map(event_ids[0]))
-            menu.addAction("Open in Events tab (timeline)").triggered.connect(
+            menu.addAction("Open in Events tab").triggered.connect(
                 lambda: (self.tabs.setCurrentWidget(self.events_view), self.events_view.table.select_event(event_ids[0])))
         menu.addAction("Show its reports").triggered.connect(lambda: self.show_reports(report_ids))
         menu.exec(position)
+
+    def connect_event_detail(self, detail: EventDetail) -> None:
+        detail.show_on_map.connect(self.show_event_id_on_map)
+        detail.draft_followup.connect(self.draft_followup_for_event)
+        detail.mark.connect(lambda event_id, status: self.mark_reports(self.event_report_ids(event_id), status))
+        detail.edit_note.connect(lambda event_id: self.edit_note(self.event_report_ids(event_id)))
+        detail.show_reports.connect(lambda event_id: self.show_reports(self.event_report_ids(event_id)))
+
+    def event_report_ids(self, event_id: int) -> list[int]:
+        return [report["report_id"] for report in self.store.event_reports(event_id)]
+
+    def draft_followup_for_event(self, event_id: int) -> None:
+        # The follow-up starts from the newest radio report (the network's own), else the newest.
+        items = self.store.event_reports(event_id)
+        radio = [report for report in items if report["source"] != "OSINT"]
+        if items:
+            self.draft_followup_for_report((radio or items)[-1]["report_id"])
 
     def show_event_id_on_map(self, event_id: int) -> None:
         event = self.map_events.event_by_id(event_id) or self.events_view.table.event_by_id(event_id)
@@ -1823,7 +1854,8 @@ class MainWindow(QMainWindow):
             self.store.set_report_status([report_id], status, text.strip())
         self.refresh_report_rows(set(report_ids))
         self.analysis.resizeColumnToContents(self.STATUS_COLUMN)
-        self.events_data_changed()
+        self.refresh_map_events()            # the note shows at once
+        self.events_view.data_changed()
 
     def apply_report_status(self, report_ids: list[int], status: str, note: str | None) -> None:
         self.store.set_report_status(report_ids, status, note)

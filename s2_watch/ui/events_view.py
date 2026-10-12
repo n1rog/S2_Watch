@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 
 from PySide6.QtCore import QByteArray, QPoint, Qt, QTimer, Signal
 from PySide6.QtGui import QBrush, QColor, QFont, QPalette
+from s2_watch.ui.event_detail import EventDetail
 from PySide6.QtWidgets import (
     QAbstractItemView, QCheckBox, QComboBox, QHBoxLayout, QHeaderView, QLabel, QPushButton, QSplitter, QTableWidget,
     QTableWidgetItem, QVBoxLayout, QWidget,
@@ -104,6 +105,7 @@ class EventsTable(QTableWidget):
         self.events = list(events)
         sorting = self.isSortingEnabled()
         self.setSortingEnabled(False)
+        self.blockSignals(True)          # one selection signal at the end, not a blank in between
         self.setRowCount(0)
         muted = self.palette().color(QPalette.ColorRole.PlaceholderText)
         for event in events:
@@ -142,7 +144,9 @@ class EventsTable(QTableWidget):
         self.apply_limit(limit)
         self._paint_highlights()
         for event_id in selected:
-            self.select_event(event_id, clear=False)
+            self.select_event(event_id, clear=False, scroll=False)
+        self.blockSignals(False)
+        self.itemSelectionChanged.emit()
 
     def _save_header(self) -> None:
         if self.store is not None and self.state_key:
@@ -183,7 +187,7 @@ class EventsTable(QTableWidget):
     def event_by_id(self, event_id):
         return next((event for event in self.events if event.event_id == event_id), None)
 
-    def select_event(self, event_id: int, clear: bool = True) -> bool:
+    def select_event(self, event_id: int, clear: bool = True, scroll: bool = True) -> bool:
         for row in range(self.rowCount()):
             item = self.item(row, 0)
             if item is not None and item.data(self.EVENT_ROLE) == event_id:
@@ -191,7 +195,8 @@ class EventsTable(QTableWidget):
                     self.clearSelection()
                 self.setRowHidden(row, False)
                 self.selectRow(row)
-                self.scrollToItem(item)
+                if scroll:
+                    self.scrollToItem(item)
                 return True
         return False
 
@@ -206,8 +211,6 @@ class EventsView(QWidget):
 
     show_on_map = Signal(object)      # [(lat, lon), ...]
     draft_briefing = Signal()
-
-    TIMELINE_COLUMNS = ("Heard", "Source", "From", "Urgency", "Report", "Official", "Label")
 
     def __init__(self, store, format_time, parent=None) -> None:
         super().__init__(parent)
@@ -245,29 +248,14 @@ class EventsView(QWidget):
         self.table.itemSelectionChanged.connect(self._selection_changed)
         self.table.activated.connect(lambda event_id: self._show(event_id))
 
-        self.heading = QLabel("Select an event to see its timeline.")
-        self.map_button = QPushButton("Show on map")
-        self.map_button.setEnabled(False)
-        self.map_button.clicked.connect(lambda: self._show(self.selected_event()))
-        detail_top = QHBoxLayout()
-        detail_top.addWidget(self.heading, 1)
-        detail_top.addWidget(self.map_button)
-        self.timeline = QTableWidget(0, len(self.TIMELINE_COLUMNS))
-        self.timeline.setHorizontalHeaderLabels(self.TIMELINE_COLUMNS)
-        self.timeline.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.timeline.setWordWrap(False)
-        self.timeline.horizontalHeader().setStretchLastSection(True)
-        self.timeline.verticalHeader().setVisible(False)
-        detail = QWidget()
-        detail_layout = QVBoxLayout(detail)
-        detail_layout.setContentsMargins(0, 0, 0, 0)
-        detail_layout.addLayout(detail_top)
-        detail_layout.addWidget(self.timeline)
+        # What the selected event is about: its reports in full, confirmation, actions.
+        self.detail = EventDetail(store, format_time)
+        detail = self.detail
 
         splitter = QSplitter(Qt.Orientation.Vertical)
         splitter.addWidget(self.table)
         splitter.addWidget(detail)
-        splitter.setSizes([400, 250])
+        splitter.setSizes([380, 320])
         layout = QVBoxLayout(self)
         layout.addLayout(top)
         layout.addWidget(splitter)
@@ -309,27 +297,8 @@ class EventsView(QWidget):
         return selected[0] if selected else None
 
     def _selection_changed(self) -> None:
-        event = self.table.event_by_id(self.selected_event()) if self.selected_event() is not None else None
-        self.timeline.setRowCount(0)
-        self.map_button.setEnabled(bool(event and event.points))
-        if event is None:
-            self.heading.setText("Select an event to see its timeline.")
-            return
-        self.heading.setText(f"<b>{event.title}</b> — {event.reports} report{'s' if event.reports != 1 else ''}, "
-                             f"{self.format_time(event.first_seen)} to {self.format_time(event.last_seen)}")
-        for report in self.store.event_reports(event.event_id):
-            row = self.timeline.rowCount()
-            self.timeline.insertRow(row)
-            text = report["summary"] or " ".join(report["text"].split())
-            copies = f" ({report['copies']} copies)" if report["copies"] > 1 else ""
-            values = (self.format_time(report["first_seen"]), report["source"] + copies, report["sender"],
-                      report["urgency"], text, report["corroboration"], report["status"])
-            for column, value in enumerate(values):
-                item = QTableWidgetItem(value or "")
-                if column == 4:
-                    item.setToolTip(" ".join(report["text"].split()))
-                self.timeline.setItem(row, column, item)
-        self.timeline.resizeColumnsToContents()
+        selected = self.selected_event()
+        self.detail.show_event(self.table.event_by_id(selected) if selected is not None else None)
 
     def _show(self, event_id) -> None:
         event = self.table.event_by_id(event_id) if event_id is not None else None

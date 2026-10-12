@@ -784,7 +784,8 @@ class SQLiteStore:
         """An event's reports in time order (its timeline)."""
         rows = self.connection.execute(
             """SELECT r.id, r.first_seen, r.last_seen, r.copies, r.sources, r.first_source, r.sender, r.urgency,
-                      r.corroboration, r.status, r.lat, r.lon, COALESCE(a.summary, ''), m.raw_content, m.fields_json
+                      r.corroboration, r.status, r.lat, r.lon, COALESCE(a.summary, ''), m.raw_content, r.status_note,
+                      m.fields_json
                FROM reports r
                JOIN messages m ON m.id = (SELECT MIN(id) FROM messages WHERE report_id = r.id)
                LEFT JOIN analysis_results a ON a.message_id = m.id
@@ -792,7 +793,7 @@ class SQLiteStore:
             (event_id,),
         ).fetchall()
         keys = ("report_id", "first_seen", "last_seen", "copies", "sources", "source", "sender", "urgency",
-                "corroboration", "status", "lat", "lon", "summary", "text")
+                "corroboration", "status", "lat", "lon", "summary", "text", "status_note")
         reports = []
         for row in rows:
             report = dict(zip(keys, row[:-1]))

@@ -52,8 +52,14 @@ hazard, within 48 hours of its latest report and about 100 km (150 km for earthq
 or in the same state when only the state is known. A named official incident (a NIFC
 fire, a USGS quake, an FAA restriction) is one event however long it lasts. Stories
 without a physical hazard (crime, politics...) also need distinctive wording in common.
-Each event shows its sources, official confirmation and how far ahead radio reported it;
-select one for its timeline, or **Show on map**.
+Each event shows its sources, official confirmation and how far ahead radio reported it.
+
+Select an event to see what it is about. The panel beside the list (on the map page and
+on the Events tab) shows its category, area, urgency and when it was heard, whether an
+official source confirms it and radio's head start, your labels and notes, then every
+report in the order heard, with the full text, the sender, its own confirmation and a link
+for official and news items. The buttons under it show the event on the map, draft a
+follow-up, label it (or edit its note), or list its reports.
 
 Under the map, **Show: Events | Reports** switches the Newsworthiness list between events
 (the default) and individual reports. Right-click events to label all their reports,
