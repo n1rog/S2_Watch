@@ -36,13 +36,15 @@ urgency: high ONLY for an imminent threat to life or a major infrastructure fail
 summary: one plain headline, at most 15 words, with the place if known. Do not add facts that are not in the message.
 matched_terms: the few words that show the event.
 confidence: 0 to 1.
-{hint}
+{hint}{examples}
 Answer with JSON only: {{"newsworthy": true|false, "category": "...", "urgency": "low|medium|high", "summary": "...", "confidence": 0.0, "matched_terms": ["..."]}}
 
 Message: {message}"""
 
 
-JS8_ROUTING = re.compile(r"^[A-Z0-9/]+:\s+(?:@?[A-Z0-9/]+\s+)?(?:MSG\s+|>\s*)?")
+# Sender and addressee are callsigns (they contain a digit) or @groups; a capitalised
+# first word of the message ("W5ABC: BRIDGE OUT ...") is not an addressee.
+JS8_ROUTING = re.compile(r"^[A-Z0-9/]*\d[A-Z0-9/]*:\s+(?:(?:@[A-Z0-9/]+|[A-Z0-9/]*\d[A-Z0-9/]*)\s+)?(?:MSG\s+|>\s*)?")
 
 
 def readable_text(message: Message) -> str:
@@ -125,6 +127,9 @@ class OllamaNewsAnalyzer(NewsAnalyzer):
         self.model = model
         self.endpoint = endpoint.rstrip("/")
         self.timeout = timeout
+        # The watch officer's recent decisions on possible misses: (message, verdict) pairs,
+        # verdict like "news (Climate / Environment)" or "not news".
+        self.examples: list[tuple[str, str]] = []
 
     @property
     def name(self) -> str:
@@ -135,7 +140,12 @@ class OllamaNewsAnalyzer(NewsAnalyzer):
         if hint is not None and hint.newsworthy:
             suggestion = (f'A keyword filter matched {", ".join(hint.matched_terms[:6]) or "some words"} and suggested '
                           f'"{hint.category}"; keywords can be wrong (negations, unrelated uses), so decide yourself.')
-        prompt = PROMPT.format(categories=", ".join(NEWS_CATEGORIES), hint=suggestion, message=readable_text(message))
+        examples = ""
+        if self.examples:
+            examples = "\nHow the watch officer judged similar messages:\n" + "\n".join(
+                f'- "{text[:160]}" -> {verdict}' for text, verdict in self.examples[:8]) + "\n"
+        prompt = PROMPT.format(categories=", ".join(NEWS_CATEGORIES), hint=suggestion, examples=examples,
+                               message=readable_text(message))
         text = ollama_generate(self.endpoint, self.model, prompt, self.timeout, json_format=True)
         try:
             result = self._validate_result(json.loads(text))

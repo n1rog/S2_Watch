@@ -1,4 +1,5 @@
 import json
+import re
 import sqlite3
 import time
 from dataclasses import dataclass
@@ -163,6 +164,10 @@ class SQLiteStore:
                 status TEXT NOT NULL
             )"""
         )
+        missed_columns = {row[1] for row in self.connection.execute("PRAGMA table_info(missed_checks)")}
+        for column, kind in (("matched_terms", "TEXT NOT NULL DEFAULT ''"), ("decided_at", "TEXT NOT NULL DEFAULT ''")):
+            if column not in missed_columns:
+                self.connection.execute(f"ALTER TABLE missed_checks ADD COLUMN {column} {kind}")
         self.connection.execute("CREATE INDEX IF NOT EXISTS reports_event_id ON reports(event_id)")
         message_columns = {row[1] for row in self.connection.execute("PRAGMA table_info(messages)")}
         if "source_key" not in message_columns:
@@ -518,23 +523,29 @@ class SQLiteStore:
     def save_missed_check(self, key: str, message: Message, result: AnalysisResult, status: str) -> None:
         self.connection.execute(
             """INSERT OR REPLACE INTO missed_checks(key, checked_at, source_application, raw_content, received_at,
-                 fields_json, newsworthy, category, urgency, summary, confidence, status)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                 fields_json, newsworthy, category, urgency, summary, confidence, status, matched_terms)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (key, utc_iso(datetime.now(timezone.utc)), message.source_application, message.raw_content,
              message.received_at.isoformat(), json.dumps(message.fields) if message.fields else "",
-             int(result.newsworthy), result.category, result.urgency, result.summary, result.confidence, status),
+             int(result.newsworthy), result.category, result.urgency, result.summary, result.confidence, status,
+             "\x1f".join(result.matched_terms)),
         )
         self.connection.commit()
 
-    def possible_misses(self, status: str = "new") -> list[tuple[str, Message, AnalysisResult]]:
-        """Messages the model thinks are news though no watch form kept them, newest first."""
+    def possible_misses(self, status: str = "new", since: datetime | None = None) -> list[tuple[str, Message, AnalysisResult]]:
+        """Messages the model thinks are news though no watch form kept them, newest first
+        (heard since ``since``, when given)."""
         rows = self.connection.execute(
             """SELECT key, source_application, raw_content, received_at, fields_json, newsworthy, category, urgency,
-                      summary, confidence FROM missed_checks WHERE status = ? ORDER BY received_at DESC""",
+                      summary, confidence, matched_terms FROM missed_checks WHERE status = ? ORDER BY received_at DESC""",
             (status,),
         ).fetchall()
         misses = []
-        for key, application, raw, received, fields_json, newsworthy, category, urgency, summary, confidence in rows:
+        for key, application, raw, received, fields_json, newsworthy, category, urgency, summary, confidence, terms in rows:
+            heard = datetime.fromisoformat(received)
+            heard = heard if heard.tzinfo else heard.replace(tzinfo=timezone.utc)
+            if since is not None and heard < since:
+                continue   # older than the watch period: left out of the list, kept in the database
             try:
                 fields = json.loads(fields_json) if fields_json else {}
             except ValueError:
@@ -542,12 +553,49 @@ class SQLiteStore:
             when = datetime.fromisoformat(received)
             message = Message(application, raw, received_at=when if when.tzinfo else when.replace(tzinfo=timezone.utc),
                               fields={str(k): str(v) for k, v in fields.items()})
-            misses.append((key, message, AnalysisResult(bool(newsworthy), category, urgency, summary, float(confidence))))
+            misses.append((key, message, AnalysisResult(bool(newsworthy), category, urgency, summary, float(confidence),
+                                                        tuple(term for term in (terms or "").split("\x1f") if term))))
         return misses
 
-    def set_missed_status(self, key: str, status: str) -> None:
-        self.connection.execute("UPDATE missed_checks SET status = ? WHERE key = ?", (status, key))
+    def set_missed_status(self, key: str, status: str, corrected: AnalysisResult | None = None) -> None:
+        """Record the operator's decision ("added", "dismissed", "deleted", back to "new"),
+        with their corrected verdict when they added it."""
+        now = utc_iso(datetime.now(timezone.utc)) if status in ("added", "dismissed") else ""
+        if corrected is not None:
+            self.connection.execute(
+                """UPDATE missed_checks SET status = ?, decided_at = ?, newsworthy = ?, category = ?, urgency = ?,
+                     summary = ? WHERE key = ?""",
+                (status, now, int(corrected.newsworthy), corrected.category, corrected.urgency, corrected.summary, key))
+        else:
+            self.connection.execute("UPDATE missed_checks SET status = ?, decided_at = ? WHERE key = ?", (status, now, key))
         self.connection.commit()
+
+    def keyword_matches(self, keyword: str, limit: int = 2000) -> tuple[int, int]:
+        """How many of the latest radio messages a keyword would catch: (matched, looked at).
+        The background check's record of unmatched traffic plus the kept messages make the sample."""
+        keyword = keyword.strip().lower()
+        if not keyword:
+            return 0, 0
+        pattern = re.compile(r"\b" + re.escape(keyword), re.IGNORECASE)
+        texts = [row[0] for row in self.connection.execute(
+            """SELECT raw_content FROM (
+                 SELECT raw_content, checked_at AS at FROM missed_checks
+                 UNION ALL SELECT raw_content, received_at AS at FROM messages WHERE source_application != 'OSINT')
+               ORDER BY at DESC LIMIT ?""", (limit,)).fetchall()]
+        return sum(bool(pattern.search(text)) for text in texts), len(texts)
+
+    def missed_decisions(self, limit: int = 8) -> list[tuple[str, str]]:
+        """The operator's latest decisions as (message, verdict) examples for the model."""
+        rows = self.connection.execute(
+            """SELECT source_application, raw_content, status, category FROM missed_checks
+               WHERE status IN ('added', 'dismissed') AND decided_at != '' ORDER BY decided_at DESC LIMIT ?""",
+            (limit,),
+        ).fetchall()
+        from s2_watch.analysis.ollama import readable_text
+
+        return [(" ".join(readable_text(Message(application, raw)).split()),
+                 f"news ({category})" if status == "added" else "not news")
+                for application, raw, status, category in rows]
 
     def missed_counts(self) -> dict[str, int]:
         return dict(self.connection.execute("SELECT status, COUNT(*) FROM missed_checks GROUP BY status").fetchall())

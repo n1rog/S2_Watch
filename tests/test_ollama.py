@@ -136,5 +136,6 @@ def test_the_model_reads_the_words_of_a_js8call_record() -> None:
     record = '{"CMD": " MSG", "DIAL": 14115000, "FREQ": 14117330, "FROM": "W0IFM", "SNR": 13, "TEXT": "W0IFM: KL5OP MSG HELLO \\u2662 "}'
     assert readable_text(Message("JS8Call", record)) == "HELLO"
     assert readable_text(Message("JS8Call", "N6KYL: @MR09 MSG CA HEAT ADVISORY")) == "CA HEAT ADVISORY"
+    assert readable_text(Message("JS8Call", "W5ABC: BRIDGE OUT ON HWY 9")) == "BRIDGE OUT ON HWY 9"   # not an addressee
     assert readable_text(Message("FLMSG", "FLOOD ON MAIN ST")) == "FLOOD ON MAIN ST"
     assert readable_text(Message("JS8Call", "{not json")) == "{not json"

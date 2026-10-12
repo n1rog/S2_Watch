@@ -61,3 +61,66 @@ def test_scanner_records_what_the_model_thinks_is_news(tmp_path, monkeypatch) ->
     assert result.summary == "Bridge out on Hwy 9 near Ada" and message.source_application == "JS8Call"
     store.set_missed_status(key, "dismissed")
     assert store.possible_misses() == []
+
+
+def test_operator_keywords_and_decisions_feed_the_rules_and_the_model(tmp_path, monkeypatch) -> None:
+    import s2_watch.analysis.ollama as ollama
+    from s2_watch.analysis.ollama import OllamaNewsAnalyzer
+    from s2_watch.analysis.rules import RuleBasedNewsAnalyzer
+    from s2_watch.missed_news import is_fragment
+
+    storm = Message("MagCommstat", "TN - ISAIAS IMPACTS EXPECTED HERE TONIGHT.")
+    assert not RuleBasedNewsAnalyzer().analyze(storm).newsworthy
+    flagged = RuleBasedNewsAnalyzer.with_keywords({"Climate / Environment": ["isaias"]}).analyze(storm)
+    assert flagged.newsworthy and flagged.category == "Climate / Environment" and flagged.matched_terms == ("isaias",)
+
+    assert is_fragment("[Partial — fragmented by JS8Call]") and not worth_checking(
+        Message("JS8Call", "W1AW: [Partial — fragmented by JS8Call] FLOODING ON MAIN ST NEAR THE BRIDGE"))
+
+    prompts = []
+    monkeypatch.setattr(ollama, "ollama_generate", lambda endpoint, model, prompt, timeout, json_format=False: (
+        prompts.append(prompt), '{"newsworthy": true, "category": "Climate / Environment", "urgency": "medium", '
+                                '"summary": "x", "confidence": 0.8, "matched_terms": ["isaias"]}')[1])
+    model = OllamaNewsAnalyzer()
+    model.examples = [("GOOD MORNING ALL", "not news"), ("ISAIAS IMPACTS TONIGHT", "news (Climate / Environment)")]
+    model.analyze(storm)
+    assert '- "GOOD MORNING ALL" -> not news' in prompts[0] and "news (Climate / Environment)" in prompts[0]
+
+
+def test_triage_decisions_are_kept_and_old_finds_leave_the_list(tmp_path) -> None:
+    from datetime import datetime, timedelta, timezone
+
+    store = SQLiteStore(tmp_path / "s2.db")
+    now = datetime.now(timezone.utc)
+    news = AnalysisResult(True, "Infrastructure", "medium", "Bridge out", 0.9, ("bridge out",))
+    fresh = Message("JS8Call", "W5ABC: BRIDGE OUT ON HWY 9 NEAR ADA", received_at=now - timedelta(hours=2))
+    old = Message("JS8Call", "W5ABC: ROAD WASHED OUT NEAR ADA", received_at=now - timedelta(days=3))
+    store.save_missed_check("k1", fresh, news, "new")
+    store.save_missed_check("k2", old, news, "new")
+    since = now - timedelta(hours=24)
+    [(key, _message, result)] = store.possible_misses("new", since)
+    assert key == "k1" and result.matched_terms == ("bridge out",)
+    corrected = AnalysisResult(True, "Infrastructure", "high", "Hwy 9 bridge out near Ada, OK", 0.9)
+    store.set_missed_status("k1", "added", corrected=corrected)
+    store.set_missed_status("k2", "dismissed")
+    assert sorted(store.missed_decisions()) == [("BRIDGE OUT ON HWY 9 NEAR ADA", "news (Infrastructure)"),
+                                                ("ROAD WASHED OUT NEAR ADA", "not news")]
+    store.set_missed_status("k2", "deleted")
+    assert store.possible_misses("dismissed") == [] and store.missed_checked("k2")   # not checked again
+
+
+def test_the_add_form_suggests_the_model_s_word_and_returns_the_correction() -> None:
+    from PySide6.QtWidgets import QApplication
+
+    from s2_watch.ui.misses_view import AddMissDialog, suggested_keyword
+
+    QApplication.instance() or QApplication([])
+    storm = Message("MagCommstat", "TN - ISAIAS IMPACTS EXPECTED HERE TONIGHT.")
+    guess = AnalysisResult(True, "Climate / Environment", "medium", "Isaias impacts expected tonight", 0.8, ("Isaias",))
+    assert suggested_keyword(storm, guess) == "isaias"
+    dialog = AddMissDialog(storm, guess)
+    dialog.urgency.setCurrentText("high")
+    dialog.headline.setText("Tropical Storm Isaias impacts expected in Tennessee tonight")
+    corrected = dialog.corrected(0.8)
+    assert (corrected.urgency, corrected.category, corrected.newsworthy) == ("high", "Climate / Environment", True)
+    assert dialog.chosen_keyword() == "isaias"

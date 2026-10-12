@@ -89,10 +89,22 @@ lists them to reopen (with every save and export option) or delete.
 
 Watch forms keep only messages with news keywords. In Ollama mode, S2 Watch also reads
 the radio traffic they didn't keep — slowly, in the background, newest first, each message
-once — and lists what the model thinks is news in the **Possible Misses** tab, to add as a
-report or dismiss. It skips heartbeats, CQs and signal reports, uses the computer at most a
-third of the time and waits while it is busy. Turn it off under Configuration → Analysis
-Mode.
+once — and lists what the model thinks is news in the **Possible Misses** tab. It skips
+heartbeats, CQs, signal reports and messages JS8Call marks as fragments, uses the computer
+at most a third of the time and waits while it is busy. Turn it off under Configuration →
+Analysis Mode.
+
+Triage (buttons, right-click, several rows at once; double-click for the full message):
+
+- **Add as report…** — correct the headline, category, urgency and place first. Optionally
+  add a keyword (the model's matched word is suggested; the form shows how much recent
+  radio traffic it would match): it is added to the category's watch form and to the
+  keyword rules, so the next message with it is kept and flagged straight away.
+- **Dismiss** (not news) hides it; **Show dismissed** to review or **Restore**.
+- **Delete** removes it for good (it is not checked again).
+
+Finds older than the watch period leave the list. Your latest decisions are given to the
+model as examples, so it repeats fewer of the same mistakes.
 
 ## Aircraft (ADS-B)
 

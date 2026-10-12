@@ -38,11 +38,20 @@ def check_key(message: Message) -> str:
     return hashlib.sha1(report_text(readable_text(message)).encode("utf-8")).hexdigest()
 
 
+FRAGMENT = re.compile(r"\[partial|fragment(?:ed)? by js8call|\bincomplete message\b", re.IGNORECASE)
+
+
+def is_fragment(text: str) -> bool:
+    """JS8Call marks messages it received only in part; a model invents the rest."""
+    return bool(FRAGMENT.search(text))
+
+
 def worth_checking(message: Message) -> bool:
     if message.source_application == "OSINT":
         return False          # official items are all kept and judged by the rules already
     body = readable_text(message)
-    return len(body) >= 20 and len(body.split()) >= 4 and not ROUTINE.match(body)
+    return (len(body) >= 20 and len(body.split()) >= 4 and not ROUTINE.match(body)
+            and not is_fragment(message.raw_content))
 
 
 def computer_busy() -> bool:
@@ -71,8 +80,10 @@ class MissedNewsScanner(QObject):
         self._thread: threading.Thread | None = None
         self.checked = 0
 
-    def configure(self, enabled: bool, model: str, endpoint: str) -> None:
+    def configure(self, enabled: bool, model: str, endpoint: str, examples=None) -> None:
         self.analyzer = OllamaNewsAnalyzer(model=model, endpoint=endpoint) if enabled else None
+        if self.analyzer is not None:
+            self.analyzer.examples = list(examples or [])
         self.enabled = enabled
         if enabled and self._thread is None:
             self._thread = threading.Thread(target=self._run, daemon=True, name="s2-watch-missed-news")

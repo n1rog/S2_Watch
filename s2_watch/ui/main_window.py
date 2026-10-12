@@ -1,3 +1,5 @@
+import json
+import re
 import sqlite3
 from html import escape
 from pathlib import Path
@@ -620,8 +622,10 @@ class MainWindow(QMainWindow):
         self.events_view.show_on_map.connect(self.show_event_on_map)
         self.events_view.draft_briefing.connect(self.draft_briefing)
         tabs.insertTab(1, self.events_view, "Events")
-        self.misses_view = MissesView(self.store, self.format_display_time)
+        self.misses_view = MissesView(self.store, self.format_display_time,
+                                      watch_hours=lambda: int(self.review_duration.currentData()))
         self.misses_view.add_requested.connect(self.add_missed_report)
+        self.misses_view.decisions_changed.connect(self.update_model_examples)
         self.misses_view.count_changed.connect(
             lambda count: tabs.setTabText(tabs.indexOf(self.misses_view),
                                           f"Possible Misses ({count})" if count else "Possible Misses"))
@@ -997,18 +1001,55 @@ class MainWindow(QMainWindow):
                 preload_limit=self.ANALYSIS_ROWS_LIMIT,
             ))
 
+    def operator_keywords(self) -> dict[str, list[str]]:
+        """Keywords the operator added from Possible Misses, per category."""
+        try:
+            keywords = json.loads(self.store.get_setting("keywords", "{}") or "{}")
+        except ValueError:
+            return {}
+        return {str(category): [str(word) for word in words] for category, words in keywords.items()}
+
     def create_analyzer(self) -> NewsAnalyzer | None:
         mode = self.analysis_mode.checkedAction().data()
+        rules = RuleBasedNewsAnalyzer.with_keywords(self.operator_keywords())
         if mode == "rules":
-            return RuleBasedNewsAnalyzer()
+            return rules
         # Rules first; the model reads only the messages the rules flag.
-        return HybridNewsAnalyzer(
-            OllamaNewsAnalyzer(
-                model=self.ollama_model.text().strip() or "llama3.2",
-                endpoint=self.ollama_endpoint.text().strip() or "http://127.0.0.1:11434",
-            ),
-            RuleBasedNewsAnalyzer(),
+        model = OllamaNewsAnalyzer(
+            model=self.ollama_model.text().strip() or "llama3.2",
+            endpoint=self.ollama_endpoint.text().strip() or "http://127.0.0.1:11434",
         )
+        model.examples = self.store.missed_decisions()
+        return HybridNewsAnalyzer(model, rules)
+
+    def update_model_examples(self) -> None:
+        """The operator's latest Possible Misses decisions become the model's examples."""
+        examples = self.store.missed_decisions()
+        model = getattr(self._analyzer, "model", None)
+        if isinstance(model, OllamaNewsAnalyzer):
+            model.examples = examples
+        if self.missed_scanner.analyzer is not None:
+            self.missed_scanner.analyzer.examples = examples
+
+    def add_operator_keyword(self, category: str, keyword: str) -> None:
+        """Catch the next message like a confirmed miss: add the word to the category's watch
+        form (so it is kept) and to the keyword rules (so it is flagged)."""
+        keyword = keyword.strip().lower()
+        if not keyword:
+            return
+        keywords = self.operator_keywords()
+        if keyword not in keywords.setdefault(category, []):
+            keywords[category].append(keyword)
+            self.store.set_setting("keywords", json.dumps(keywords, sort_keys=True))
+        term = r"\b" + re.escape(keyword)
+        form = next((f for f in self.store.list_watch_forms() if f.application == ANY_APPLICATION and f.name == category), None)
+        if form is None:
+            form = WatchForm(ANY_APPLICATION, category, term, enabled=True, use_regex=True)
+        elif term not in form.match_text:
+            pattern = form.match_text if form.use_regex else re.escape(form.match_text)
+            form = replace(form, match_text=f"(?:{pattern})|{term}" if pattern else term, use_regex=True, enabled=True)
+        self.store.save_watch_form(form)
+        self.refresh_forms()   # rebuilds the analyzer and re-checks the watch period
 
     def analysis_mode_changed(self) -> None:
         self.store.set_setting("analysis.mode", str(self.analysis_mode.checkedAction().data()))
@@ -1606,7 +1647,8 @@ class MainWindow(QMainWindow):
         self.missed_check_action.setEnabled(ollama)
         self.missed_scanner.configure(ollama and self.missed_check_action.isChecked(),
                                       self.ollama_model.text().strip() or "llama3.2",
-                                      self.ollama_endpoint.text().strip() or "http://127.0.0.1:11434")
+                                      self.ollama_endpoint.text().strip() or "http://127.0.0.1:11434",
+                                      examples=self.store.missed_decisions())
 
     def missed_check_changed(self, enabled: bool) -> None:
         self.store.set_setting("missed.enabled", "1" if enabled else "0")
@@ -1615,20 +1657,26 @@ class MainWindow(QMainWindow):
     def missed_progress(self, checked: int, waiting: int) -> None:
         self.misses_view.show_progress(checked, waiting, self.missed_scanner.last_error)
 
-    def add_missed_report(self, key: str, message: Message, result: AnalysisResult) -> None:
-        """Save a possible miss the operator confirmed as a report, and show it."""
+    def add_missed_report(self, key: str, message: Message, result: AnalysisResult, place: str = "",
+                          keyword: str = "") -> None:
+        """Save a possible miss the operator confirmed (and corrected) as a report, and show it."""
         matched = replace(message, form_name="Ollama find")
         message_id = self.store.save_message(matched, message_key(message), legacy_message_key(message))
         self.store.save_analysis(message_id, result, "ollama-find")
-        locations = self._official_resolver.resolve(matched)
+        # A place the operator typed wins over what the message's own words give.
+        locations = (self._official_resolver.resolve(Message(message.source_application, place)) if place else []) \
+            or self._official_resolver.resolve(matched)
         area = next((location for location in locations if location.state or location.region), None)
         report = self.store.assign_report(message_id, matched, result, state=(area.state or "") if area else "",
                                           region=area.region if area else None)
         text = f"{readable_text(message)} {result.summary}"
         self.store.assign_event(report.report_id, result.category, report_hazards(text),
                                 place_from_locations(locations), result.summary, incident_key(message), key_terms(text))
-        self.store.set_missed_status(key, "added")
+        self.store.set_missed_status(key, "added", corrected=result)
         self.handle_batch([ProcessedMessage(matched, result, locations, report)])
+        self.update_model_examples()
+        if keyword:
+            self.add_operator_keyword(result.category, keyword)
 
     def show_event_on_map(self, points) -> None:
         self.tabs.setCurrentIndex(0)

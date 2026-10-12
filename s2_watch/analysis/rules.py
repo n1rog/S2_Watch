@@ -108,6 +108,13 @@ class RuleBasedNewsAnalyzer(NewsAnalyzer):
     def __init__(self, rules: tuple[Rule, ...] = DEFAULT_RULES) -> None:
         self.rules = rules
 
+    @classmethod
+    def with_keywords(cls, keywords: dict[str, list[str]] | None) -> "RuleBasedNewsAnalyzer":
+        """The built-in rules plus the operator's own keywords per category (added from
+        Possible Misses), each matching at the start of a word, medium urgency."""
+        extra = tuple(Rule(category, tuple(words), "medium") for category, words in (keywords or {}).items() if words)
+        return cls(cls.DEFAULT_RULES + extra)
+
     name = "rules"
 
     def analyze(self, message: Message) -> AnalysisResult:
