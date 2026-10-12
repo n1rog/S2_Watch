@@ -9,7 +9,7 @@ from __future__ import annotations
 import time
 from datetime import datetime, timedelta, timezone
 
-from PySide6.QtCore import QPoint, Qt, QTimer, Signal
+from PySide6.QtCore import QByteArray, QPoint, Qt, QTimer, Signal
 from PySide6.QtGui import QBrush, QColor, QFont, QPalette
 from PySide6.QtWidgets import (
     QAbstractItemView, QCheckBox, QComboBox, QHBoxLayout, QHeaderView, QLabel, QPushButton, QSplitter, QTableWidget,
@@ -45,8 +45,13 @@ class EventsTable(QTableWidget):
                "Radio lead", "Labels")
     EVENT_ROLE = Qt.ItemDataRole.UserRole
 
-    def __init__(self, format_time, parent=None) -> None:
+    # Starting widths (pixels); people drag them, and the table remembers theirs.
+    DEFAULT_WIDTHS = (150, 380, 150, 80, 70, 170, 80, 170, 80)
+
+    def __init__(self, format_time, parent=None, store=None, state_key: str = "") -> None:
         super().__init__(0, len(self.COLUMNS), parent)
+        self.store = store
+        self.state_key = state_key
         self.format_time = format_time
         self.events = []
         self._seen: dict[int, datetime] = {}       # event id -> last activity at the previous fill
@@ -58,11 +63,23 @@ class EventsTable(QTableWidget):
         self.setAlternatingRowColors(True)
         self.setWordWrap(False)
         header = self.horizontalHeader()
-        header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)   # the event's title gets the room
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)   # drag to resize
+        header.setStretchLastSection(True)
+        for column, width in enumerate(self.DEFAULT_WIDTHS):
+            self.setColumnWidth(column, width)
         self.verticalHeader().setVisible(False)
+        saved = store.get_setting(state_key, "") if store is not None and state_key else ""
+        if saved:
+            header.restoreState(QByteArray.fromBase64(saved.encode()))
+        self._save_timer = QTimer(self)
+        self._save_timer.setSingleShot(True)
+        self._save_timer.setInterval(500)
+        self._save_timer.timeout.connect(self._save_header)
+        header.sectionResized.connect(lambda *_: self._save_timer.start())
+        header.sortIndicatorChanged.connect(lambda *_: self._save_timer.start())
         self.setSortingEnabled(True)
-        self.sortItems(0, Qt.SortOrder.DescendingOrder)   # focus regions, then the latest activity first
+        if not saved:   # focus regions, then the latest activity first (else the remembered sort)
+            self.sortItems(0, Qt.SortOrder.DescendingOrder)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(
             lambda position: self.selected_events() and self.menu_requested.emit(
@@ -126,6 +143,10 @@ class EventsTable(QTableWidget):
         self._paint_highlights()
         for event_id in selected:
             self.select_event(event_id, clear=False)
+
+    def _save_header(self) -> None:
+        if self.store is not None and self.state_key:
+            self.store.set_setting(self.state_key, bytes(self.horizontalHeader().saveState().toBase64()).decode())
 
     def apply_limit(self, limit: int | None) -> None:
         events = {event.event_id: event for event in self.events}
@@ -220,7 +241,7 @@ class EventsView(QWidget):
         top.addWidget(self.count)
         top.addWidget(briefing)
 
-        self.table = EventsTable(format_time)
+        self.table = EventsTable(format_time, store=store, state_key="events.tab.header")
         self.table.itemSelectionChanged.connect(self._selection_changed)
         self.table.activated.connect(lambda event_id: self._show(event_id))
 

@@ -560,7 +560,7 @@ class MainWindow(QMainWindow):
         self.map_view.setMinimumHeight(500)
         map_layout.addWidget(self.map_view, 3)
         # Under the map: events (the default) or individual reports, switchable.
-        self.map_events = EventsTable(self.format_display_time)
+        self.map_events = EventsTable(self.format_display_time, store=self.store, state_key="events.map.header")
         self.map_events.menu_requested.connect(self.show_event_menu)
         self.map_events.activated.connect(self.show_event_id_on_map)
         self.event_actions: list[QAction] = []
