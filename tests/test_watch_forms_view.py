@@ -63,3 +63,19 @@ def test_an_osint_adapter_with_no_sources_fetches_nothing() -> None:
         assert adapter.status.startswith("Off") and adapter.read_messages() == []
     finally:
         adapter.close()
+
+
+def test_the_watch_forms_menu_switches_osint_sources(tmp_path) -> None:
+    from s2_watch.ui.main_window import MainWindow
+
+    window = MainWindow(str(tmp_path / "s2.db"))
+    try:
+        action, box = window.osint_actions["state"], window.watch_forms_page.osint_boxes["state"]
+        assert action.isChecked() and box.isChecked()
+        action.trigger()                                        # off from the menu
+        assert not box.isChecked() and window.store.get_setting("osint.source.state") == "0"
+        assert "state" not in window.osint_adapter.fetchers
+        box.setChecked(True)                                    # on from the page
+        assert action.isChecked() and "state" in window.osint_adapter.fetchers
+    finally:
+        window.close()

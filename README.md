@@ -189,7 +189,8 @@ one sender.
 The same page has an on/off switch for each **OSINT source** (SPC storm reports, USGS
 earthquakes, NIFC wildfires, FEMA declarations, FAA security TFRs, State Department
 advisories, GDELT news), with how often each is fetched, when it last updated, and any
-error. Turning a source off stops fetching it and removes its items from the map and
+error. The same switches are in the **Configuration → Watch Forms** menu, under
+**Edit Watch Forms…**. Turning a source off stops fetching it and removes its items from the map and
 from official confirmations; reports already saved stay until they leave the watch
 period.
 

@@ -470,8 +470,22 @@ class MainWindow(QMainWindow):
             action.triggered.connect(self.focus_regions_changed)
             self.focus_actions.append(action)
         configuration_menu.addSeparator()
+        # Watch Forms: the page, and a switch for each OSINT source (the same as the page's boxes).
+        watch_forms_menu = configuration_menu.addMenu("Watch Forms")
+        watch_forms_menu.setToolTipsVisible(True)
+        watch_forms_menu.addAction("Edit Watch Forms…").triggered.connect(
+            lambda: self.open_settings_dialog(self.watch_forms_dialog))
+        watch_forms_menu.addSection("OSINT sources")
+        self.osint_actions: dict[str, QAction] = {}
+        for name, label in osint_sources.SOURCE_LABELS.items():
+            action = watch_forms_menu.addAction(label)
+            action.setCheckable(True)
+            action.setChecked(self.watch_forms_page.osint_boxes[name].isChecked())
+            action.setToolTip(f"Fetched every {osint_sources.SCHEDULE.get(name, 30)} min. "
+                              "Unchecked: not fetched, and its items leave the map.")
+            action.triggered.connect(lambda checked, name=name: self.watch_forms_page.osint_boxes[name].setChecked(checked))
+            self.osint_actions[name] = action
         for title, dialog in (
-            ("Watch Forms…", self.watch_forms_dialog),
             ("Display…", self.display_dialog),
             ("Sources…", self.sources_dialog),
         ):
@@ -798,6 +812,8 @@ class MainWindow(QMainWindow):
 
     def osint_source_toggled(self, name: str, enabled: bool) -> None:
         self.store.set_setting(f"osint.source.{name}", "1" if enabled else "0")
+        if name in getattr(self, "osint_actions", {}):
+            self.osint_actions[name].setChecked(enabled)     # the menu shows the page's choice
         if not enabled:
             osint_sources.forget(name)      # off the map and out of the confirmations at once
             self.refresh_official()
