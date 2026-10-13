@@ -22,13 +22,18 @@ def editable_checkout(checkout: Path = CHECKOUT) -> bool:
     """True when this environment's S2 Watch is an editable install of ``checkout``, a git clone."""
     if not (checkout / ".git").exists() or not (checkout / "pyproject.toml").is_file():
         return False
-    try:
-        info = json.loads(metadata.distribution("s2-watch").read_text("direct_url.json") or "{}")
-    except (metadata.PackageNotFoundError, ValueError):
-        return False
-    url = urlparse(info.get("url", ""))
-    return bool(info.get("dir_info", {}).get("editable")) and url.scheme == "file" and \
-        Path(url2pathname(url.path)).resolve() == checkout.resolve()
+    # pip leaves s2_watch.egg-info in the clone, which Python also finds when started there;
+    # only the environment's record says how S2 Watch was installed.
+    for distribution in metadata.distributions(name="s2-watch"):
+        try:
+            info = json.loads(distribution.read_text("direct_url.json") or "{}")
+        except ValueError:
+            continue
+        url = urlparse(info.get("url", ""))
+        if info.get("dir_info", {}).get("editable") and url.scheme == "file" and \
+                Path(url2pathname(url.path)).resolve() == checkout.resolve():
+            return True
+    return False
 
 
 def requirements(checkout: Path = CHECKOUT) -> str:

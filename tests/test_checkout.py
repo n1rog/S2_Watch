@@ -15,8 +15,9 @@ def make_clone(tmp_path: Path, dependencies: str) -> Path:
 
 def installed_from(monkeypatch, clone: Path, editable: bool = True) -> None:
     info = {"url": clone.resolve().as_uri(), "dir_info": {"editable": editable}}
-    monkeypatch.setattr(checkout.metadata, "distribution",
-                        lambda name: SimpleNamespace(read_text=lambda _file: json.dumps(info)))
+    clone_egg_info = SimpleNamespace(read_text=lambda _file: None)     # found first when started in the clone
+    environment = SimpleNamespace(read_text=lambda _file: json.dumps(info))
+    monkeypatch.setattr(checkout.metadata, "distributions", lambda name: iter([clone_egg_info, environment]))
 
 
 def test_a_pull_that_changes_the_packages_installs_them_once(tmp_path, monkeypatch) -> None:
