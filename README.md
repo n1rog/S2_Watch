@@ -13,8 +13,13 @@ the TCP API is not enabled.
 
 ## Installing
 
-**To install S2 Watch, see [INSTALL.md](INSTALL.md)**: download the installer package
-from the [latest release](https://github.com/n1rog/S2_Watch/releases/latest) and run it.
+**To install S2 Watch, see [INSTALL.md](INSTALL.md)**: clone this repository and run
+`installer/install.sh` (or `installer\install.cmd`), then update with `git pull`; or run
+the installer package from the [latest release](https://github.com/n1rog/S2_Watch/releases/latest).
+
+Installed from a clone, S2 Watch runs the clone's code (an editable install), so `git pull`
+updates it. When a pull changes `pyproject.toml`'s dependencies, S2 Watch installs them at
+its next start, before Qt loads (`s2_watch/checkout.py`).
 
 Install scripts for Linux, macOS and Windows live in `installer/`. Each one checks
 for and downloads what S2 Watch needs (Python 3.11+, Qt's system libraries on Linux,

@@ -7,17 +7,32 @@ missing, installs S2 Watch, adds shortcuts, and then walks you through the setti
 You need an internet connection; about 400 MB is downloaded the first time. Nothing is
 installed system-wide without asking you first.
 
-## 1. Download
+## 1. Get S2 Watch
 
-Open the [latest release](https://github.com/n1rog/S2_Watch/releases/latest) and, under
+There are two ways. Both use the same installer and keep your data in the same place.
+
+**With Git (recommended): update any time with `git pull`.** You need
+[Git](https://git-scm.com/downloads); on Windows you can install it with
+`winget install Git.Git`. In a terminal (Command Prompt or PowerShell on Windows), in the
+folder where you want S2 Watch's files to live:
+
+```bash
+git clone https://github.com/n1rog/S2_Watch.git
+```
+
+This makes an `S2_Watch` folder. Keep it: S2 Watch runs from it. The installer is in its
+`installer` folder.
+
+**Or download a release package.** Open the
+[latest release](https://github.com/n1rog/S2_Watch/releases/latest) and, under
 **Assets**, download `S2Watch-<version>-installer.zip`. The same package works on all
-three systems. Unzip it.
+three systems. Unzip it. To update, you download and run each new release.
 
 ## 2. Install
 
 ### Windows
 
-1. Open the unzipped folder.
+1. Open the unzipped folder (with Git: `S2_Watch\installer`).
 2. Double-click **`install.cmd`**.
 3. Answer the questions in the window that opens.
 
@@ -31,7 +46,7 @@ is a script, not a signed program.
 
 1. Open **Terminal**.
 2. Type `bash ` (with a space after it), drag **`install.sh`** from the unzipped folder
-   into the Terminal window, and press Return.
+   (with Git: `S2_Watch/installer`) into the Terminal window, and press Return.
 3. Answer the questions.
 
 S2 Watch is installed in `~/Library/Application Support/S2 Watch`, and **S2 Watch** is
@@ -39,10 +54,11 @@ added to `~/Applications`.
 
 ### Linux
 
-In a terminal, in the unzipped folder:
+In a terminal:
 
 ```bash
-bash install.sh
+bash install.sh                    # in the unzipped folder
+bash S2_Watch/installer/install.sh # or, with Git, where you cloned it
 ```
 
 S2 Watch is installed in `~/.local/share/s2-watch`, with the `s2-watch` command in
@@ -88,11 +104,34 @@ The installer looks for an existing `s2_watch.db` and offers to import it. Your 
 watch forms, reports, labels and history then come with you. You can also type the path
 to a database you copied over.
 
-## Upgrading
+## Updating
 
-Quit S2 Watch first. Then download the new release and run its installer the same way.
-Your data and settings are kept. The version shows at the top of the window and in
-**Help → About S2 Watch**.
+Quit S2 Watch first. Your data and settings are kept either way.
+
+**Installed with Git:** in a terminal, in the `S2_Watch` folder:
+
+```bash
+git pull
+```
+
+Then start S2 Watch. If an update needs new or newer Python packages, S2 Watch installs
+them as it starts. On Windows a window shows the progress; that start can take a few
+minutes when the update includes a new Qt.
+
+**Installed from a release package:** download the new release and run its installer the
+same way.
+
+The version shows in **Help → About S2 Watch**.
+
+### Switching an existing install to Git
+
+Clone S2 Watch as in step 1 and run the installer from the clone's `installer` folder. It
+replaces the program in the same place and keeps your data, settings and shortcuts.
+From then on, `git pull` updates it.
+
+If you ran an older S2 Watch straight from an unzipped folder (no installer), the
+installer offers to import that folder's `s2_watch.db`. After checking that your data came
+across, delete the old folder so you don't start the old copy by mistake.
 
 ## Your data and backups
 
@@ -119,6 +158,10 @@ seconds per message.
   the host and port under **Configuration → Sources…** match it.
 - **The installer stopped partway:** fix what it reports, then run it again. Running
   it again is safe and keeps your data.
+- **`git pull` says your local changes would be overwritten:** you (or an editor) changed
+  a file in the clone. `git stash` sets your changes aside; then `git pull` again.
+- **S2 Watch won't start after `git pull`:** run the installer from the clone's
+  `installer` folder again. It repairs the installation and keeps your data.
 
 ## Uninstalling
 
@@ -127,7 +170,8 @@ seconds per message.
 | Windows       | Start menu → **Uninstall S2 Watch** |
 | macOS / Linux | `bash <install folder>/uninstall.sh` |
 
-Your data is kept unless you choose to delete it.
+Your data is kept unless you choose to delete it. With Git, also delete the `S2_Watch`
+folder.
 
 ## Installer options
 
