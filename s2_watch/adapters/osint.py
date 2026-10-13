@@ -73,6 +73,7 @@ STATE_NAMES = {
 # Shared by every adapter instance, so the re-scans that follow a watch-form change reuse
 # recent results instead of fetching again: source -> (fetched at, messages).
 _CACHE: dict[str, tuple[float, list[Message]]] = {}
+_UPDATED: dict[str, datetime] = {}      # source -> when it last fetched successfully (UTC)
 _CACHE_LOCK = threading.Lock()
 
 
@@ -285,6 +286,30 @@ def cached_messages(kinds=None) -> list[Message]:
     return [message for message in messages if kinds is None or message.fields.get("type") in kinds]
 
 
+# What each source is, in the operator's words (Configuration → Watch Forms), in display order.
+SOURCE_LABELS = {
+    "spc": "NOAA SPC storm reports (tornado, hail, damaging wind)",
+    "usgs": "USGS earthquakes",
+    "nifc": "NIFC wildfires",
+    "fema": "FEMA disaster declarations",
+    "faa": "FAA security flight restrictions (TFRs)",
+    "state": "State Department travel advisories",
+    "gdelt": "News reports of unrest and violence (GDELT)",
+}
+
+
+def forget(name: str) -> None:
+    """Drop a source's fetched items (it was turned off): they leave the map and confirmations."""
+    with _CACHE_LOCK:
+        _CACHE.pop(name, None)
+        _UPDATED.pop(name, None)
+
+
+def last_updated(name: str) -> datetime | None:
+    with _CACHE_LOCK:
+        return _UPDATED.get(name)
+
+
 FETCHERS = {"gdelt": fetch_gdelt, "faa": fetch_faa_security_tfrs, "state": fetch_state_advisories,
             "fema": fetch_fema_declarations, "usgs": fetch_usgs_earthquakes, "spc": fetch_spc_storm_reports,
             "nifc": fetch_nifc_wildfires}
@@ -297,9 +322,11 @@ class OsintAdapter:
 
     def __init__(self, lookback: timedelta | None = None, fetchers=None) -> None:
         self.lookback = lookback
-        self.fetchers = fetchers or FETCHERS
+        self.fetchers = FETCHERS if fetchers is None else fetchers
         self.status = "Connecting"
         self.errors: dict[str, str] = {}
+        if not self.fetchers:
+            self._update_status()
         self._pending: list[Message] = []
         self._delivered: set[str] = set()
         self._lock = threading.Lock()
@@ -323,6 +350,7 @@ class OsintAdapter:
                 messages = fetch()
                 with _CACHE_LOCK:
                     _CACHE[name] = (time.monotonic(), messages)
+                    _UPDATED[name] = datetime.now(timezone.utc)
                 self.errors.pop(name, None)
             except Exception as error:  # keep the other sources going; retry later
                 self.errors[name] = str(error)[:120]
@@ -340,6 +368,12 @@ class OsintAdapter:
                     continue  # kept for corroboration only (e.g. small quakes and fires)
                 self._delivered.add(identity)
                 self._pending.append(message)
+        self._update_status()
+
+    def _update_status(self) -> None:
+        if not self.fetchers:
+            self.status = "Off (no OSINT sources chosen)"
+            return
         working = [source for source in self.fetchers if source not in self.errors]
         self.status = ("Connected (" + ", ".join(working) + ")" if working else "Unavailable") + (
             f"; failing: {', '.join(self.errors)}" if self.errors else "")

@@ -77,6 +77,7 @@ from s2_watch.default_forms import install_default_forms
 from s2_watch.adapters import osint as osint_sources
 from s2_watch.locating import LocationResolver
 from s2_watch.ui.watch_form_dialog import WatchFormDialog
+from s2_watch.ui.watch_forms_view import WatchFormsPage
 
 
 class MainWindow(QMainWindow):
@@ -215,18 +216,17 @@ class MainWindow(QMainWindow):
         )
         self.ollama_model.editingFinished.connect(self.analysis_settings_changed)
         self.ollama_endpoint.editingFinished.connect(self.analysis_settings_changed)
-        self.forms = QListWidget()
-        self.forms.itemChanged.connect(self.form_changed)
-        add_form = QPushButton("Add watch form")
-        add_form.clicked.connect(self.add_form)
-        edit_form = QPushButton("Edit selected form")
-        edit_form.clicked.connect(self.edit_form)
-        remove_form = QPushButton("Remove selected form")
-        remove_form.clicked.connect(self.remove_form)
-        import_forms = QPushButton("Import watch forms")
-        import_forms.clicked.connect(self.import_forms)
-        export_forms = QPushButton("Export watch forms")
-        export_forms.clicked.connect(self.export_forms)
+        self.watch_forms_page = WatchFormsPage(
+            {key: (label, f"every {osint_sources.SCHEDULE.get(key, 30)} min")
+             for key, label in osint_sources.SOURCE_LABELS.items()},
+            self.enabled_osint_sources())
+        self.watch_forms_page.toggled.connect(self.form_toggled)
+        self.watch_forms_page.add_requested.connect(self.add_form)
+        self.watch_forms_page.edit_requested.connect(self.edit_form)
+        self.watch_forms_page.remove_requested.connect(self.remove_form)
+        self.watch_forms_page.import_requested.connect(self.import_forms)
+        self.watch_forms_page.export_requested.connect(self.export_forms)
+        self.watch_forms_page.osint_source_toggled.connect(self.osint_source_toggled)
         self.messages = QTableWidget(0, 4)
         self.messages.setHorizontalHeaderLabels(
             ("Time", "Application", "Watch form", "Message")
@@ -407,11 +407,9 @@ class MainWindow(QMainWindow):
         self.ollama_dialog = self.create_settings_dialog("Ollama Settings", ollama_layout)
 
         watch_forms_layout = QVBoxLayout()
-        watch_forms_layout.addWidget(QLabel("Watch forms"))
-        watch_forms_layout.addWidget(self.forms)
-        for button in (add_form, edit_form, remove_form, import_forms, export_forms):
-            watch_forms_layout.addWidget(button)
+        watch_forms_layout.addWidget(self.watch_forms_page)
         self.watch_forms_dialog = self.create_settings_dialog("Watch Forms", watch_forms_layout)
+        self.watch_forms_dialog.resize(980, 720)
 
         display_layout = QFormLayout()
         display_layout.addRow("Time Format:", self.time_zone)
@@ -790,7 +788,31 @@ class MainWindow(QMainWindow):
         self.commstat_adapter = CommstatSQLiteAdapter(self.commstat_path.text().strip(), lookback)
         self.flmsg_adapter = FLMSGFileAdapter(self.flmsg_path.text().strip(), lookback)
         self.superspotter_adapter = JS8SuperSpotterSQLiteAdapter(self.superspotter_path.text().strip(), lookback)
-        self.osint_adapter = OsintAdapter(lookback)
+        enabled = self.enabled_osint_sources()
+        self.osint_adapter = OsintAdapter(lookback, {name: fetch for name, fetch in osint_sources.FETCHERS.items()
+                                                     if name in enabled})
+
+    def enabled_osint_sources(self) -> set[str]:
+        return {name for name in osint_sources.FETCHERS
+                if self.store.get_setting(f"osint.source.{name}", "1") == "1"}
+
+    def osint_source_toggled(self, name: str, enabled: bool) -> None:
+        self.store.set_setting(f"osint.source.{name}", "1" if enabled else "0")
+        if not enabled:
+            osint_sources.forget(name)      # off the map and out of the confirmations at once
+            self.refresh_official()
+        self.rescan_sources()               # a fresh OSINT adapter with the chosen sources
+        self.update_osint_status()
+
+    def update_osint_status(self) -> None:
+        errors = getattr(self.osint_adapter, "errors", {}) or {}
+        status = {}
+        for name in osint_sources.FETCHERS:
+            if name in errors:
+                status[name] = f"failing: {errors[name]}"
+            elif (updated := osint_sources.last_updated(name)) is not None:
+                status[name] = f"updated {self.format_display_time(updated)}"
+        self.watch_forms_page.set_osint_status(status)
 
     def rescan_sources(self) -> None:
         """Apply the current watch forms to the whole review window, not just new traffic.
@@ -997,18 +1019,7 @@ class MainWindow(QMainWindow):
         install_default_forms(self.store)
         forms = self.store.list_watch_forms()
         self.clear_live_messages()
-        self.forms.blockSignals(True)
-        self.forms.clear()
-        for form in forms:
-            filter_description = form.match_text or "(all messages)"
-            item = QListWidgetItem(
-                f"{form.application} | {form.name}: {filter_description}"
-            )
-            item.setData(256, form)
-            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-            item.setCheckState(Qt.CheckState.Checked if form.enabled else Qt.CheckState.Unchecked)
-            self.forms.addItem(item)
-        self.forms.blockSignals(False)
+        self.watch_forms_page.set_forms(forms)
         self.rescan_sources()
 
     def rebuild_monitor(self) -> None:
@@ -1112,12 +1123,9 @@ class MainWindow(QMainWindow):
             return
         self.refresh_forms()
 
-    def edit_form(self) -> None:
-        item = self.forms.currentItem()
-        if item is None:
-            return
-        current = item.data(256)
-        if not isinstance(current, WatchForm):
+    def edit_form(self, current: WatchForm | None = None) -> None:
+        current = current or self.watch_forms_page.selected_form()
+        if current is None:
             return
         dialog = WatchFormDialog(self, current)
         if dialog.exec() != QDialog.DialogCode.Accepted:
@@ -1132,29 +1140,21 @@ class MainWindow(QMainWindow):
             return
         self.refresh_forms()
 
-    def form_changed(self, item: QListWidgetItem) -> None:
-        form = item.data(256)
-        if isinstance(form, WatchForm):
-            self.store.save_watch_form(
-                WatchForm(
-                    form.application,
-                    form.name,
-                    form.match_text,
-                    item.checkState() == Qt.CheckState.Checked,
-                    form.use_regex,
-                    form.message_type,
-                    form.sender,
-                )
-            )
-            self.rescan_sources()
-            self.poll()
+    def form_toggled(self, form: WatchForm, enabled: bool) -> None:
+        self.store.save_watch_form(replace(form, enabled=enabled))
+        self.watch_forms_page.set_forms(self.store.list_watch_forms())
+        self.rescan_sources()
+        self.poll()
 
-    def remove_form(self) -> None:
-        item = self.forms.currentItem()
-        if item is None:
+    def remove_form(self, form: WatchForm | None = None) -> None:
+        form = form or self.watch_forms_page.selected_form()
+        if form is None:
             return
-        form = item.data(256)
-        if isinstance(form, WatchForm):
+        answer = QMessageBox.question(
+            self.watch_forms_dialog, "Remove watch form",
+            f"Remove the watch form “{form.name}” ({form.application})?\n\n"
+            "To pause it instead, uncheck it. Reports it already found are kept.")
+        if answer == QMessageBox.StandardButton.Yes:
             self.store.delete_watch_form(form.application, form.name)
             self.refresh_forms()
 
@@ -1191,6 +1191,8 @@ class MainWindow(QMainWindow):
 
     def poll(self) -> None:
         self.update_application_status()
+        if self.watch_forms_dialog.isVisible():
+            self.update_osint_status()
         monitored = self.monitored_applications()
         statuses = []
         for application, adapter in (

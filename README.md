@@ -176,12 +176,22 @@ application bundle is desired. For Windows, distribute the generated
 directory or create an installer around it. For Linux, distribute the
 generated directory or integrate it with the desktop environment.
 
-The window persists JS8Call watch forms in SQLite. Forms can be added,
-enabled/disabled, edited, and removed from the UI. Matching supports
-case-insensitive text containment, regular expressions, JS8Call message type,
-and sender/call-sign. The text-to-match field is optional; leaving it blank
-matches every message from the selected application, or every message that
-matches the optional message-type or sender filters.
+**Configuration → Watch Forms** lists the forms in groups: **Topics** (the keyword
+forms for each news category, checked in every application's messages), **Whole
+applications** (every message from one application), and **Your forms**. Each form says
+what it matches in plain words (e.g. "Keywords: shooting, shooter, shots fired…"), with
+the full pattern in its tooltip. Check or uncheck a form to turn it on or off;
+double-click to edit it. A form keeps every message, messages containing some text,
+messages with any of a list of words (whole words: "ice" doesn't match "police"), or
+messages matching a regular expression, optionally only of one message type or from
+one sender.
+
+The same page has an on/off switch for each **OSINT source** (SPC storm reports, USGS
+earthquakes, NIFC wildfires, FEMA declarations, FAA security TFRs, State Department
+advisories, GDELT news), with how often each is fetched, when it last updated, and any
+error. Turning a source off stops fetching it and removes its items from the map and
+from official confirmations; reports already saved stay until they leave the watch
+period.
 
 S2 Watch creates an unfiltered default watch form for each supported
 application: JS8Call, MagCommstat, Commstat, FLMSG, and JS8SuperSpotter.
