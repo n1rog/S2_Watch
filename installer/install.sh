@@ -204,8 +204,16 @@ fi
 [ -x "$VENV/bin/python" ] || "$PYTHON" -m venv "$VENV"
 info "Downloading and installing packages (PySide6 is large; this can take several minutes)..."
 "$VENV/bin/python" -m pip install --upgrade --quiet pip
-"$VENV/bin/python" -m pip install --upgrade --progress-bar on "$SOURCE_DIR"
-info "OK: installed."
+if [ -e "$SOURCE_DIR/.git" ]; then
+    # From a git clone: S2 Watch runs the clone's code, so "git pull" updates it.
+    "$VENV/bin/python" -m pip install --upgrade --progress-bar on -e "$SOURCE_DIR"
+    "$VENV/bin/python" -c 'from s2_watch.checkout import record_requirements; record_requirements()'
+    info "OK: installed from the git clone in $SOURCE_DIR. Update later with: git pull"
+    info "Keep that folder; S2 Watch runs from it."
+else
+    "$VENV/bin/python" -m pip install --upgrade --progress-bar on "$SOURCE_DIR"
+    info "OK: installed."
+fi
 
 # ---- 5. Check the installation ------------------------------------------------------------
 bold "5/7  Checking the installation"

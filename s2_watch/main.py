@@ -5,11 +5,9 @@ import sqlite3
 import sys
 from pathlib import Path
 
-from PySide6.QtWidgets import QApplication
+from s2_watch.checkout import refresh_packages_after_pull
 
-from s2_watch.single_instance import SingleInstance
-from s2_watch.ui.icons import app_icon
-from s2_watch.ui.main_window import MainWindow
+# Qt and the window are imported in main(), after a git-pulled version's packages are installed.
 
 
 def parse_arguments(argv: list[str]) -> argparse.Namespace:
@@ -47,10 +45,17 @@ def apply_map_rendering(database: str) -> None:
 
 def main() -> int:
     arguments = parse_arguments(sys.argv)
+    refresh_packages_after_pull()
     if arguments.configure:
         from s2_watch.setup_wizard import run_wizard
         return run_wizard(arguments.database)
     apply_map_rendering(arguments.database)
+    from PySide6.QtWidgets import QApplication
+
+    from s2_watch.single_instance import SingleInstance
+    from s2_watch.ui.icons import app_icon
+    from s2_watch.ui.main_window import MainWindow
+
     app = QApplication(sys.argv)
     app.setApplicationName("s2-watch")
     app.setWindowIcon(app_icon())

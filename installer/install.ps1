@@ -140,9 +140,19 @@ if ((Test-Path $VenvPython) -and -not ((& $VenvPython -c 'import sys; print(sys.
 if (-not (Test-Path $VenvPython)) { & $Python -m venv $Venv; if ($LASTEXITCODE -ne 0) { Fail 'could not create the Python environment.' } }
 Info 'Downloading and installing packages (PySide6 is large; this can take several minutes)...'
 & $VenvPython -m pip install --upgrade --quiet pip
-& $VenvPython -m pip install --upgrade $SourceDir
+$FromClone = Test-Path (Join-Path $SourceDir '.git')
+if ($FromClone) {
+    # From a git clone: S2 Watch runs the clone's code, so "git pull" updates it.
+    & $VenvPython -m pip install --upgrade -e $SourceDir
+} else {
+    & $VenvPython -m pip install --upgrade $SourceDir
+}
 if ($LASTEXITCODE -ne 0) { Fail 'installing the Python packages failed; see the messages above.' }
-Info 'OK: installed.'
+if ($FromClone) {
+    & $VenvPython -c 'from s2_watch.checkout import record_requirements; record_requirements()'
+    Info "OK: installed from the git clone in $SourceDir. Update later with: git pull"
+    Info 'Keep that folder; S2 Watch runs from it.'
+} else { Info 'OK: installed.' }
 
 # ---- 5. Check the installation -------------------------------------------------------------
 Heading '5/7  Checking the installation'
