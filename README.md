@@ -13,6 +13,9 @@ the TCP API is not enabled.
 
 ## Installing
 
+**To install S2 Watch, see [INSTALL.md](INSTALL.md)**: download the installer package
+from the [latest release](https://github.com/n1rog/S2_Watch/releases/latest) and run it.
+
 Install scripts for Linux, macOS and Windows live in `installer/`. Each one checks
 for and downloads what S2 Watch needs (Python 3.11+, Qt's system libraries on Linux,
 the Visual C++ runtime on Windows, and PySide6), installs S2 Watch into its own
@@ -20,8 +23,8 @@ Python environment, creates menu and desktop shortcuts, and then runs the setup
 wizard. The wizard walks through sources, the review window, focus regions, watch
 forms, analysis, alerts, map layers and display.
 
-Build the installer package (the repository is private, so the package carries
-the program with it):
+Build the installer package (it carries the program with it, so installing needs no
+access to this repository):
 
 ```bash
 python tools/make_installer_package.py   # -> dist/S2Watch-<version>-installer.zip

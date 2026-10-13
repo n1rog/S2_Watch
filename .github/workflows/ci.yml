@@ -110,4 +110,4 @@ jobs:
           version="${GITHUB_REF_NAME#v}"
           gh release create "$GITHUB_REF_NAME" dist/S2Watch-*-installer.zip \
             --title "S2 Watch $version" --generate-notes \
-            --notes "Download S2Watch-$version-installer.zip, unzip it, and run install.sh (Linux/macOS) or install.cmd (Windows). See README-INSTALL.txt inside."
+            --notes "Download S2Watch-$version-installer.zip, unzip it, and run install.sh (Linux/macOS) or install.cmd (Windows). Step-by-step instructions: https://github.com/n1rog/S2_Watch/blob/main/INSTALL.md"

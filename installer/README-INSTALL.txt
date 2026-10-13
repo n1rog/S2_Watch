@@ -1,6 +1,9 @@
 S2 Watch - installation
 =======================
 
+These steps, with troubleshooting, are also online:
+https://github.com/n1rog/S2_Watch/blob/main/INSTALL.md
+
 The installer checks for everything S2 Watch needs, downloads anything that is missing,
 installs S2 Watch, creates shortcuts, and then walks you through the settings:
 which radio applications to watch, how far back to look, your MARS/FEMA focus regions,
