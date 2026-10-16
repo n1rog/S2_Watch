@@ -21,6 +21,7 @@ from s2_watch.backups import back_up_in_background, backup_folder
 from s2_watch.s2_report import DEFAULT_MAGCON, briefing_report as s2_briefing_report, followup_report as s2_followup_report, js8_report
 from s2_watch.followup import FollowUpFacts
 from s2_watch.ui.drafts_dialog import DraftsDialog
+from s2_watch.ui.senders_dialog import SendersDialog
 from s2_watch.ui.event_detail import EventDetail
 from s2_watch.ui.events_view import EventsTable, EventsView
 from s2_watch.ui.misses_view import MissesView
@@ -469,6 +470,13 @@ class MainWindow(QMainWindow):
             action.setData(region)
             action.triggered.connect(self.focus_regions_changed)
             self.focus_actions.append(action)
+        self.exercise_action = configuration_menu.addAction("Exercise in Progress")
+        self.exercise_action.setCheckable(True)
+        self.exercise_action.setChecked(self.exercise_in_progress())
+        self.exercise_action.setToolTip(
+            "On: exercise traffic (EXERCISE EXERCISE EXERCISE, THIS IS A DRILL...) is handled like real news, "
+            "marked EXERCISE in lists, events, reports and briefings. Off: it is kept off the news lists.")
+        self.exercise_action.toggled.connect(self.exercise_changed)
         configuration_menu.addSeparator()
         # Watch Forms: the page, and a switch for each OSINT source (the same as the page's boxes).
         watch_forms_menu = configuration_menu.addMenu("Watch Forms")
@@ -505,6 +513,7 @@ class MainWindow(QMainWindow):
         reports_menu.addAction("Draft Shift Briefing…").triggered.connect(
             lambda: self.draft_briefing(int(self.review_duration.currentData())))
         reports_menu.addAction("Saved Reports && Briefings…").triggered.connect(self.show_saved_drafts)
+        reports_menu.addAction("Sender Track Records…").triggered.connect(self.show_sender_records)
         reports_menu.addSeparator()
         reports_menu.addAction("Show Events").triggered.connect(lambda: self.tabs.setCurrentWidget(self.events_view))
         help_menu = self.menuBar().addMenu("Help")
@@ -521,6 +530,12 @@ class MainWindow(QMainWindow):
         self.clock_button = QToolButton()
         self.clock_button.setToolTip("Switch all times between Local and Zulu (UTC)")
         self.clock_button.clicked.connect(self.toggle_time_format)
+        self.exercise_label = QLabel("EXERCISE")
+        self.exercise_label.setToolTip("Exercise in progress: exercise traffic is treated as news "
+                                       "(Configuration → Exercise in Progress)")
+        self.exercise_label.setStyleSheet("color: white; background: #c62828; font-weight: bold; padding: 1px 8px;")
+        self.exercise_label.setVisible(self.exercise_in_progress())
+        clock_layout.addWidget(self.exercise_label)
         clock_layout.addWidget(self.clock_label)
         clock_layout.addWidget(self.clock_button)
         self.menuBar().setCornerWidget(self.clock_corner, Qt.Corner.TopRightCorner)
@@ -650,6 +665,7 @@ class MainWindow(QMainWindow):
         self.events_view.show_on_map.connect(self.show_event_on_map)
         self.events_view.draft_briefing.connect(self.draft_briefing)
         self.connect_event_detail(self.events_view.detail)
+        self.events_view.table.menu_requested.connect(self.show_event_menu)
         tabs.insertTab(1, self.events_view, "Events")
         self.misses_view = MissesView(self.store, self.format_display_time,
                                       watch_hours=lambda: int(self.review_duration.currentData()))
@@ -932,6 +948,11 @@ class MainWindow(QMainWindow):
             draft.setEnabled(bool(items))
             draft.triggered.connect(lambda: self.draft_followup_for_event(event_ids[0]))
             menu.addAction("Show on map").triggered.connect(lambda: self.show_event_id_on_map(event_ids[0]))
+            chosen = self.map_events.event_by_id(event_ids[0]) or self.events_view.table.event_by_id(event_ids[0])
+            if chosen is not None and chosen.closed_at is not None:
+                menu.addAction("Reopen event").triggered.connect(lambda: self.reopen_event(event_ids[0]))
+            else:
+                menu.addAction("Close event…").triggered.connect(lambda: self.close_event(event_ids[0]))
             menu.addAction("Open in Events tab").triggered.connect(
                 lambda: (self.tabs.setCurrentWidget(self.events_view), self.events_view.table.select_event(event_ids[0])))
         menu.addAction("Show its reports").triggered.connect(lambda: self.show_reports(report_ids))
@@ -943,6 +964,42 @@ class MainWindow(QMainWindow):
         detail.mark.connect(lambda event_id, status: self.mark_reports(self.event_report_ids(event_id), status))
         detail.edit_note.connect(lambda event_id: self.edit_note(self.event_report_ids(event_id)))
         detail.show_reports.connect(lambda event_id: self.show_reports(self.event_report_ids(event_id)))
+        detail.close_requested.connect(self.close_event)
+        detail.reopen_requested.connect(self.reopen_event)
+
+    def close_event(self, event_id: int) -> None:
+        reason, accepted = QInputDialog.getText(
+            self, "Close event", "Why is it over? (optional, e.g. \"all clear from EOC\")\n\n"
+            "A new report about it reopens it.")
+        if accepted:
+            self.store.close_event(event_id, reason)
+            self.event_states_changed()
+
+    def reopen_event(self, event_id: int) -> None:
+        self.store.reopen_event(event_id)
+        self.event_states_changed()
+
+    def event_states_changed(self) -> None:
+        self.refresh_map_events()
+        self.events_view.refresh()
+
+    def exercise_in_progress(self) -> bool:
+        return self.store.get_setting("exercise.in_progress", "0") == "1"
+
+    def exercise_changed(self, on: bool) -> None:
+        self.store.set_setting("exercise.in_progress", "1" if on else "0")
+        self.exercise_label.setVisible(on)
+        self.clock_corner.adjustSize()      # the menu bar keeps the corner's old size otherwise
+        self.menuBar().setCornerWidget(self.clock_corner, Qt.Corner.TopRightCorner)
+        self.rescan_sources()      # exercise traffic joins (or leaves) the news lists and events
+
+    def sender_grades(self) -> dict[str, str]:
+        """Call sign -> the reliability grade its track record suggests (judged ones only)."""
+        return {station: record.grade for station, record in self.store.sender_track_records().items()
+                if record.grade != "F"}
+
+    def show_sender_records(self) -> None:
+        SendersDialog(self.store, self.format_display_time, self).exec()
 
     def event_report_ids(self, event_id: int) -> list[int]:
         return [report["report_id"] for report in self.store.event_reports(event_id)]
@@ -1057,6 +1114,7 @@ class MainWindow(QMainWindow):
                 adapters, self._monitor_forms, self._analyzer, self.geocoding_enabled.isChecked(),
                 preload_since=datetime.now(timezone.utc) - timedelta(hours=int(self.review_duration.currentData())),
                 preload_limit=self.ANALYSIS_ROWS_LIMIT,
+                exercise_in_progress=self.exercise_in_progress(),
             ))
 
     def operator_keywords(self) -> dict[str, list[str]]:
@@ -1751,7 +1809,7 @@ class MainWindow(QMainWindow):
             events = self.events_view.visible_events()
         text = s2_briefing_report(events, now, hours, self.focus_regions, last_briefing,
                                   magcon=self.store.get_setting("magcon.status", DEFAULT_MAGCON),
-                                  reports_of=self.store.event_reports)
+                                  reports_of=self.store.event_reports, grades=self.sender_grades())
         ollama = None
         if self.analysis_mode.checkedAction().data() == "ollama":
             ollama = (self.ollama_endpoint.text().strip() or "http://127.0.0.1:11434",
@@ -1823,7 +1881,8 @@ class MainWindow(QMainWindow):
         # The MAGNET S2 report covers the report's whole event (its timeline and sources).
         event_id = self.store.event_of_report(report_id)
         members = self.store.event_reports(event_id) if event_id is not None else None
-        text = s2_followup_report(facts, members, magcon=self.store.get_setting("magcon.status", DEFAULT_MAGCON))
+        text = s2_followup_report(facts, members, magcon=self.store.get_setting("magcon.status", DEFAULT_MAGCON),
+                                  grades=self.sender_grades())
         ollama = None
         if self.analysis_mode.checkedAction().data() == "ollama":
             ollama = (self.ollama_endpoint.text().strip() or "http://127.0.0.1:11434",

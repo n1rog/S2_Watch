@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 PERIODS = (("24 hours", 24), ("48 hours", 48), ("7 days", 168), ("30 days", 720))
 URGENCY_RANK = {"high": 3, "medium": 2, "low": 1}
 PINNED_STATUSES = {"interest", "followup"}
+STATUS_RANK = {"active": 2, "quiet": 1, "closed": 0}
 HIGHLIGHT_SECONDS = 15
 
 
@@ -43,11 +44,11 @@ class EventsTable(QTableWidget):
     activated = Signal(int)                   # event id (double-click)
 
     COLUMNS = ("Last activity", "Event", "Category", "Area", "Reports", "Sources", "Urgency", "Official",
-               "Radio lead", "Labels")
+               "Radio lead", "Labels", "Status")
     EVENT_ROLE = Qt.ItemDataRole.UserRole
 
     # Starting widths (pixels); people drag them, and the table remembers theirs.
-    DEFAULT_WIDTHS = (150, 380, 150, 80, 70, 170, 80, 170, 80)
+    DEFAULT_WIDTHS = (150, 380, 150, 80, 70, 170, 80, 170, 80, 120)
 
     def __init__(self, format_time, parent=None, store=None, state_key: str = "") -> None:
         super().__init__(0, len(self.COLUMNS), parent)
@@ -108,6 +109,7 @@ class EventsTable(QTableWidget):
         self.blockSignals(True)          # one selection signal at the end, not a blank in between
         self.setRowCount(0)
         muted = self.palette().color(QPalette.ColorRole.PlaceholderText)
+        now = datetime.now(timezone.utc)
         for event in events:
             row = self.rowCount()
             self.insertRow(row)
@@ -125,10 +127,15 @@ class EventsTable(QTableWidget):
                 QTableWidgetItem(f"✓ {event.official}" if event.official else ""),
                 SortKeyItem(lead, event.radio_lead_minutes or 0),
                 QTableWidgetItem(", ".join(status for status in event.statuses if status)),
+                SortKeyItem(event.status_text(now), STATUS_RANK[event.status(now)]),
             )
             cells[0].setData(self.EVENT_ROLE, event.event_id)
             cells[1].setToolTip(event.title)
-            ignored = bool(event.statuses) and set(event.statuses) == {"ignored"}
+            if event.closed_at is not None:
+                cells[10].setToolTip(f"Closed {self.format_time(event.closed_at)}"
+                                     + (" by you" if event.closed_by == "operator" else " by a report")
+                                     + (f": {event.close_reason}" if event.close_reason else ""))
+            ignored = (bool(event.statuses) and set(event.statuses) == {"ignored"}) or event.closed_at is not None
             for column, item in enumerate(cells):
                 font = QFont(item.font())
                 font.setBold(column == 1 and event.reports > 1 or column == 9 and bool(PINNED_STATUSES & set(event.statuses)))
@@ -230,6 +237,10 @@ class EventsView(QWidget):
         self.focus_only = QCheckBox("Focus regions only")
         self.focus_only.setChecked(self.store.get_setting("events.focus_only", "0") == "1")
         self.focus_only.toggled.connect(self._filter_changed)
+        self.hide_closed = QCheckBox("Hide closed events")
+        self.hide_closed.setToolTip("Events an all-clear report, or you, closed")
+        self.hide_closed.setChecked(self.store.get_setting("events.hide_closed", "0") == "1")
+        self.hide_closed.toggled.connect(self._filter_changed)
         self.count = QLabel()
         briefing = QPushButton("Draft briefing…")
         briefing.setToolTip("Draft a shift briefing from these events (full report, FLMSG and JS8Call versions)")
@@ -240,6 +251,7 @@ class EventsView(QWidget):
         top.addSpacing(12)
         top.addWidget(self.multi_only)
         top.addWidget(self.focus_only)
+        top.addWidget(self.hide_closed)
         top.addStretch(1)
         top.addWidget(self.count)
         top.addWidget(briefing)
@@ -283,6 +295,8 @@ class EventsView(QWidget):
         events = self.store.events_since(since, regions)
         if self.multi_only.isChecked():
             events = [event for event in events if event.reports > 1]
+        if self.hide_closed.isChecked():
+            events = [event for event in events if event.closed_at is None]
         return events
 
     def refresh(self) -> None:
@@ -312,4 +326,5 @@ class EventsView(QWidget):
     def _filter_changed(self) -> None:
         self.store.set_setting("events.multi_only", "1" if self.multi_only.isChecked() else "0")
         self.store.set_setting("events.focus_only", "1" if self.focus_only.isChecked() else "0")
+        self.store.set_setting("events.hide_closed", "1" if self.hide_closed.isChecked() else "0")
         self.refresh()

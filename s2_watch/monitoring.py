@@ -5,6 +5,7 @@ from collections.abc import Callable, Iterable
 from s2_watch.adapters.base import ApplicationAdapter
 from s2_watch.analysis.base import AnalysisResult, NewsAnalyzer
 from s2_watch.digest import split_digest
+from s2_watch.exercise import mark_exercise
 from s2_watch.models import ANY_APPLICATION, Message, WatchForm
 from s2_watch.storage import SQLiteStore
 
@@ -48,6 +49,7 @@ class Monitor:
         on_saved: Callable[[int, Message, AnalysisResult | None], None] | None = None,
         on_read: Callable[[Message], None] | None = None,
         on_unmatched: Callable[[Message], None] | None = None,
+        exercise_in_progress: bool = False,
     ) -> None:
         self.adapters = list(adapters)
         self.forms = list(forms)
@@ -62,6 +64,8 @@ class Monitor:
         # Called with every message read, matched or not (e.g. for station coverage).
         self.on_read = on_read
         self.on_unmatched = on_unmatched   # messages no watch form kept
+        # Exercise traffic counts as news only during an exercise (s2_watch.exercise).
+        self.exercise_in_progress = exercise_in_progress
 
     def poll(self) -> None:
         active_applications = {
@@ -108,6 +112,11 @@ class Monitor:
                 result = self.store.saved_analysis(known, analyzer_name(self.analyzer))
             if result is None:
                 result = self.analyzer.analyze(matched)
+        # The analyzer's own verdict is saved (and reused); exercise and test traffic is then
+        # handled by the current exercise setting.
+        analysis = result
+        if result is not None:
+            result = mark_exercise(matched, result, self.exercise_in_progress)
         if result is not None and result.newsworthy:
             # Credit the form named after the report's category (the category forms), not
             # simply the first form in the list that happened to match.
@@ -119,8 +128,8 @@ class Monitor:
         # A message read again keeps the time it was first seen (sources without timestamps).
         matched = replace(matched, received_at=self.store.earliest_received_at(message_id, matched.received_at))
         self.on_match(matched)
-        if result is not None:
-            self.store.save_analysis(message_id, result, analyzer_name(self.analyzer))
+        if analysis is not None:
+            self.store.save_analysis(message_id, analysis, analyzer_name(self.analyzer))
         if self.on_saved:
             self.on_saved(message_id, matched, result)
         if result is not None and self.on_analysis:

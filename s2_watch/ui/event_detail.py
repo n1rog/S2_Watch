@@ -8,13 +8,16 @@ official and news items. Buttons act on the event.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from html import escape
 
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QHBoxLayout, QMenu, QPushButton, QTextBrowser, QToolButton, QVBoxLayout, QWidget
 
 from s2_watch.analysis.ollama import readable_text
+from s2_watch.events import quiet_hours
 from s2_watch.models import Message
+from s2_watch.senders import GRADE_WORDS, callsign
 
 STATUS_LABELS = {"interest": "Of interest", "followup": "Follow-up created", "ignored": "Ignored"}
 
@@ -32,6 +35,8 @@ class EventDetail(QWidget):
     mark = Signal(int, str)        # event id, status ("" clears)
     edit_note = Signal(int)
     show_reports = Signal(int)
+    close_requested = Signal(int)
+    reopen_requested = Signal(int)
 
     def __init__(self, store, format_time, parent=None) -> None:
         super().__init__(parent)
@@ -58,8 +63,12 @@ class EventDetail(QWidget):
         self.label_button.setMenu(menu)
         self.reports_button = QPushButton("Show its reports")
         self.reports_button.clicked.connect(lambda: self.current and self.show_reports.emit(self.current.event_id))
+        self.close_button = QPushButton("Close event…")
+        self.close_button.setToolTip("It's over: show it as closed, and list it as resolved in briefings. "
+                                     "A new report reopens it.")
+        self.close_button.clicked.connect(self._close_or_reopen)
         buttons = QHBoxLayout()
-        for button in (self.map_button, self.draft_button, self.label_button, self.reports_button):
+        for button in (self.map_button, self.draft_button, self.label_button, self.reports_button, self.close_button):
             buttons.addWidget(button)
         buttons.addStretch(1)
         layout = QVBoxLayout(self)
@@ -73,8 +82,10 @@ class EventDetail(QWidget):
         self.current = event
         if event is None:
             self._shown_id = self._shown_html = None
-        for button in (self.map_button, self.draft_button, self.label_button, self.reports_button):
+        for button in (self.map_button, self.draft_button, self.label_button, self.reports_button, self.close_button):
             button.setEnabled(event is not None)
+        self.close_button.setText("Reopen event" if event is not None and event.closed_at is not None
+                                  else "Close event…")
         if event is None:
             self.browser.setHtml("<p style='color:gray'>Select an event to see what it is about: its reports, "
                                  "their full text, official confirmation and how far ahead radio was.</p>")
@@ -82,7 +93,7 @@ class EventDetail(QWidget):
         self.map_button.setEnabled(bool(event.points))
         reports = self.store.event_reports(event.event_id)
         self.draft_button.setEnabled(bool(reports))
-        html = self.render(event, reports)
+        html = self.render(event, reports, self.store.sender_track_records())
         if event.event_id == self._shown_id and html == self._shown_html:
             return                       # a refresh with nothing new: keep the reader's place
         scroll = self.browser.verticalScrollBar()
@@ -91,17 +102,37 @@ class EventDetail(QWidget):
         scroll.setValue(position)
         self._shown_id, self._shown_html = event.event_id, html
 
-    def render(self, event, reports: list[dict]) -> str:
+    def _close_or_reopen(self) -> None:
+        if self.current is None:
+            return
+        if self.current.closed_at is not None:
+            self.reopen_requested.emit(self.current.event_id)
+        else:
+            self.close_requested.emit(self.current.event_id)
+
+    def render(self, event, reports: list[dict], records: dict | None = None,
+               now: datetime | None = None) -> str:
         e = escape
+        records = records or {}
+        now = now or datetime.now(timezone.utc)
         area = ", ".join(part for part in (event.state, f"MARS Region {event.region}" if event.region else "") if part)
         urgency_colour = {"high": "#c62828", "medium": "#e65100"}.get(event.urgency, "gray")
         sources = ", ".join(event.sources)
         when = (self.format_time(event.first_seen) if event.first_seen == event.last_seen
                 else f"{self.format_time(event.first_seen)} to {self.format_time(event.last_seen)}")
-        out = [f"<h3 style='margin-bottom:2px'>{e(event.title)}</h3>",
+        out = [f"<p style='color:#c62828;margin:0'><b>EXERCISE</b>: these reports are exercise traffic.</p>"
+               if getattr(event, "exercise", False) else "",
+               f"<h3 style='margin-bottom:2px'>{e(event.title)}</h3>",
                f"<p style='margin-top:0'><b>{e(event.category)}</b>"
                f"{' · ' + e(area) if area else ''} · <b style='color:{urgency_colour}'>{e(event.urgency.upper())}</b><br>"
                f"{e(when)} · {event.reports} report{'s' if event.reports != 1 else ''} from {e(sources)}</p>"]
+        if event.closed_at is not None:
+            who = "you" if event.closed_by == "operator" else "a report"
+            out.append(f"<p style='color:#2e7d32'>✓ <b>Closed</b> {e(self.format_time(event.closed_at))} by {who}"
+                       f"{': ' + e(event.close_reason) if event.close_reason else ''}. A new report reopens it.</p>")
+        elif event.status(now) == "quiet":
+            out.append(f"<p><b>Quiet:</b> no new reports for {quiet_hours(now - event.last_seen)} hours. "
+                       "It may be over; close it if you know it is.</p>")
         if event.official:
             lead = (f" Radio reported it <b>{event.radio_lead_minutes} minutes</b> before the official source."
                     if event.radio_lead_minutes else "")
@@ -121,13 +152,21 @@ class EventDetail(QWidget):
         for report in reports:
             body = " ".join(readable_text(Message(report["source"], report["text"] or "")).split())
             sender = f" ({report['sender']})" if report.get("sender") else ""
+            station = callsign(report["source"], report.get("sender") or "", report.get("text") or "")
+            record = records.get(station) if report["source"] != "OSINT" else None
+            track = ""
+            if record is not None:
+                track = (f" · track record <b>{record.grade}</b> ({e(GRADE_WORDS[record.grade])}: "
+                         f"{e(record.explanation)})")
+            drill = {"exercise": " · <b style='color:#c62828'>EXERCISE</b>",
+                     "test": " · <b>TEST</b>"}.get(report.get("exercise") or "", "")
             copies = f" · {report['copies']} copies via {report['sources']}" if report.get("copies", 1) > 1 else ""
             label = STATUS_LABELS.get(report["status"], "")
             headline = useful_headline(report.get("summary") or "", body)
             url = (report.get("fields") or {}).get("url", "")
             parts = [f"<p style='margin-top:8px'><b>{e(self.format_time(report['first_seen']))}</b> — "
                      f"{e(report['source'])}{e(sender)} · {e(report['urgency'])}{e(copies)}"
-                     + (f" · <i>{e(label)}</i>" if label else "")]
+                     + (f" · <i>{e(label)}</i>" if label else "") + track + drill]
             if headline:
                 parts.append(f"<br><b>{e(headline)}</b>")
             parts.append(f"<br>{e(body)}")

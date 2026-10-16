@@ -21,6 +21,7 @@ DEFAULT_RADIUS_KM = 100
 RADIUS_KM = {"earthquake": 150, "fire": 80, "tropical": 250, "winter": 150, "heat": 200}
 SPECIFIC_LEVELS = {"precise", "city", "county", "grid"}
 INCIDENT_GAP = timedelta(days=30)     # a named fire is one event however long it burns
+STALE_AFTER = timedelta(hours=12)     # no reports this long: the event shows as quiet
 # Words too common to show two reports are about the same thing.
 STOP_WORDS = set("""
 THE AND FOR WITH FROM THAT THIS HAVE HAS WERE WILL BEEN THEY THEIR THERE ABOUT AFTER BEFORE INTO
@@ -87,6 +88,62 @@ class EventSummary:
     radio_lead_minutes: int | None  # radio's head start on the first official source
     statuses: tuple[str, ...] = field(default_factory=tuple)
     points: list[tuple[float, float]] = field(default_factory=list)
+    closed_at: datetime | None = None   # an all-clear report, or the operator, closed it
+    close_reason: str = ""
+    closed_by: str = ""                 # "report" or "operator"
+    exercise: bool = False              # its reports are exercise traffic
+
+    def status(self, now: datetime) -> str:
+        """"closed", "quiet" (no reports for STALE_AFTER), or "active"."""
+        if self.closed_at is not None:
+            return "closed"
+        return "quiet" if now - self.last_seen >= STALE_AFTER else "active"
+
+    def status_text(self, now: datetime) -> str:
+        state = self.status(now)
+        if state == "closed":
+            return f"Closed: {self.close_reason}" if self.close_reason else "Closed"
+        if state == "quiet":
+            return f"Quiet {quiet_hours(now - self.last_seen)} h"
+        return "Active"
+
+
+def quiet_hours(gap: timedelta) -> int:
+    return int(gap.total_seconds() // 3600)
+
+
+# A report saying it's over closes its event. A negation just before ("not yet restored",
+# "no all clear") keeps the event open.
+_ALL_CLEAR = re.compile(
+    r"\ball[-\s]+clear\b"
+    r"|\b(?:power|service|electricity|water|phones?|internet|comms|communications|cell\s+service)\s+"
+    r"(?:has\s+been\s+|have\s+been\s+|is\s+|are\s+|was\s+|were\s+)?(?:fully\s+)?"
+    r"(?:restored|back\s+(?:on(?:line)?|up))\b"
+    r"|\b(?:warning|watch|advisory|alert|evacuation(?:\s+orders?)?|curfew|lockdown|boil[-\s]+water\s+"
+    r"(?:notice|advisory|order)|shelter[-\s]+in[-\s]+place(?:\s+order)?)\s+"
+    r"(?:has\s+been\s+|have\s+been\s+|was\s+|were\s+|is\s+|are\s+)?"
+    r"(?:cancell?ed|lifted|expired|rescinded|terminated|ended)\b"
+    r"|\b(?:road|roads|highway|interstate|bridge|airport|port|school|schools)\s+"
+    r"(?:has\s+been\s+|have\s+been\s+|is\s+|are\s+)?re-?opened\b"
+    r"|\b100\s*%\s+contain(?:ed|ment)\b|\bfully\s+contained\b"
+    r"|\bsuspects?\s+(?:is\s+|are\s+|was\s+|were\s+|now\s+)?(?:in\s+custody|apprehended|arrested)\b"
+    r"|\bthreat\s+(?:has\s+)?(?:passed|ended|is\s+over)\b"
+    r"|\b(?:situation|incident)\s+(?:is\s+|has\s+been\s+)?(?:resolved|over)\b"
+    r"|\breturn(?:ed|ing)?\s+to\s+normal\b"
+    r"|\bno\s+further\s+(?:traffic|reports?|updates?|threat)\b"
+    r"|\b(?:eoc|net|nets|operations?)\s+(?:has\s+been\s+|have\s+been\s+|is\s+)?(?:stood\s+down|deactivated|secured)\b",
+    re.IGNORECASE,
+)
+_NEGATED = re.compile(r"\b(?:not|no|isn'?t|aren'?t|wasn'?t|never|yet\s+to\s+be|until|before)\s+(?:\w+\s+){0,2}$",
+                      re.IGNORECASE)
+
+
+def all_clear(text: str) -> str:
+    """The words that say an event is over ("power restored", "warning cancelled"), or ""."""
+    for match in _ALL_CLEAR.finditer(text):
+        if not _NEGATED.search(text[max(0, match.start() - 40):match.start()]):
+            return " ".join(match.group().lower().split())
+    return ""
 
 
 def place_from_locations(locations) -> Place:

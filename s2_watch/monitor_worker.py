@@ -15,6 +15,7 @@ from s2_watch.analysis.base import AnalysisResult, NewsAnalyzer
 from s2_watch.analysis.ollama import readable_text
 from s2_watch.analysis.summary import is_placeholder_summary, summarize
 from s2_watch.events import incident_key, key_terms, place_from_locations, report_hazards
+from s2_watch.exercise import mark_exercise
 from s2_watch.geocoding import NominatimGeocoder
 from s2_watch.locating import LocationResolver, ResolvedLocation
 from s2_watch.models import Message, WatchForm
@@ -23,6 +24,12 @@ from s2_watch.overlays import CoverageTracker
 from s2_watch.storage import ReportInfo, SQLiteStore
 
 BATCH_SIZE = 200
+
+
+def closing_text(message: Message) -> str:
+    """The words that may close a report's event ("power restored"). News headlines don't:
+    "suspects arrested" is often where a story starts."""
+    return "" if message.fields.get("type") == "NEWS" else readable_text(message)
 
 
 @dataclass
@@ -34,6 +41,7 @@ class MonitorConfig:
     # Show the saved reports seen since this time first, before the sources are read.
     preload_since: datetime | None = None
     preload_limit: int = 1000
+    exercise_in_progress: bool = False   # exercise traffic is news (marked EXERCISE)
 
 
 @dataclass
@@ -85,7 +93,8 @@ class MonitorWorker(QObject):
             locations = self.resolver.resolve(message)
             text = f"{readable_text(message)} {summary}"
             self.store.assign_event(report_id, category, report_hazards(text), place_from_locations(locations),
-                                    summary or message.raw_content[:120], incident_key(message), key_terms(text))
+                                    summary or message.raw_content[:120], incident_key(message), key_terms(text),
+                                    closing_text(message))
             grouped += 1
         if grouped:
             self.events_changed.emit()
@@ -103,6 +112,7 @@ class MonitorWorker(QObject):
         self.monitor = Monitor(
             self.adapters, config.forms, self.store, self._matched, config.analyzer, self._analysed,
             self._saved, self.coverage.add, on_unmatched=self._unmatched,
+            exercise_in_progress=config.exercise_in_progress,
         ) if self.adapters and self.store else None
         if self.store and config.preload_since is not None:
             self._preload(config)
@@ -115,6 +125,7 @@ class MonitorWorker(QObject):
         for report_id, message, result in self.store.recent_reports(config.preload_since, config.preload_limit):
             if result is None or not any(form.matches(message) for form in forms):
                 continue
+            result = mark_exercise(message, result, config.exercise_in_progress)
             locations = self.resolver.resolve(message)
             batch.append(ProcessedMessage(message, result, locations, self.store.report_info(report_id), preloaded=True))
         if batch:
@@ -193,6 +204,7 @@ class MonitorWorker(QObject):
             self.store.assign_event(
                 processed.report.report_id, result.category, report_hazards(text),
                 place_from_locations(processed.locations), result.summary, incident_key(message), key_terms(text),
+                closing_text(message),
             )
 
     def _analysed(self, message: Message, result: AnalysisResult) -> None:

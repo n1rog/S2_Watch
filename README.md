@@ -67,7 +67,42 @@ on the Events tab) shows its category, area, urgency and when it was heard, whet
 official source confirms it and radio's head start, your labels and notes, then every
 report in the order heard, with the full text, the sender, its own confirmation and a link
 for official and news items. The buttons under it show the event on the map, draft a
-follow-up, label it (or edit its note), or list its reports.
+follow-up, label it (or edit its note), list its reports, or close it.
+
+**Events that are over.** A radio or official report saying it's over closes its event:
+"all clear", "power restored", "warning cancelled", "evacuation order lifted", "bridge
+reopened", "100% contained", "suspect in custody", "net secured" (not when negated: "power
+not yet restored"). News headlines don't close events. You can close an event yourself
+(**Close event…**, with an optional reason) or reopen it; a later report reopens a closed
+event. An event with no reports for 12 hours shows as **Quiet**. The **Status** column
+shows Active, Quiet or Closed; closed events are greyed, the Events tab can hide them, and
+briefings list them under **Resolved in the Period** instead of as current activity.
+
+## Exercise traffic
+
+Clear exercise markers ("EXERCISE EXERCISE EXERCISE", "THIS IS A DRILL", "exercise
+message", "for exercise purposes only", "simulated emergency", STARTEX/ENDEX, a message
+that starts "EXERCISE:") mark radio traffic as exercise traffic; "real world" or "no duff"
+marks it real. Ordinary words don't count ("Exercise Normal Precautions", "military
+drills"), and official and news feeds are never exercise traffic. Test traffic ("THIS IS
+A TEST", "test message") is never news.
+
+Exercise traffic is kept off the news lists, events and briefings. During an exercise,
+turn on **Configuration → Exercise in Progress** (a red EXERCISE marker shows by the
+clock): exercise traffic is then handled like real news, marked EXERCISE in the lists, the
+event panel, follow-up reports and briefings (subject prefixed, and EXERCISE EXERCISE
+EXERCISE at the top and bottom). Possible Misses skips exercise and test traffic.
+
+## Sender track records
+
+**Reports → Sender Track Records** shows how each radio station's newsworthy reports have
+held up: confirmed by an official source, or marked Of interest / Follow-up, counts for the
+station; marked Ignored counts against it. With 5 or more judged reports, the share that
+held up suggests a reliability grade: B usually reliable (85%+), C fairly reliable (65%+),
+D not usually reliable (40%+), E unreliable; fewer is F, cannot be judged. A is left to
+official sources. MAGNET reports use the grade in each station's source rating (e.g.
+[B2]), and the event panel shows it beside each report. Exercise and test traffic doesn't
+count.
 
 Under the map, **Show: Events | Reports** switches the Newsworthiness list between events
 (the default) and individual reports. Right-click events to label all their reports,

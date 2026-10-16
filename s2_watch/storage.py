@@ -108,7 +108,7 @@ class SQLiteStore:
             )"""
         )
         report_columns = {row[1] for row in self.connection.execute("PRAGMA table_info(reports)")}
-        for column in ("status", "status_note", "status_changed", "corroboration"):
+        for column in ("status", "status_note", "status_changed", "corroboration", "exercise"):
             if column not in report_columns:
                 self._add_column(f"ALTER TABLE reports ADD COLUMN {column} TEXT NOT NULL DEFAULT ''")
         self.connection.execute("CREATE INDEX IF NOT EXISTS reports_first_seen ON reports(first_seen)")
@@ -134,6 +134,11 @@ class SQLiteStore:
             )"""
         )
         self.connection.execute("CREATE INDEX IF NOT EXISTS events_last_seen ON events(last_seen)")
+        # Closed by an all-clear report or the operator (closed_by "report" / "operator").
+        event_columns = {row[1] for row in self.connection.execute("PRAGMA table_info(events)")}
+        for column in ("closed_at", "close_reason", "closed_by"):
+            if column not in event_columns:
+                self._add_column(f"ALTER TABLE events ADD COLUMN {column} TEXT NOT NULL DEFAULT ''")
         # Briefings and reports the operator saved in S2 Watch (the draft text, to reopen).
         self.connection.execute(
             """CREATE TABLE IF NOT EXISTS drafts (
@@ -287,6 +292,9 @@ class SQLiteStore:
         region: int | None = None,
     ) -> ReportInfo:
         """Link a saved message to its report, starting a new report if it is the first copy."""
+        from s2_watch.exercise import exercise_kind
+
+        kind = exercise_kind(message)
         row = self.connection.execute(
             "SELECT report_id FROM messages WHERE id = ?", (message_id,)
         ).fetchone()
@@ -296,9 +304,9 @@ class SQLiteStore:
                 # The report follows the latest analysis of its first copy (a later, better
                 # analyzer such as Ollama can find a rules match was routine chat).
                 self.connection.execute(
-                    """UPDATE reports SET newsworthy = ?, category = ?, urgency = ?
+                    """UPDATE reports SET newsworthy = ?, category = ?, urgency = ?, exercise = ?
                        WHERE id = ? AND (SELECT MIN(id) FROM messages WHERE report_id = ?) = ?""",
-                    (int(result.newsworthy), result.category, result.urgency, report_id, report_id, message_id))
+                    (int(result.newsworthy), result.category, result.urgency, kind, report_id, report_id, message_id))
                 self.connection.commit()
             return self._report_info(report_id, new_report=False)
         text = report_text(message.raw_content)
@@ -318,10 +326,10 @@ class SQLiteStore:
         if match is None:
             cursor = self.connection.execute(
                 """INSERT INTO reports(report_text, first_seen, last_seen, copies, sources, first_source,
-                     sender, newsworthy, category, urgency, state, region)
-                   VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                     sender, newsworthy, category, urgency, state, region, exercise)
+                   VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (text, utc_iso(seen), utc_iso(seen), message.source_application, message.source_application,
-                 sender, int(newsworthy), category, urgency, state, region),
+                 sender, int(newsworthy), category, urgency, state, region, kind),
             )
             report_id, new_report = cursor.lastrowid, True
         else:
@@ -612,9 +620,14 @@ class SQLiteStore:
     # -- events ----------------------------------------------------------------------
 
     def assign_event(self, report_id: int, category: str, hazards: set[str], place, title: str,
-                     incident: str = "", terms: set[str] | None = None) -> int:
-        """Put a newsworthy report in its event (an existing one, or a new one); the event id."""
-        from s2_watch.events import EVENT_GAP, INCIDENT_GAP, EventCandidate, Place, choose_event, clean_title
+                     incident: str = "", terms: set[str] | None = None, text: str = "") -> int:
+        """Put a newsworthy report in its event (an existing one, or a new one); the event id.
+
+        ``text`` is the report's words when they may close the event ("power restored",
+        "warning cancelled"); a later report reopens a closed event.
+        """
+        from s2_watch.events import (EVENT_GAP, INCIDENT_GAP, EventCandidate, Place, all_clear, choose_event,
+                                     clean_title)
 
         terms = terms or set()
         title = clean_title(title, place)
@@ -670,8 +683,31 @@ class SQLiteStore:
                                                                         # set would match ever more stories
             )
         self.connection.execute("UPDATE reports SET event_id = ? WHERE id = ?", (event_id, report_id))
+        clear = all_clear(text) if text else ""
+        if clear:
+            self.connection.execute(
+                """UPDATE events SET closed_at = ?, close_reason = ?, closed_by = 'report'
+                   WHERE id = ? AND (closed_at = '' OR closed_at < ?)""",
+                (first_seen, clear, event_id, first_seen))
+        else:   # news after the closure: it isn't over after all
+            self.connection.execute(
+                "UPDATE events SET closed_at = '', close_reason = '', closed_by = '' WHERE id = ? AND closed_at != '' "
+                "AND closed_at < ?", (event_id, first_seen))
         self.connection.commit()
         return int(event_id)
+
+    def close_event(self, event_id: int, reason: str = "", when: datetime | None = None) -> None:
+        """The operator closes an event (a later report reopens it)."""
+        when = when or datetime.now(timezone.utc)
+        self.connection.execute(
+            "UPDATE events SET closed_at = ?, close_reason = ?, closed_by = 'operator' WHERE id = ?",
+            (utc_iso(when), reason.strip() or "closed by the operator", event_id))
+        self.connection.commit()
+
+    def reopen_event(self, event_id: int) -> None:
+        self.connection.execute(
+            "UPDATE events SET closed_at = '', close_reason = '', closed_by = '' WHERE id = ?", (event_id,))
+        self.connection.commit()
 
     def reports_needing_events(self, since: datetime) -> list[tuple[int, Message, str, str]]:
         """Newsworthy reports since ``since`` not yet in an event: (id, first copy, category, summary)."""
@@ -704,7 +740,7 @@ class SQLiteStore:
         rows = self.connection.execute(
             """SELECT e.id, e.title, e.category, e.state, e.region, e.first_seen, e.last_seen,
                       r.first_seen, r.sources, r.first_source, r.urgency, r.corroboration, r.status, r.lat, r.lon,
-                      r.sender
+                      r.sender, e.closed_at, e.close_reason, e.closed_by, r.exercise
                FROM events e JOIN reports r ON r.event_id = e.id
                WHERE e.last_seen >= ? AND r.newsworthy = 1
                ORDER BY e.last_seen DESC, r.first_seen""",
@@ -713,13 +749,16 @@ class SQLiteStore:
         rank = {"low": 1, "medium": 2, "high": 3}
         events: dict[int, dict] = {}
         for (event_id, title, category, state, region, first, last, seen, sources, first_source, urgency,
-             corroboration, status, lat, lon, sender) in rows:
+             corroboration, status, lat, lon, sender, closed_at, close_reason, closed_by, exercise) in rows:
             event = events.setdefault(event_id, {
                 "title": title, "category": category, "state": state, "region": region,
                 "first": datetime.fromisoformat(first), "last": datetime.fromisoformat(last),
                 "reports": 0, "sources": [], "urgency": "low", "official": "", "radio": None,
-                "official_time": None, "lead": None, "statuses": [], "points": []})
+                "official_time": None, "lead": None, "statuses": [], "points": [],
+                "closed_at": datetime.fromisoformat(closed_at) if closed_at else None,
+                "close_reason": close_reason, "closed_by": closed_by, "exercise": False})
             event["reports"] += 1
+            event["exercise"] = event["exercise"] or exercise == "exercise"
             for source in sources.split(","):
                 if source and source not in event["sources"]:
                     event["sources"].append(source)
@@ -758,8 +797,32 @@ class SQLiteStore:
             summaries.append(EventSummary(
                 event_id, event["title"], event["category"], event["state"], event["region"], event["first"],
                 event["last"], event["reports"], tuple(event["sources"]), event["urgency"], event["official"], lead,
-                tuple(event["statuses"]), event["points"]))
+                tuple(event["statuses"]), event["points"], event["closed_at"], event["close_reason"],
+                event["closed_by"], event["exercise"]))
         return summaries
+
+    def sender_track_records(self) -> dict:
+        """Each radio station's track record (s2_watch.senders), by call sign. Exercise and test
+        traffic doesn't count."""
+        from s2_watch.senders import TrackRecord, callsign
+
+        placeholders = ",".join("?" * len(OFFICIAL_SENDERS))
+        confirmed_events = {row[0] for row in self.connection.execute(
+            f"""SELECT DISTINCT event_id FROM reports WHERE event_id IS NOT NULL AND newsworthy = 1
+                AND first_source = 'OSINT' AND sender IN ({placeholders})""", sorted(OFFICIAL_SENDERS))}
+        rows = self.connection.execute(
+            """SELECT r.first_source, r.sender, r.status, r.corroboration, r.first_seen, r.event_id,
+                      CASE WHEN r.sender = '' THEN m.raw_content ELSE '' END
+               FROM reports r JOIN messages m ON m.id = (SELECT MIN(id) FROM messages WHERE report_id = r.id)
+               WHERE r.newsworthy = 1 AND r.first_source != 'OSINT' AND r.exercise = ''""").fetchall()
+        records: dict[str, TrackRecord] = {}
+        for source, sender, status, corroboration, first_seen, event_id, text in rows:
+            station = callsign(source, sender, text)
+            if not station:
+                continue
+            confirmed = bool(corroboration) or (event_id is not None and event_id in confirmed_events)
+            records.setdefault(station, TrackRecord(station)).add(datetime.fromisoformat(first_seen), confirmed, status)
+        return records
 
     def event_of_report(self, report_id: int) -> int | None:
         row = self.connection.execute("SELECT event_id FROM reports WHERE id = ?", (report_id,)).fetchone()
@@ -794,7 +857,7 @@ class SQLiteStore:
         rows = self.connection.execute(
             """SELECT r.id, r.first_seen, r.last_seen, r.copies, r.sources, r.first_source, r.sender, r.urgency,
                       r.corroboration, r.status, r.lat, r.lon, COALESCE(a.summary, ''), m.raw_content, r.status_note,
-                      m.fields_json
+                      r.exercise, m.fields_json
                FROM reports r
                JOIN messages m ON m.id = (SELECT MIN(id) FROM messages WHERE report_id = r.id)
                LEFT JOIN analysis_results a ON a.message_id = m.id
@@ -802,7 +865,7 @@ class SQLiteStore:
             (event_id,),
         ).fetchall()
         keys = ("report_id", "first_seen", "last_seen", "copies", "sources", "source", "sender", "urgency",
-                "corroboration", "status", "lat", "lon", "summary", "text", "status_note")
+                "corroboration", "status", "lat", "lon", "summary", "text", "status_note", "exercise")
         reports = []
         for row in rows:
             report = dict(zip(keys, row[:-1]))

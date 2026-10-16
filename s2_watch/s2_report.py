@@ -72,19 +72,20 @@ def timeline_time(value) -> str:
     return f"{when:%H%M}Z {day_label(when)}"
 
 
-def admiralty(source: str, sender: str, confirmed: bool, independent_sources: int) -> str:
+def admiralty(source: str, sender: str, confirmed: bool, independent_sources: int, grade: str = "") -> str:
     """A suggested Admiralty rating (reliability A–F, credibility 1–6) for the analyst to adjust.
 
-    Official government sources are A; news organisations C; individual radio stations F
-    (reliability not judged). Credibility is 1 when another independent source confirms
-    the report, 2 when several sources agree, 6 when it cannot yet be judged.
+    Official government sources are A; news organisations C; a radio station gets the grade
+    its track record suggests (s2_watch.senders), F when it can't be judged yet. Credibility
+    is 1 when another independent source confirms the report, 2 when several sources agree,
+    6 when it cannot yet be judged.
     """
     if source == "OSINT" and sender in OFFICIAL_SOURCES:
         reliability = "A"
     elif source == "OSINT":
         reliability = "C"
     else:
-        reliability = "F"
+        reliability = grade or "F"
     credibility = "1" if confirmed else "2" if independent_sources > 1 else "6"
     return f"[{reliability}{credibility}]"
 
@@ -103,8 +104,12 @@ def _source_name(report: dict) -> str:
     return f"{report['source']} ({sender})" if sender else report["source"]   # "—" separates source-line parts
 
 
-def source_lines(reports: list[dict], confirmed: bool) -> list[str]:
-    """Numbered source list, one line per distinct source, in first-heard order."""
+def source_lines(reports: list[dict], confirmed: bool, grades: dict[str, str] | None = None) -> list[str]:
+    """Numbered source list, one line per distinct source, in first-heard order. ``grades``:
+    call sign -> the reliability its track record suggests."""
+    from s2_watch.senders import callsign
+
+    grades = grades or {}
     independent = len({r["source"] for r in reports})
     lines, seen = [], set()
     for report in reports:
@@ -112,7 +117,8 @@ def source_lines(reports: list[dict], confirmed: bool) -> list[str]:
         if name in seen:
             continue
         seen.add(name)
-        rating = admiralty(report["source"], report.get("sender") or "", confirmed, independent)
+        station = callsign(report["source"], report.get("sender") or "", report.get("text") or "")
+        rating = admiralty(report["source"], report.get("sender") or "", confirmed, independent, grades.get(station, ""))
         heard = f"heard {timeline_time(report['first_seen'])}"
         what = "official report" if report["source"] == "OSINT" and (report.get("sender") in OFFICIAL_SOURCES) else \
             "open-source report" if report["source"] == "OSINT" else "radio report"
@@ -170,7 +176,7 @@ def _place(state: str, region, label: str = "") -> str:
 # -- follow-up report (one report or event) ----------------------------------------------
 
 def followup_report(facts, members: list[dict] | None = None, now: datetime | None = None,
-                    magcon: str = DEFAULT_MAGCON) -> str:
+                    magcon: str = DEFAULT_MAGCON, grades: dict[str, str] | None = None) -> str:
     """A MAGNET S2 report about one report and the event it belongs to."""
     now = now or datetime.now(timezone.utc)
     members = members or [{"first_seen": facts.message.received_at.isoformat(), "source": facts.message.source_application,
@@ -188,6 +194,9 @@ def followup_report(facts, members: list[dict] | None = None, now: datetime | No
     radio = [m for m in members if m["source"] != "OSINT"]
     sources = sorted({m["source"] for m in members})
     subject = facts.result.summary.replace("Coordinates in report", focus.split(",")[0])
+    exercise = any(m.get("exercise") == "exercise" for m in members) or subject.upper().startswith("EXERCISE")
+    if exercise and not subject.upper().startswith("EXERCISE"):
+        subject = f"EXERCISE: {subject}"
     fields = {
         "SUBJECT": subject,
         "PURPOSE": f"Provide intelligence assessment of {facts.result.category.lower()} reporting in {focus} "
@@ -242,18 +251,27 @@ def followup_report(facts, members: list[dict] | None = None, now: datetime | No
         "- Continue monitoring radio and open-source reporting for updates and official confirmation.",
         "- (Add actionable recommendations tied to the specific threats identified.)",
         "", "MAGNET GUIDANCE", "(Operator-specific actions; reference the PACE tier if communications posture is relevant.)",
-        "", "SOURCE LIST", *source_lines(members, confirmed),
+        "", "SOURCE LIST", *source_lines(members, confirmed, grades),
         "", "TAGS: " + ", ".join(make_tags(subject, focus, extra=(facts.result.category, "MAGNET S2", *sources))),
     ]
-    return "\n".join(lines)
+    return _exercise_banner(lines) if exercise else "\n".join(lines)
+
+
+def _exercise_banner(lines: list[str]) -> str:
+    """Exercise traffic is marked at the top and bottom, as exercise messages are."""
+    from s2_watch.exercise import BANNER
+
+    return "\n".join([BANNER, "", *lines, "", BANNER])
 
 
 # -- shift briefing (a period) ---------------------------------------------------------
 
 def briefing_report(events, now: datetime, hours: int, focus: set[int] | None = None,
                     last_briefing: datetime | None = None, magcon: str = DEFAULT_MAGCON,
-                    reports_of=None) -> str:
-    """A MAGNET S2 report summarising a watch period's events."""
+                    reports_of=None, grades: dict[str, str] | None = None) -> str:
+    """A MAGNET S2 report summarising a watch period's events. Closed events are listed as
+    resolved, not as current activity; quiet ones say how long they've been quiet."""
+    from s2_watch.events import quiet_hours
     from s2_watch.briefing import PRIORITY_ITEMS, URGENCY_RANK, priority_key
 
     from s2_watch.analysis.categories import NEWS_CATEGORIES
@@ -270,7 +288,12 @@ def briefing_report(events, now: datetime, hours: int, focus: set[int] | None = 
             if first_report:
                 words = " ".join(readable_text(Message(first_report["source"], first_report["text"])).split())
                 title = words[:90] + ("..." if len(words) > 90 else "")
+        if getattr(event, "exercise", False) and not title.upper().startswith("EXERCISE"):
+            title = f"EXERCISE: {title}"
         titles[event.event_id] = title
+    exercise = any(getattr(event, "exercise", False) for event in events)
+    resolved = [e for e in events if getattr(e, "closed_at", None) is not None]
+    events = [e for e in events if getattr(e, "closed_at", None) is None]
     ranked = sorted(events, key=lambda e: priority_key(e, focus), reverse=True)
     priority = [e for e in ranked if e.urgency in ("high", "medium")
                 and (e.region or any(source != "OSINT" for source in e.sources))][:PRIORITY_ITEMS]
@@ -280,7 +303,7 @@ def briefing_report(events, now: datetime, hours: int, focus: set[int] | None = 
     new = [e for e in events if last_briefing and e.first_seen > last_briefing]
     top = priority[0] if priority else None
     fields = {
-        "SUBJECT": f"Situation Briefing – {area}",
+        "SUBJECT": ("EXERCISE: " if exercise else "") + f"Situation Briefing – {area}",
         "PURPOSE": f"Provide a situational summary of newsworthy reporting for {area} over the last {hours} hours.",
         "DTG": magnet_dtg(now),
         "REPORTING PERIOD": period_label(start, now),
@@ -290,21 +313,26 @@ def briefing_report(events, now: datetime, hours: int, focus: set[int] | None = 
         "SOURCES": DEFAULT_SOURCES,
     }
     counts = {level: sum(e.urgency == level for e in events) for level in ("high", "medium")}
-    bluf = [f"{len(events)} events were reported in the period ({counts['high']} high and {counts['medium']} medium urgency); "
+    reported = "remain open" if resolved else "were reported in the period"
+    bluf = [f"{len(events)} events {reported} ({counts['high']} high and {counts['medium']} medium urgency); "
             f"{confirmed} are corroborated by official sources."]
     if top:
         bluf.insert(0, f"Most significant: {titles[top.event_id]} ({top.state or 'location unknown'}).")
     if last_briefing:
         bluf.append(f"{len(new)} are new since the last briefing.")
+    if resolved:
+        bluf.append(f"{len(resolved)} event{'s' if len(resolved) != 1 else ''} closed in the period.")
     situation = []
     timeline = []
     for event in priority:
         status = f"Corroborated by {event.official}" if event.official else "Not yet corroborated by official sources"
         lead = f"; radio reported {event.radio_lead_minutes} min ahead" if event.radio_lead_minutes else ""
         flag = " [NEW]" if event in new else ""
+        quiet = event.status(now) == "quiet" if hasattr(event, "status") else False
+        quiet_note = f"; no new reports for {quiet_hours(now - event.last_seen)} hours" if quiet else ""
         situation += [f"{titles[event.event_id]}:",
                       f"{event.reports} report{'s' if event.reports != 1 else ''} from {', '.join(event.sources)}; "
-                      f"{status}{lead}; urgency {event.urgency.upper()}.{flag}", ""]
+                      f"{status}{lead}; urgency {event.urgency.upper()}{quiet_note}.{flag}", ""]
         timeline.append(f"~{timeline_time(event.first_seen)} | {titles[event.event_id]}")
     by_category: dict[str, int] = {}
     for event in events:
@@ -316,13 +344,15 @@ def briefing_report(events, now: datetime, hours: int, focus: set[int] | None = 
     if reports_of is not None:
         for event in priority:
             sources.extend(reports_of(event.event_id))
-    source_list = source_lines(sorted(sources, key=lambda r: r["first_seen"]), confirmed > 0) if sources else \
+    source_list = source_lines(sorted(sources, key=lambda r: r["first_seen"]), confirmed > 0, grades) if sources else \
         ["[1] S2 Watch event log — radio and open-source reporting for the period"]
     lines = _header(fields) + [
         "", "SUMMARY (BLUF)", " ".join(bluf),
         "", "BACKGROUND", f"(Factual context for the period: standing conditions, MagCon basis, ongoing situations.)",
         "", "SITUATION", *(situation or ["No high- or medium-urgency events in the period.", ""]),
         "Other Activity:", f"Events by category: {other or 'none'}.",
+        *(["", "Resolved in the Period:"] if resolved else []),
+        *[f"- {titles[e.event_id]}: {e.close_reason or 'closed'} ({timeline_time(e.closed_at)})" for e in resolved],
         "", "Timeline of Known Activity:", *(timeline or ["— | No priority events"]),
         "", "COMMENTS / ASSESSMENT",
         "(Analytical layer in measured language: assessed, likely, indicates, suggests. Overall situation first.)",
@@ -337,7 +367,7 @@ def briefing_report(events, now: datetime, hours: int, focus: set[int] | None = 
         "", "TAGS: " + ", ".join(make_tags(*(titles[e.event_id] for e in priority), extra=("MAGNET S2", "situation briefing",
                                                                             *sorted(by_category)))),
     ]
-    return "\n".join(lines)
+    return _exercise_banner(lines) if exercise else "\n".join(lines)
 
 
 # -- reading an (edited) report back -----------------------------------------------------

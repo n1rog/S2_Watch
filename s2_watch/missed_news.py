@@ -23,6 +23,7 @@ from PySide6.QtCore import QObject, Signal
 from s2_watch.analysis.base import AnalysisResult
 from s2_watch.analysis.ollama import OllamaError, OllamaNewsAnalyzer, readable_text
 from s2_watch.dedup import report_text
+from s2_watch.exercise import exercise_kind
 from s2_watch.models import Message
 from s2_watch.storage import SQLiteStore
 
@@ -49,6 +50,8 @@ def is_fragment(text: str) -> bool:
 def worth_checking(message: Message) -> bool:
     if message.source_application == "OSINT":
         return False          # official items are all kept and judged by the rules already
+    if exercise_kind(message):
+        return False          # exercise and test traffic isn't a missed story
     body = readable_text(message)
     return (len(body) >= 20 and len(body.split()) >= 4 and not ROUTINE.match(body)
             and not is_fragment(message.raw_content))
