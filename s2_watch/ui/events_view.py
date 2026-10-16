@@ -87,6 +87,10 @@ class EventsTable(QTableWidget):
             lambda position: self.selected_events() and self.menu_requested.emit(
                 self.selected_events(), self.viewport().mapToGlobal(position)))
         self.cellDoubleClicked.connect(lambda row, _column: self._activate(row))
+        # Repaint the visible rows when the selection changes: after a refresh rebuilds the
+        # rows, Qt doesn't redraw the row it deselects, which stayed drawn as selected (until
+        # the list scrolled) when the operator clicked another event.
+        self.selectionModel().selectionChanged.connect(lambda *_: self.viewport().update())
         self._highlight_timer = QTimer(self)
         self._highlight_timer.setInterval(5000)
         self._highlight_timer.timeout.connect(self._fade_highlights)
