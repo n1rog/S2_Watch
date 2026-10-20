@@ -199,6 +199,8 @@ class LocationResolver:
     def __init__(self, geocoder=None) -> None:
         self.geocoder = geocoder
         self.gazetteer = load_gazetteer()
+        # The operator's corrections, checked first: (phrase pattern or message hash, location).
+        self._corrections: list[tuple[re.Pattern | str, ResolvedLocation]] = []
         self._state_pattern = _state_names_pattern(self.gazetteer)
         abbreviations = "|".join(self.gazetteer.state_names)
         names = "|".join(sorted((re.escape(n) for n in self.gazetteer.state_by_name), key=len, reverse=True))
@@ -213,7 +215,22 @@ class LocationResolver:
             rf"\b({_WORD}(?:\s+{_WORD}){{0,3}}),\s*(?:({abbreviations})|({names}))\b"
         )
 
+    def set_corrections(self, corrections: list[tuple[str, ResolvedLocation]]) -> None:
+        """Where the operator said places really are: a phrase ("BIXBY") wherever a message
+        uses it, or one message ("#msg:<hash>", see message_hash)."""
+        compiled: list[tuple[re.Pattern | str, ResolvedLocation]] = []
+        for phrase, location in corrections:
+            if phrase.startswith("#msg:"):
+                compiled.append((phrase, location))
+            elif normalize(phrase):
+                compiled.append((re.compile(r"\b" + re.escape(normalize(phrase)) + r"\b"), location))
+        self._corrections = compiled
+
     def resolve(self, message: Message) -> list[ResolvedLocation]:
+        if self._corrections:
+            corrected = self._corrected(message)
+            if corrected is not None:
+                return [corrected]
         fields = {key.casefold(): str(value) for key, value in message.fields.items()}
         # Numbers and words inside links are not locations.
         text = _URL.sub(" ", message.raw_content)
@@ -224,6 +241,20 @@ class LocationResolver:
             if found:
                 return [self.gazetteer.with_area(location) for location in dict.fromkeys(found)]
         return []
+
+    def _corrected(self, message: Message) -> ResolvedLocation | None:
+        own = f"#msg:{message_hash(message)}"
+        plain = None
+        for key, location in self._corrections:
+            if isinstance(key, str):
+                if key == own:
+                    return location
+                continue
+            if plain is None:
+                plain = normalize(normalize_text(_URL.sub(" ", message.raw_content)))
+            if key.search(plain):
+                return location
+        return None
 
     # -- context: states and regions named anywhere in the message ---------------------
 
@@ -435,6 +466,13 @@ class LocationResolver:
                              None, region)
             for region in context["regions"] if region in g.region_anchor
         ]
+
+
+def message_hash(message: Message) -> str:
+    """Identifies one message's text, for a correction that applies to it alone."""
+    import hashlib
+
+    return hashlib.sha1(f"{message.source_application}\x1f{message.raw_content}".encode("utf-8")).hexdigest()[:16]
 
 
 def normalize_text(text: str) -> str:

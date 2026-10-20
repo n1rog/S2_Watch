@@ -228,8 +228,9 @@ def followup_report(facts, members: list[dict] | None = None, now: datetime | No
             words = member.get("summary") or words
         situation.append(f"{timeline_time(member['first_seen'])}: {_source_name(member)} reported: "
                          f"\"{words[:400]}\"")
-    timeline = [f"~{timeline_time(m['first_seen'])} | {_source_name(m)}: {m.get('summary') or ' '.join(m['text'].split())[:160]}"
-                for m in members]
+    # The time the message gives (a relay may be heard hours later), else when it was heard.
+    timeline = [f"~{timeline_time(m.get('event_time') or m['first_seen'])} | {_source_name(m)}: "
+                f"{m.get('summary') or ' '.join(m['text'].split())[:160]}" for m in members]
     gaps = []
     if not confirmed:
         gaps.append("Has any official source (NWS, emergency management, law enforcement) confirmed the reporting?")
@@ -330,6 +331,8 @@ def briefing_report(events, now: datetime, hours: int, focus: set[int] | None = 
         flag = " [NEW]" if event in new else ""
         quiet = event.status(now) == "quiet" if hasattr(event, "status") else False
         quiet_note = f"; no new reports for {quiet_hours(now - event.last_seen)} hours" if quiet else ""
+        if hasattr(event, "single_source") and event.single_source(now):
+            status = "Single source, not confirmed by any other station or official source"
         situation += [f"{titles[event.event_id]}:",
                       f"{event.reports} report{'s' if event.reports != 1 else ''} from {', '.join(event.sources)}; "
                       f"{status}{lead}; urgency {event.urgency.upper()}{quiet_note}.{flag}", ""]
@@ -338,7 +341,9 @@ def briefing_report(events, now: datetime, hours: int, focus: set[int] | None = 
     for event in events:
         by_category[event.category] = by_category.get(event.category, 0) + 1
     other = "; ".join(f"{category} {count}" for category, count in sorted(by_category.items(), key=lambda kv: -kv[1]))
-    gaps = [f"- Is \"{titles[e.event_id]}\" confirmed by an official source?" for e in priority if not e.official][:6]
+    gaps = [f"- Can another station or an official source confirm \"{titles[e.event_id]}\"? (single source)"
+            if hasattr(e, "single_source") and e.single_source(now)
+            else f"- Is \"{titles[e.event_id]}\" confirmed by an official source?" for e in priority if not e.official][:6]
     gaps = gaps or ["- (No open questions identified.)"]
     sources: list[dict] = []
     if reports_of is not None:

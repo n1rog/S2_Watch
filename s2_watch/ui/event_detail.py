@@ -11,15 +11,23 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from html import escape
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import QUrl, Signal
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QHBoxLayout, QMenu, QPushButton, QTextBrowser, QToolButton, QVBoxLayout, QWidget
 
 from s2_watch.analysis.ollama import readable_text
 from s2_watch.events import quiet_hours
 from s2_watch.models import Message
 from s2_watch.senders import GRADE_WORDS, callsign
+from s2_watch.ui.metrics_view import is_dark
 
 STATUS_LABELS = {"interest": "Of interest", "followup": "Follow-up created", "ignored": "Ignored"}
+def _when(value) -> datetime:
+    when = datetime.fromisoformat(value) if isinstance(value, str) else value
+    return when if when.tzinfo else when.replace(tzinfo=timezone.utc)
+
+
+PLACE_WORDS = {"precise": "exact point", "city": "town", "county": "county", "grid": "grid square"}
 
 
 def useful_headline(headline: str, body: str) -> str:
@@ -36,6 +44,7 @@ class EventDetail(QWidget):
     edit_note = Signal(int)
     show_reports = Signal(int)
     close_requested = Signal(int)
+    fix_location = Signal(int)     # report id
     reopen_requested = Signal(int)
 
     def __init__(self, store, format_time, parent=None) -> None:
@@ -45,7 +54,8 @@ class EventDetail(QWidget):
         self.current = None
         self._shown_id = self._shown_html = None
         self.browser = QTextBrowser()
-        self.browser.setOpenExternalLinks(True)
+        self.browser.setOpenLinks(False)          # web links open in the browser; s2watch: links act here
+        self.browser.anchorClicked.connect(self._link)
         self.map_button = QPushButton("Show on map")
         self.map_button.clicked.connect(lambda: self.current and self.show_on_map.emit(self.current.event_id))
         self.draft_button = QPushButton("Draft follow-up…")
@@ -98,9 +108,19 @@ class EventDetail(QWidget):
             return                       # a refresh with nothing new: keep the reader's place
         scroll = self.browser.verticalScrollBar()
         position = scroll.value() if event.event_id == self._shown_id else 0
+        # Links readable in the current theme (the default blue is too dark on a dark one).
+        self.browser.document().setDefaultStyleSheet(f"a {{ color: {'#8ab4f8' if is_dark(self) else '#1a5fb4'}; }}")
         self.browser.setHtml(html)
         scroll.setValue(position)
         self._shown_id, self._shown_html = event.event_id, html
+
+    def _link(self, url: QUrl) -> None:
+        if url.scheme() == "s2watch":
+            action, _, value = url.path().partition("/")
+            if action == "fix-location" and value.isdigit():
+                self.fix_location.emit(int(value))
+        else:
+            QDesktopServices.openUrl(url)
 
     def _close_or_reopen(self) -> None:
         if self.current is None:
@@ -133,6 +153,9 @@ class EventDetail(QWidget):
         elif event.status(now) == "quiet":
             out.append(f"<p><b>Quiet:</b> no new reports for {quiet_hours(now - event.last_seen)} hours. "
                        "It may be over; close it if you know it is.</p>")
+        if event.single_source(now):
+            out.append(f"<p style='color:#e65100'>⚠ <b>Single source:</b> only one station or outlet has reported "
+                       f"this, and nothing has confirmed it in {quiet_hours(now - event.first_seen)} hours.</p>")
         if event.official:
             lead = (f" Radio reported it <b>{event.radio_lead_minutes} minutes</b> before the official source."
                     if event.radio_lead_minutes else "")
@@ -158,6 +181,9 @@ class EventDetail(QWidget):
             if record is not None:
                 track = (f" · track record <b>{record.grade}</b> ({e(GRADE_WORDS[record.grade])}: "
                          f"{e(record.explanation)})")
+            stated = report.get("event_time") or ""
+            if stated and abs((_when(report["first_seen"]) - _when(stated)).total_seconds()) >= 300:
+                track += f" · time in message <b>{e(self.format_time(stated))}</b>"
             drill = {"exercise": " · <b style='color:#c62828'>EXERCISE</b>",
                      "test": " · <b>TEST</b>"}.get(report.get("exercise") or "", "")
             copies = f" · {report['copies']} copies via {report['sources']}" if report.get("copies", 1) > 1 else ""
@@ -172,6 +198,12 @@ class EventDetail(QWidget):
             parts.append(f"<br>{e(body)}")
             if report.get("corroboration"):
                 parts.append(f"<br><span style='color:gray'>{e(report['corroboration'])}</span>")
+            place = ", ".join(str(part) for part in (report.get("state"), f"MARS Region {report['region']}"
+                                                     if report.get("region") else "") if part)
+            level = PLACE_WORDS.get(report.get("place_level") or "", "")
+            parts.append(f"<br><span style='color:gray'>Placed: {e(place) if place else 'no location'}"
+                         f"{' (' + level + ')' if level and place else ''}</span> "
+                         f"<a href='s2watch:fix-location/{report['report_id']}'>fix location</a>")
             if url:
                 parts.append(f"<br><a href='{e(url)}'>{e(url)}</a>")
             out.append("".join(parts) + "</p>")

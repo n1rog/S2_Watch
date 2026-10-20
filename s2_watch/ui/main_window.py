@@ -21,6 +21,8 @@ from s2_watch.backups import back_up_in_background, backup_folder
 from s2_watch.s2_report import DEFAULT_MAGCON, briefing_report as s2_briefing_report, followup_report as s2_followup_report, js8_report
 from s2_watch.followup import FollowUpFacts
 from s2_watch.ui.drafts_dialog import DraftsDialog
+from s2_watch.ui.fix_location_dialog import FixLocationDialog
+from s2_watch.ui.keyword_noise_dialog import KeywordNoiseDialog
 from s2_watch.ui.senders_dialog import SendersDialog
 from s2_watch.ui.event_detail import EventDetail
 from s2_watch.ui.events_view import EventsTable, EventsView
@@ -76,7 +78,8 @@ from s2_watch.corroboration import corroborate, official_items
 from s2_watch.digest import digest_label
 from s2_watch.default_forms import install_default_forms
 from s2_watch.adapters import osint as osint_sources
-from s2_watch.locating import LocationResolver
+from s2_watch.geocoding import NominatimGeocoder
+from s2_watch.locating import LocationResolver, message_hash
 from s2_watch.ui.watch_form_dialog import WatchFormDialog
 from s2_watch.ui.watch_forms_view import WatchFormsPage
 
@@ -523,6 +526,8 @@ class MainWindow(QMainWindow):
             lambda: self.draft_briefing(int(self.review_duration.currentData())))
         reports_menu.addAction("Saved Reports && Briefings…").triggered.connect(self.show_saved_drafts)
         reports_menu.addAction("Sender Track Records…").triggered.connect(self.show_sender_records)
+        reports_menu.addAction("Keyword Noise…").triggered.connect(self.show_keyword_noise)
+        self._noise_dialog = None
         reports_menu.addSeparator()
         reports_menu.addAction("Show Events").triggered.connect(lambda: self.tabs.setCurrentWidget(self.events_view))
         help_menu = self.menuBar().addMenu("Help")
@@ -974,7 +979,26 @@ class MainWindow(QMainWindow):
         detail.edit_note.connect(lambda event_id: self.edit_note(self.event_report_ids(event_id)))
         detail.show_reports.connect(lambda event_id: self.show_reports(self.event_report_ids(event_id)))
         detail.close_requested.connect(self.close_event)
+        detail.fix_location.connect(self.fix_report_location)
         detail.reopen_requested.connect(self.reopen_event)
+
+    def fix_report_location(self, report_id: int) -> None:
+        found = self.store.report_first_message(report_id)
+        if found is None:
+            return
+        message = found[0]
+        resolver = LocationResolver()
+        resolver.set_corrections(self.store.place_corrections())
+        current = next(iter(resolver.resolve(message)), None)
+        geocoder = NominatimGeocoder(self.store.get_geocode, self.store.set_geocode)
+        dialog = FixLocationDialog(message, current, resolver, geocoder.geocode, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted or dialog.location is None:
+            return
+        key = dialog.correction_key() or f"#msg:{message_hash(message)}"
+        self.store.save_place_correction(key, dialog.location)
+        self.store.correct_report_location(report_id, dialog.location)
+        self.rescan_sources()        # markers move; remembered phrases apply to every message
+        self.event_states_changed()
 
     def close_event(self, event_id: int) -> None:
         reason, accepted = QInputDialog.getText(
@@ -1139,9 +1163,36 @@ class MainWindow(QMainWindow):
             return {}
         return {str(category): [str(word) for word in words] for category, words in keywords.items()}
 
+    def excluded_keywords(self) -> dict[str, list[str]]:
+        """Words the operator stopped using, per category (Reports → Keyword Noise)."""
+        try:
+            words = json.loads(self.store.get_setting("keywords.excluded", "{}") or "{}")
+        except ValueError:
+            return {}
+        return {str(category): [str(word) for word in items] for category, items in words.items()}
+
+    def set_keyword_excluded(self, category: str, keyword: str, excluded: bool) -> None:
+        words = self.excluded_keywords()
+        current = words.setdefault(category, [])
+        if excluded and keyword not in current:
+            current.append(keyword)
+        elif not excluded and keyword in current:
+            current.remove(keyword)
+        self.store.set_setting("keywords.excluded", json.dumps({c: w for c, w in words.items() if w}, sort_keys=True))
+        self.refresh_forms()        # a new analyzer, and the watch period checked again
+        if self._noise_dialog is not None:
+            self._noise_dialog.refresh(self.excluded_keywords())
+
+    def show_keyword_noise(self) -> None:
+        self._noise_dialog = KeywordNoiseDialog(self.store, self.excluded_keywords(), self)
+        self._noise_dialog.stop_requested.connect(lambda c, k: self.set_keyword_excluded(c, k, True))
+        self._noise_dialog.resume_requested.connect(lambda c, k: self.set_keyword_excluded(c, k, False))
+        self._noise_dialog.exec()
+        self._noise_dialog = None
+
     def create_analyzer(self) -> NewsAnalyzer | None:
         mode = self.analysis_mode.checkedAction().data()
-        rules = RuleBasedNewsAnalyzer.with_keywords(self.operator_keywords())
+        rules = RuleBasedNewsAnalyzer.with_keywords(self.operator_keywords(), self.excluded_keywords())
         if mode == "rules":
             return rules
         # Rules first; the model reads only the messages the rules flag.

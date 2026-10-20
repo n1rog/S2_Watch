@@ -1,3 +1,5 @@
+import hashlib
+import json
 import re
 from dataclasses import dataclass
 from functools import cached_property
@@ -26,12 +28,16 @@ class Rule:
             + [re.compile(pattern, re.IGNORECASE) for pattern in self.patterns]
         )
 
-    def matches(self, content: str) -> list[str]:
+    def matches(self, content: str, skip: frozenset[str] = frozenset()) -> list[str]:
+        """The first match of each term or pattern, passing over words in ``skip`` (the
+        operator stopped using them)."""
         found = []
         for pattern in self._compiled:
-            match = pattern.search(content)
-            if match:
-                found.append(match.group(0).casefold())
+            for match in pattern.finditer(content):
+                word = match.group(0).casefold()
+                if word not in skip:
+                    found.append(word)
+                    break
         return found
 
 
@@ -105,17 +111,35 @@ class RuleBasedNewsAnalyzer(NewsAnalyzer):
         Rule("Climate / Environment", (), "medium", (ENVIRONMENTAL_HAZARDS_PATTERN,)),
     )
 
-    def __init__(self, rules: tuple[Rule, ...] = DEFAULT_RULES) -> None:
+    def __init__(self, rules: tuple[Rule, ...] = DEFAULT_RULES,
+                 excluded: dict[str, list[str]] | None = None) -> None:
         self.rules = rules
+        # Words the operator stopped using, per category (Reports → Keyword Noise).
+        self.excluded = {category: frozenset(word.casefold() for word in words)
+                         for category, words in (excluded or {}).items()}
+        self._keywords: dict[str, list[str]] = {}
+
+    @property
+    def name(self) -> str:
+        """"rules", or "rules:<fingerprint>" with the operator's added or stopped words: a
+        change re-checks messages already analysed (saved results are reused by name)."""
+        excluded = {category: sorted(words) for category, words in self.excluded.items() if words}
+        keywords = {category: sorted(words) for category, words in self._keywords.items() if words}
+        if not excluded and not keywords:
+            return "rules"
+        signature = json.dumps([keywords, excluded], sort_keys=True)
+        return "rules:" + hashlib.sha1(signature.encode("utf-8")).hexdigest()[:10]
 
     @classmethod
-    def with_keywords(cls, keywords: dict[str, list[str]] | None) -> "RuleBasedNewsAnalyzer":
+    def with_keywords(cls, keywords: dict[str, list[str]] | None,
+                      excluded: dict[str, list[str]] | None = None) -> "RuleBasedNewsAnalyzer":
         """The built-in rules plus the operator's own keywords per category (added from
-        Possible Misses), each matching at the start of a word, medium urgency."""
+        Possible Misses), each matching at the start of a word, medium urgency; ``excluded``
+        words no longer count for their category."""
         extra = tuple(Rule(category, tuple(words), "medium") for category, words in (keywords or {}).items() if words)
-        return cls(cls.DEFAULT_RULES + extra)
-
-    name = "rules"
+        analyzer = cls(cls.DEFAULT_RULES + extra, excluded)
+        analyzer._keywords = {category: list(words) for category, words in (keywords or {}).items()}
+        return analyzer
 
     def analyze(self, message: Message) -> AnalysisResult:
         structured = " ".join(
@@ -126,7 +150,7 @@ class RuleBasedNewsAnalyzer(NewsAnalyzer):
         matches = [
             (rule, term)
             for rule in self.rules
-            for term in rule.matches(content)
+            for term in rule.matches(content, self.excluded.get(rule.category, frozenset()))
         ]
         if not matches:
             return AnalysisResult(False, "routine", "low", message.raw_content, 0.1)

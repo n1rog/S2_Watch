@@ -80,6 +80,32 @@ Quiet or Closed; only radio and official reports close events, and all-clear rep
 saved before events could close are applied once on the first start of 0.28; closed events are greyed, the Events tab can hide them, and
 briefings list them under **Resolved in the Period** instead of as current activity.
 
+**Single source.** An event radio reported, but only one station has (copies and relays
+count once, the same call sign twice is one station), with no official confirmation after
+2 hours, is flagged **Single source** in the event panel and in briefings, whose
+intelligence gaps then ask whether another station or an official source can confirm it.
+News stories alone aren't flagged; most are one article.
+
+**Where a report is.** The event panel shows where each report was placed, with a **fix
+location** link: type where it really is (Town, ST · a county · coordinates · a grid
+square). Towns S2 Watch doesn't list can be looked up on OpenStreetMap, only when you
+press the button. Tick **Remember** and every message using the same words ("BIXBY")
+is placed there from then on; otherwise the correction applies to that message only.
+
+**Time in message.** A radio report's own time ("AT 1420Z", "152330Z", "9:15 AM CDT", a
+MagCommstat or MAGNET date-time stamp) is shown beside when it was heard, and follow-up
+timelines use it. Forecast wording ("until 1800Z", "expected at") and times later than
+the message was heard don't count. Radio lead still compares when reports were heard.
+
+## Keyword noise
+
+**Reports → Keyword Noise** lists the keywords that flagged newsworthy reports you then
+marked Ignored, noisiest first, with how many came from radio and how many from feeds.
+**Stop using this word** and it no longer makes a report news in that category (other
+words in the same message still can), for every source; **Use again** undoes it. The
+watch period is then checked again with the new words, as it is after adding a keyword
+from Possible Misses.
+
 ## Exercise traffic
 
 Clear exercise markers ("EXERCISE EXERCISE EXERCISE", "THIS IS A DRILL", "exercise

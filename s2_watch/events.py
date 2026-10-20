@@ -21,6 +21,7 @@ DEFAULT_RADIUS_KM = 100
 RADIUS_KM = {"earthquake": 150, "fire": 80, "tropical": 250, "winter": 150, "heat": 200}
 SPECIFIC_LEVELS = {"precise", "city", "county", "grid"}
 INCIDENT_GAP = timedelta(days=30)     # a named fire is one event however long it burns
+SINGLE_SOURCE_AFTER = timedelta(hours=2)   # unconfirmed this long from one source: say so
 STALE_AFTER = timedelta(hours=12)     # no reports this long: the event shows as quiet (Display setting)
 
 
@@ -97,6 +98,15 @@ class EventSummary:
     close_reason: str = ""
     closed_by: str = ""                 # "report" or "operator"
     exercise: bool = False              # its reports are exercise traffic
+    independent_sources: int = 0        # distinct stations and outlets (copies and relays count once)
+
+    def single_source(self, now: datetime) -> bool:
+        """Radio reported it, but only one station (or outlet) has, no official source has
+        confirmed it, and it has had SINGLE_SOURCE_AFTER to be. (A news story alone isn't
+        flagged: most are one article, and analysts read them as such.)"""
+        radio = any(source != "OSINT" for source in self.sources)
+        return (radio and not self.official and self.closed_at is None and self.independent_sources == 1
+                and now - self.first_seen >= SINGLE_SOURCE_AFTER)
 
     def status(self, now: datetime) -> str:
         """"closed", "quiet" (no reports for STALE_AFTER), or "active"."""

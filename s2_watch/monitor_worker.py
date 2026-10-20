@@ -76,6 +76,7 @@ class MonitorWorker(QObject):
     @Slot()
     def start(self) -> None:
         self.store = SQLiteStore(self.database_path)
+        self.resolver.set_corrections(self.store.place_corrections())
         self._timer = QTimer(self)
         self._timer.timeout.connect(self.poll)
         self._timer.start(1000)
@@ -111,6 +112,8 @@ class MonitorWorker(QObject):
             if not any(adapter is new for new in config.adapters):
                 adapter.close()
         self.adapters = list(config.adapters)
+        if self.store:
+            self.resolver.set_corrections(self.store.place_corrections())   # the operator's latest fixes
         self.resolver.geocoder = (
             NominatimGeocoder(self.store.get_geocode, self.store.set_geocode)
             if config.geocoding and self.store else None
