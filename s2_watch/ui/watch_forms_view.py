@@ -11,7 +11,8 @@ import re
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
-    QAbstractItemView, QCheckBox, QGridLayout, QGroupBox, QHBoxLayout, QHeaderView, QLabel, QMenu, QPushButton,
+    QAbstractItemView, QCheckBox, QGroupBox, QHBoxLayout, QHeaderView, QLabel, QMenu, QPushButton, QSplitter,
+    QTableWidget, QTableWidgetItem,
     QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
@@ -210,35 +211,49 @@ class WatchFormsPage(QWidget):
         forms_layout.addLayout(buttons)
 
         osint_box = QGroupBox("OSINT sources (official and open feeds from the internet)")
-        osint_layout = QGridLayout(osint_box)
+        osint_layout = QVBoxLayout(osint_box)
         note = QLabel("Turning a source off stops new items from it. Reports already saved stay until they "
                       "leave the watch period.")
         note.setWordWrap(True)
-        osint_layout.addWidget(note, 0, 0, 1, 4)
+        osint_layout.addWidget(note)
+        # One row per source: its switch, how often it's fetched, and how it's doing.
+        self.osint_table = QTableWidget(len(osint_sources), 3)
+        self.osint_table.setHorizontalHeaderLabels(("Source", "Fetched", "Status"))
+        self.osint_table.verticalHeader().setVisible(False)
+        self.osint_table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        self.osint_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.osint_table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        header = self.osint_table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
         self.osint_boxes: dict[str, QCheckBox] = {}
-        self.osint_status: dict[str, QLabel] = {}
-        self.osint_schedule: dict[str, str] = {}
-        for index, (key, (label, schedule)) in enumerate(osint_sources.items()):
+        self.osint_status: dict[str, QTableWidgetItem] = {}
+        for row, (key, (label, schedule)) in enumerate(osint_sources.items()):
             box = QCheckBox(label)
             box.setChecked(key in enabled_sources)
             box.toggled.connect(lambda on, key=key: self.osint_source_toggled.emit(key, on))
-            status = QLabel(schedule)
-            status.setEnabled(False)          # greyed: secondary information
-            status.setWordWrap(True)
+            box.toggled.connect(lambda _on: self.set_osint_status(self._last_status))
+            self.osint_table.setCellWidget(row, 0, box)
+            self.osint_table.setItem(row, 1, QTableWidgetItem(schedule))
+            status = QTableWidgetItem("")
+            self.osint_table.setItem(row, 2, status)
             self.osint_boxes[key] = box
             self.osint_status[key] = status
-            self.osint_schedule[key] = schedule
-            row, column = 1 + index // 2, (index % 2) * 2
-            osint_layout.addWidget(box, row, column)
-            osint_layout.addWidget(status, row, column + 1)
-        osint_layout.setColumnStretch(1, 1)
-        osint_layout.setColumnStretch(3, 1)
-        osint_layout.setHorizontalSpacing(12)
+        self.osint_table.resizeRowsToContents()
+        self._last_status: dict[str, str] = {}
+        osint_layout.addWidget(self.osint_table)
 
+        # The divider between forms and sources can be dragged.
+        splitter = QSplitter(Qt.Orientation.Vertical)
+        splitter.addWidget(forms_box)
+        splitter.addWidget(osint_box)
+        splitter.setStretchFactor(0, 1)
+        splitter.setStretchFactor(1, 1)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(forms_box, 3)
-        layout.addWidget(osint_box)
+        layout.addWidget(splitter)
+        self.set_osint_status({})
         self._selection_changed()
 
     def set_forms(self, forms: list[WatchForm]) -> None:
@@ -275,11 +290,10 @@ class WatchFormsPage(QWidget):
 
     def set_osint_status(self, status: dict[str, str]) -> None:
         """Per source: "updated 14:02", "failing: ...", or "" when not fetched yet."""
-        for key, label in self.osint_status.items():
-            if not self.osint_boxes[key].isChecked():
-                label.setText(f"off · {self.osint_schedule[key]}")
-            else:
-                label.setText(" · ".join(part for part in (self.osint_schedule[key], status.get(key, "")) if part))
+        self._last_status = dict(status)
+        for key, item in self.osint_status.items():
+            item.setText(status.get(key, "") if self.osint_boxes[key].isChecked() else "off")
+            item.setToolTip(item.text())
 
     def selected_form(self) -> WatchForm | None:
         item = self.tree.currentItem()

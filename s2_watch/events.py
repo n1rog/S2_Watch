@@ -193,6 +193,15 @@ def incident_key(message) -> str:
         return f"quake:{message.fields['message_id']}"
     if kind == "FAA TFR" and message.fields.get("message_id"):
         return f"tfr:{message.fields['message_id']}"
+    # One storm, volcano, river gauge, state outage, airport or worldwide disaster is one
+    # event however many updates it has; a kind of space weather is one event while it lasts.
+    for kind_name, field_name, prefix in (("TROPICAL CYCLONE", "storm_id", "storm"), ("VOLCANO", "volcano", "volcano"),
+                                          ("RIVER FLOOD", "gauge", "gauge"), ("INTERNET OUTAGE", "entity", "outage"),
+                                          ("AIRPORT STATUS", "airport", "airport"), ("WORLD DISASTER", "event", "gdacs")):
+        if kind == kind_name and message.fields.get(field_name):
+            return f"{prefix}:{message.fields[field_name]}"
+    if kind == "SPACE WEATHER" and message.fields.get("scale"):
+        return f"space:{message.fields['scale'][0]}"
     return ""
 
 

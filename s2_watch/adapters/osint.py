@@ -311,9 +311,14 @@ def last_updated(name: str) -> datetime | None:
         return _UPDATED.get(name)
 
 
+from s2_watch.adapters import osint_more  # noqa: E402  (the newer sources)
+
 FETCHERS = {"gdelt": fetch_gdelt, "faa": fetch_faa_security_tfrs, "state": fetch_state_advisories,
             "fema": fetch_fema_declarations, "usgs": fetch_usgs_earthquakes, "spc": fetch_spc_storm_reports,
-            "nifc": fetch_nifc_wildfires}
+            "nifc": fetch_nifc_wildfires, **osint_more.FETCHERS}
+SOURCE_LABELS.update(osint_more.SOURCE_LABELS)
+SCHEDULE.update(osint_more.SCHEDULE)
+DEFAULT_OFF = set(osint_more.DEFAULT_OFF)
 
 
 class OsintAdapter:

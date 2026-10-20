@@ -53,8 +53,8 @@ def test_osint_sources_have_their_own_switches() -> None:
     assert page.osint_boxes["usgs"].isChecked() and not page.osint_boxes["gdelt"].isChecked()
     page.osint_boxes["gdelt"].setChecked(True)
     assert switched == [("gdelt", True)]
-    page.set_osint_status({"usgs": "updated 14:02"})
-    assert page.osint_status["usgs"].text() == "every 10 min · updated 14:02"
+    page.set_osint_status({"usgs": "updated 14:02", "gdelt": "updated 14:05"})
+    assert page.osint_status["usgs"].text() == "updated 14:02" and page.osint_status["gdelt"].text() == "updated 14:05"
 
 
 def test_an_osint_adapter_with_no_sources_fetches_nothing() -> None:

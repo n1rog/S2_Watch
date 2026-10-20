@@ -80,6 +80,26 @@ WEATHER_PATTERNS = (
 )
 
 
+# Wording of the official and open feeds added in 0.29 (public alerts, space weather,
+# airports, volcanoes, cyber, borders) that the category patterns don't cover.
+FEED_RULES = (
+    Rule("Climate / Environment", (), "high", (
+        r"\bevacuation\s+(?:immediate|orders?)\b", r"\bshelter[-\s]+in[-\s]+place\b",
+        r"\b(?:debris\s+flow|mudslides?|landslides?|storm\s+surge|tsunamis?)\b", r"\bhazardous\s+materials?\s+warning\b",
+        r"\bvolcano:.*\b(?:watch|warning)\b", r"\beruptions?\b", r"\btropical\s+cyclones?\b")),
+    Rule("Crime", (), "high", (
+        r"\blaw\s+enforcement\s+warning\b", r"\bchild\s+abduction\s+emergency\b", r"\bamber\s+alert\b",
+        r"\bblue\s+alert\b", r"\bmissing\s+(?:and\s+)?endangered\b", r"\bsilver\s+alert\b", r"\bcivil\s+danger\s+warning\b")),
+    Rule("Infrastructure", (), "high", (
+        r"\b911\s+(?:telephone\s+)?outage\b", r"\bnoaa\s+scale\s+(?:g[45]|r[345]|s[345])\b")),
+    Rule("Infrastructure", (), "medium", (
+        r"\bspace\s+weather\b", r"\bground\s+stop\b", r"\bairport\s+closed\b",
+        r"\bknown\s+exploited\s+vulnerability\b", r"\bborder\s+crossing\s+(?:closed|temporarily\s+closed)\b")),
+    # Any other public alert an authority sent through IPAWS (road closures, local emergencies).
+    Rule("Infrastructure", (), "low", (r"^public\s+alert\s+\(ipaws\)",)),
+)
+
+
 class RuleBasedNewsAnalyzer(NewsAnalyzer):
     """Deterministic, offline classifier intended as a safe baseline."""
 
@@ -109,6 +129,7 @@ class RuleBasedNewsAnalyzer(NewsAnalyzer):
         *(Rule(category, (), "medium", (pattern,)) for category, pattern in CATEGORY_PATTERNS.items()
           if category != "Climate / Environment"),
         Rule("Climate / Environment", (), "medium", (ENVIRONMENTAL_HAZARDS_PATTERN,)),
+        *FEED_RULES,
     )
 
     def __init__(self, rules: tuple[Rule, ...] = DEFAULT_RULES,

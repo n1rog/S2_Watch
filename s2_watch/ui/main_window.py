@@ -84,6 +84,8 @@ from s2_watch.corroboration import corroborate, official_items
 from s2_watch.digest import digest_label
 from s2_watch.default_forms import install_default_forms
 from s2_watch.adapters import osint as osint_sources
+from s2_watch.adapters import osint_more
+from s2_watch.adapters.aprs_is import AprsIsAdapter
 from s2_watch.geocoding import NominatimGeocoder
 from s2_watch.locating import LocationResolver, message_hash
 from s2_watch.ui.watch_form_dialog import WatchFormDialog
@@ -456,6 +458,24 @@ class MainWindow(QMainWindow):
         sources_layout.addRow("FLMSG message directory", self.flmsg_path)
         sources_layout.addRow("JS8SuperSpotter database", self.superspotter_path)
         sources_layout.addRow("Review existing feeder data from:", self.review_duration)
+        callsign = self.store.get_setting("operator.callsign", "").strip().upper()
+        self.aprs_enabled = QCheckBox("Read APRS bulletins from APRS-IS (internet, receive-only)")
+        self.aprs_enabled.setChecked(self.store.get_setting("aprs.enabled", "0") == "1")
+        self.aprs_login = QLineEdit(self.store.get_setting("aprs.login", f"{callsign}-13" if callsign else ""))
+        self.aprs_login.setPlaceholderText("your call sign with an SSID, e.g. N0ABC-13")
+        self.aprs_login.setToolTip("APRS-IS servers refuse anonymous logins. Receive-only (passcode -1): nothing is "
+                                   "sent to RF. Use an SSID your own APRS software doesn't use.")
+        self.aprs_enabled.toggled.connect(self.aprs_settings_changed)
+        self.aprs_login.editingFinished.connect(self.aprs_settings_changed)
+        self.firms_key = QLineEdit(self.store.get_setting("osint.firms_key", ""))
+        self.firms_key.setPlaceholderText("free key from firms.modaps.eosdis.nasa.gov/api/map_key")
+        self.firms_key.setToolTip("Turns on satellite fire detections (Watch Forms → OSINT sources). Kept on this "
+                                  "computer and sent only to NASA FIRMS.")
+        osint_more.set_firms_key(self.firms_key.text())
+        self.firms_key.editingFinished.connect(self.firms_key_changed)
+        sources_layout.addRow("NASA FIRMS map key:", self.firms_key)
+        sources_layout.addRow(self.aprs_enabled)
+        sources_layout.addRow("APRS-IS login:", self.aprs_login)
         sources_layout.addRow(connect)
         sources_layout.addRow(status_group)
         self.sources_dialog = self.create_settings_dialog("Sources", sources_layout)
@@ -854,14 +874,37 @@ class MainWindow(QMainWindow):
         self.commstat_adapter = CommstatSQLiteAdapter(self.commstat_path.text().strip(), lookback)
         self.flmsg_adapter = FLMSGFileAdapter(self.flmsg_path.text().strip(), lookback)
         self.superspotter_adapter = JS8SuperSpotterSQLiteAdapter(self.superspotter_path.text().strip(), lookback)
+        self.aprs_adapter = (AprsIsAdapter(login=self.store.get_setting("aprs.login", ""))
+                             if self.store.get_setting("aprs.enabled", "0") == "1" else None)
         self.analyst_adapter = AnalystAdapter(self.store.analyst_entries(datetime.now(timezone.utc) - lookback))
         enabled = self.enabled_osint_sources()
         self.osint_adapter = OsintAdapter(lookback, {name: fetch for name, fetch in osint_sources.FETCHERS.items()
                                                      if name in enabled})
 
+    def aprs_settings_changed(self) -> None:
+        enabled, login = self.aprs_enabled.isChecked(), self.aprs_login.text().strip().upper()
+        if (("1" if enabled else "0"), login) == (self.store.get_setting("aprs.enabled", "0"),
+                                                   self.store.get_setting("aprs.login", "")):
+            return
+        self.store.set_setting("aprs.enabled", "1" if enabled else "0")
+        self.store.set_setting("aprs.login", login)
+        self.rescan_sources()
+
+    def firms_key_changed(self) -> None:
+        key = self.firms_key.text().strip()
+        if key == self.store.get_setting("osint.firms_key", ""):
+            return
+        self.store.set_setting("osint.firms_key", key)
+        osint_more.set_firms_key(key)
+        osint_sources.forget("firms")
+        if key and "firms" not in self.enabled_osint_sources():
+            self.watch_forms_page.osint_boxes["firms"].setChecked(True)   # a key means: use it
+        else:
+            self.rescan_sources()
+
     def enabled_osint_sources(self) -> set[str]:
         return {name for name in osint_sources.FETCHERS
-                if self.store.get_setting(f"osint.source.{name}", "1") == "1"}
+                if self.store.get_setting(f"osint.source.{name}", "0" if name in osint_sources.DEFAULT_OFF else "1") == "1"}
 
     def osint_source_toggled(self, name: str, enabled: bool) -> None:
         self.store.set_setting(f"osint.source.{name}", "1" if enabled else "0")
@@ -1181,6 +1224,8 @@ class MainWindow(QMainWindow):
                 adapters.append(self.osint_adapter)
             if getattr(self, "analyst_adapter", None):
                 adapters.append(self.analyst_adapter)
+            if getattr(self, "aprs_adapter", None):
+                adapters.append(self.aprs_adapter)
             self._monitor_forms = self.store.list_watch_forms()
             self._analyzer = self.create_analyzer()
             self.worker_config.emit(MonitorConfig(
@@ -1407,6 +1452,7 @@ class MainWindow(QMainWindow):
             ("Commstat", self.commstat_adapter),
             ("FLMSG", self.flmsg_adapter),
             ("JS8SuperSpotter", self.superspotter_adapter),
+            ("APRS", getattr(self, "aprs_adapter", None)),
             ("OSINT", self.osint_adapter),
         ):
             if adapter:
@@ -1428,13 +1474,14 @@ class MainWindow(QMainWindow):
             "Commstat": self.commstat_adapter,
             "FLMSG": self.flmsg_adapter,
             "JS8SuperSpotter": self.superspotter_adapter,
+            "APRS": getattr(self, "aprs_adapter", None),
             "OSINT": self.osint_adapter,
         }
         monitored = self.monitored_applications()
         for application, adapter in adapters.items():
             status = self.application_status(application, adapter, monitored)
             connected = status.startswith("Connected")
-            if application not in monitored:
+            if application not in monitored or status.startswith(("Off", "Needs")):
                 color = "#757575"
             else:
                 color = "#2e7d32" if connected else "#c62828"
@@ -1454,6 +1501,8 @@ class MainWindow(QMainWindow):
         # their own status would read "Disconnected" even when the application is running.
         if application not in monitored:
             return self.NOT_MONITORED
+        if adapter is None and application == "APRS":
+            return "Off (turn on in Configuration → Sources)"
         return getattr(adapter, "status", "Disconnected") if adapter else "Disconnected"
 
     def handle_batch(self, batch: list[ProcessedMessage]) -> None:
@@ -1756,7 +1805,9 @@ class MainWindow(QMainWindow):
 
     def refresh_official(self) -> None:
         self.official = official_items(
-            osint_sources.cached_messages({"EARTHQUAKE", "SPC STORM REPORT", "WILDFIRE", "FEMA DECLARATION", "FAA TFR"}),
+            osint_sources.cached_messages({"EARTHQUAKE", "SPC STORM REPORT", "WILDFIRE", "FEMA DECLARATION", "FAA TFR",
+                                           "STORM REPORT", "RIVER FLOOD", "TROPICAL CYCLONE", "FIRE DETECTION",
+                                           "IPAWS ALERT"}),
             self._official_resolver,
         )
         for row in range(self.analysis.rowCount()):

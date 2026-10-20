@@ -117,6 +117,25 @@ def official_items(messages, resolver=None) -> list[OfficialItem]:
             if hazards:
                 items.append(OfficialItem("FEMA", f"{incident} declaration", hazards, when, state=fields["state"],
                                           window=timedelta(days=30), rank=1))
+        elif kind in ("STORM REPORT", "RIVER FLOOD") and lat is not None:
+            found = hazards(message.raw_content) or ({"flood"} if kind == "RIVER FLOOD" else set())
+            if found:
+                items.append(OfficialItem("NWS", "storm report" if kind == "STORM REPORT" else "river gauge", found,
+                                          when, lat, lon, radius_km=50 if kind == "STORM REPORT" else 60,
+                                          window=timedelta(hours=12) if kind == "STORM REPORT" else timedelta(days=2),
+                                          rank=3))
+        elif kind == "TROPICAL CYCLONE" and lat is not None:
+            items.append(OfficialItem("NHC", message.raw_content.split(":", 1)[-1].split("—", 1)[0].strip(),
+                                      hazards(message.raw_content) | {"wind", "flood"}, when, lat, lon, radius_km=400,
+                                      window=timedelta(days=2), rank=3))
+        elif kind == "FIRE DETECTION" and lat is not None:
+            items.append(OfficialItem("NASA FIRMS", "satellite fire detection", {"fire"}, when, lat, lon, radius_km=30,
+                                      window=timedelta(days=1), rank=1))
+        elif kind == "IPAWS ALERT" and resolver is not None and hazards(message.raw_content):
+            place = next((location for location in resolver.resolve(message) if location.level in SPECIFIC_LEVELS), None)
+            if place is not None:
+                items.append(OfficialItem(fields.get("sender") or "IPAWS", "public alert", hazards(message.raw_content),
+                                          when, place.lat, place.lon, radius_km=50, window=timedelta(days=1), rank=2))
         elif kind == "FAA TFR" and resolver is not None:
             place = next((location for location in resolver.resolve(message) if location.level in SPECIFIC_LEVELS | {"state"}), None)
             if place is not None and place.level != "state":

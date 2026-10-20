@@ -564,7 +564,7 @@ Reports and events inside it are in focus as well as those in any chosen regions
 come first in the lists and briefings, and alert like focus-region reports. The map draws
 the area as a dashed circle. Metrics and aircraft still use the regions.
 
-**OSINT** is a sixth source alongside the radio applications, with its own status
+**OSINT** is a source alongside the radio applications, with its own status
 light and an "All OSINT reports" watch form. It collects free, keyless open and
 official sources on a background thread: US news about protests, riots, unrest,
 shootings, bombings and terrorism from the GDELT news search (news-derived, not
@@ -576,8 +576,41 @@ level or risks changed in the last 30 days, FEMA disaster and emergency declarat
 elsewhere M6+) and wildfires (10,000+ acres, or discovered in the last 3 days, not yet
 contained, prescribed burns excluded) become reports; smaller ones are still used to
 confirm radio reports. Items flow through watch forms, the analyzer, deduplication,
-locations, labels and Metrics like radio reports. DHS NTAS, CISA and U.S. Embassy
-alert feeds are not included because their servers refuse automated clients.
+locations, labels and Metrics like radio reports. DHS NTAS, CISA advisory and U.S.
+Embassy alert feeds are not included because their servers refuse automated clients
+(S2 Watch identifies itself honestly), and CDC's Health Alert Network has no current
+feed (its email alerts are the reliable route).
+
+Added in 0.29 (each can be switched off under Configuration → Watch Forms):
+- **NWS storm reports** via Iowa State's archive (every 30 minutes): floods, flash floods,
+  heavy snow (6"+), ice, blizzards, wildfires, dust storms, non-thunderstorm wind damage,
+  landslides; the kinds SPC already covers are left out. Reports filed by amateur radio
+  say so.
+- **NWS river gauges** at moderate or major flood stage (hourly).
+- **National Hurricane Center** active storms with position, winds and movement.
+- **Local public alerts (FEMA IPAWS)**: evacuations, shelter-in-place, law enforcement
+  warnings, AMBER and missing-person alerts, road closures, from local authorities (the
+  weather service's own are left out). FEMA's archive runs about a day behind.
+- **Space weather (NOAA SWPC)**: radio blackouts R2+, radiation storms S2+, geomagnetic
+  storms G3+, which affect HF propagation.
+- **Internet outages by state (IODA, Georgia Tech)**: critical outages.
+- **Airport closures and ground stops (FAA)**, except for routine volume, works, and
+  scheduled closure notices.
+- **USGS volcanoes** at WATCH or WARNING.
+- Off by default: **worldwide disasters** (GDACS orange/red), **newly exploited
+  vulnerabilities** (CISA), **border crossings not open** (CBP, round-the-clock crossings
+  only), and **satellite fire detections** (NASA FIRMS: clusters of 6+ detections; needs
+  a free map key, entered under Configuration → Sources).
+
+Official ones among them (NWS, NHC, USGS, FAA, FEMA IPAWS, NOAA SWPC, CBP) confirm events
+like the original official sources; storm reports, river gauges, hurricanes, public alerts
+and satellite fire clusters also confirm radio reports nearby (the Official column).
+
+**APRS** bulletins (BLN0–BLN9 and named groups) can be read from APRS-IS: turn it on
+under Configuration → Sources. Receive-only (passcode -1, nothing is sent to RF); servers
+refuse anonymous logins, so it logs in with your call sign and an SSID (default -13, to
+stay clear of your own APRS software). Only U.S. stations' bulletins are kept, and only
+what arrives while S2 Watch runs (APRS-IS has no backlog). APRS counts as radio traffic.
 
 The **Official** column in Newsworthiness marks a radio report that an official source
 confirms: same kind of hazard, same place, around the same time. Sources and rules:

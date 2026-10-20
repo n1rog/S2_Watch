@@ -10,6 +10,7 @@ DEFAULT_WATCH_FORMS = {
     "Commstat": "All Commstat messages",
     "FLMSG": "All FLMSG messages",
     "JS8SuperSpotter": "All JS8SuperSpotter messages",
+    "APRS": "All APRS bulletins",
     "OSINT": "All OSINT reports",
 }
 # Bump to offer category forms added in a later release; forms the user deleted after an
