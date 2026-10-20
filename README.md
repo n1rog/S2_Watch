@@ -74,8 +74,10 @@ follow-up, label it (or edit its note), list its reports, or close it.
 reopened", "100% contained", "suspect in custody", "net secured" (not when negated: "power
 not yet restored"). News headlines don't close events. You can close an event yourself
 (**Close event…**, with an optional reason) or reopen it; a later report reopens a closed
-event. An event with no reports for 12 hours shows as **Quiet**. The **Status** column
-shows Active, Quiet or Closed; closed events are greyed, the Events tab can hide them, and
+event. An event with no reports for 12 hours shows as **Quiet** (change the hours under
+**Configuration → Display…**). The **Status** column, next to Last activity, shows Active,
+Quiet or Closed; only radio and official reports close events, and all-clear reports
+saved before events could close are applied once on the first start of 0.28; closed events are greyed, the Events tab can hide them, and
 briefings list them under **Resolved in the Period** instead of as current activity.
 
 ## Exercise traffic
@@ -167,11 +169,14 @@ air-ambulance callsigns and by registration to air-medical operators
 
 ## Continuous integration and releases
 
-`.github/workflows/ci.yml` runs the tests and a Linux install from the installer
-package on every push. Pushing a version tag (`git push --tags`) runs the tests and
-installers on Linux, Windows and macOS and then publishes a GitHub release with
-`S2Watch-<version>-installer.zip` attached. The full run can also be started from
-the Actions tab (CI → Run workflow).
+`.github/workflows/ci.yml` runs the tests, a Linux install from the installer package,
+and a Linux install from a git clone on every push. The clone install checks that S2
+Watch runs from the clone and that a pulled change to the required packages is
+installed at the next start. Pushing a version tag (`git push origin v1.2.3`) runs all
+of it on Linux, Windows and macOS and then publishes a GitHub release with
+`S2Watch-<version>-installer.zip` attached. Push one tag at a time: GitHub starts no
+workflows when more than three tags are pushed at once. The full run can also be
+started from the Actions tab (CI → Run workflow).
 
 ## Long-run check
 

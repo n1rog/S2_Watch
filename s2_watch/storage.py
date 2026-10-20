@@ -696,6 +696,37 @@ class SQLiteStore:
         self.connection.commit()
         return int(event_id)
 
+    def close_events_from_history(self, since: datetime) -> int:
+        """Close open events whose latest report is an all-clear (reports placed before events
+        could close). Only radio and official reports close events, not news. The number closed."""
+        from s2_watch.analysis.ollama import readable_text
+        from s2_watch.events import all_clear
+
+        rows = self.connection.execute(
+            """SELECT r.event_id, r.first_seen, m.source_application, m.raw_content, r.sender
+               FROM reports r
+               JOIN events e ON e.id = r.event_id
+               JOIN messages m ON m.id = (SELECT MIN(id) FROM messages WHERE report_id = r.id)
+               WHERE r.newsworthy = 1 AND e.closed_at = '' AND e.last_seen >= ?
+               ORDER BY r.event_id, r.first_seen""", (utc_iso(since),)).fetchall()
+        closing: dict[int, tuple[str, str] | None] = {}
+        for event_id, first_seen, application, raw, sender in rows:
+            may_close = application != "OSINT" or sender in OFFICIAL_SENDERS
+            clear = all_clear(readable_text(Message(application, raw))) if may_close else ""
+            if clear:
+                closing[event_id] = (first_seen, clear)
+            elif closing.get(event_id) is not None:
+                closing[event_id] = None          # more news after the all-clear: still open
+        closed = 0
+        for event_id, found in closing.items():
+            if found is not None:
+                self.connection.execute(
+                    "UPDATE events SET closed_at = ?, close_reason = ?, closed_by = 'report' WHERE id = ?",
+                    (found[0], found[1], event_id))
+                closed += 1
+        self.connection.commit()
+        return closed
+
     def close_event(self, event_id: int, reason: str = "", when: datetime | None = None) -> None:
         """The operator closes an event (a later report reopens it)."""
         when = when or datetime.now(timezone.utc)

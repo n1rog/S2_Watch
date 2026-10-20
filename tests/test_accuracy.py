@@ -165,3 +165,39 @@ def test_the_monitor_keeps_exercise_traffic_off_the_news_until_an_exercise(tmp_p
     report, result = run(True)                                     # read again during an exercise
     assert result.newsworthy
     assert store.connection.execute("SELECT newsworthy FROM reports").fetchone() == (1,)
+
+
+def test_events_already_over_close_from_history_but_not_from_news(tmp_path: Path) -> None:
+    store = SQLiteStore(tmp_path / "s2.db")
+    outage = place_report(store, "TULSA OK - POWER OUTAGE ACROSS NORTH TULSA", T0, closing=False)
+    place_report(store, "TULSA OK - POWER HAS BEEN RESTORED, OUTAGE OVER", T0 + timedelta(hours=3), closing=False)
+    shooting = add(store, "OSINT", "Shooting in Tulsa; suspect arrested", T0, TULSA, category="Crime",
+                   fields={"sender": "tulsaworld.com"})
+    assert store.close_events_from_history(T0 - timedelta(days=1)) == 1
+    closed = {e.event_id: e.closed_at is not None for e in store.events_since(T0 - timedelta(days=1))}
+    assert closed[outage] and not closed[shooting]              # a news headline doesn't close a story
+
+
+def test_the_quiet_threshold_is_a_setting() -> None:
+    from s2_watch import events
+
+    summary = EventSummary(1, "Flooding", "Climate / Environment", "OK", 6, T0, T0, 1, ("MagCommstat",), "high", "", None)
+    try:
+        events.set_quiet_hours(4)
+        assert summary.status(T0 + timedelta(hours=5)) == "quiet"
+        events.set_quiet_hours(12)
+        assert summary.status(T0 + timedelta(hours=5)) == "active"
+    finally:
+        events.set_quiet_hours(12)
+
+
+def test_the_status_column_moves_next_to_last_activity_once(tmp_path: Path) -> None:
+    from s2_watch.ui.events_view import EventsTable
+
+    store = SQLiteStore(tmp_path / "s2.db")
+    table = EventsTable(str, store=store, state_key="events.map.header")
+    assert table.horizontalHeader().visualIndex(table.COLUMNS.index("Status")) == 1
+    table.horizontalHeader().moveSection(1, 5)                 # the operator moves it elsewhere
+    table._save_header()
+    again = EventsTable(str, store=store, state_key="events.map.header")
+    assert again.horizontalHeader().visualIndex(again.COLUMNS.index("Status")) == 5

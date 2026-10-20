@@ -54,7 +54,8 @@ NIFC_URL = ("https://services3.arcgis.com/T4QMspbfLg3qTGWY/arcgis/rest/services/
 # US states and territories, roughly: quakes elsewhere only count when magnitude 6+.
 US_BOXES = ((24, 50, -125, -66), (51, 72, -180, -129), (18, 23, -161, -154), (17, 19, -68, -65), (13, 21, 144, 146))
 # Minutes between fetches of each source.
-SCHEDULE = {"gdelt": 15, "faa": 30, "state": 60, "fema": 60, "usgs": 10, "spc": 15, "nifc": 60}
+# GDELT refuses frequent requests ("429 Too Many Requests"): every 30 minutes.
+SCHEDULE = {"gdelt": 30, "faa": 30, "state": 60, "fema": 60, "usgs": 10, "spc": 15, "nifc": 60}
 DECLARATION_TYPES = {"DR": "Major Disaster", "EM": "Emergency", "FM": "Fire Management"}
 STATE_NAMES = {
     "AL": "Alabama", "AK": "Alaska", "AZ": "Arizona", "AR": "Arkansas", "CA": "California", "CO": "Colorado",

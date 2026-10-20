@@ -26,7 +26,7 @@ from s2_watch.ui.event_detail import EventDetail
 from s2_watch.ui.events_view import EventsTable, EventsView
 from s2_watch.ui.misses_view import MissesView
 from s2_watch.missed_news import MissedNewsScanner
-from s2_watch.events import incident_key, key_terms, place_from_locations, report_hazards
+from s2_watch.events import incident_key, key_terms, place_from_locations, report_hazards, set_quiet_hours
 from s2_watch.monitoring import legacy_message_key, message_key
 from s2_watch.ui.followup_dialog import FollowUpDialog
 
@@ -416,6 +416,15 @@ class MainWindow(QMainWindow):
         display_layout.addRow("Time Format:", self.time_zone)
         self.news_rows.setToolTip("Reports marked Of interest or Follow-up are always shown")
         display_layout.addRow("Newsworthiness rows shown:", self.news_rows)
+        self.quiet_hours = QSpinBox()
+        self.quiet_hours.setRange(2, 72)
+        self.quiet_hours.setSuffix(" hours")
+        self.quiet_hours.setValue(int(self.store.get_setting("events.quiet_hours", "12") or 12))
+        self.quiet_hours.setToolTip("An event with no new reports for this long shows as Quiet "
+                                    "(it may be over; briefings say how long it has been quiet)")
+        set_quiet_hours(self.quiet_hours.value())
+        self.quiet_hours.valueChanged.connect(self.quiet_hours_changed)
+        display_layout.addRow("Events go quiet after:", self.quiet_hours)
         display_layout.addRow(self.alerts_enabled)
         display_layout.addRow(self.alert_high_urgency)
         display_layout.addRow(self.geocoding_enabled)
@@ -982,6 +991,11 @@ class MainWindow(QMainWindow):
     def event_states_changed(self) -> None:
         self.refresh_map_events()
         self.events_view.refresh()
+
+    def quiet_hours_changed(self, hours: int) -> None:
+        self.store.set_setting("events.quiet_hours", str(hours))
+        set_quiet_hours(hours)
+        self.event_states_changed()
 
     def exercise_in_progress(self) -> bool:
         return self.store.get_setting("exercise.in_progress", "0") == "1"

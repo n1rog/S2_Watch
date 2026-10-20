@@ -91,9 +91,46 @@ jobs:
           name: installer-package
           path: dist/S2Watch-*-installer.zip
 
+  # Install from a git clone (how the team installs, to update with "git pull"): S2 Watch
+  # must run from the clone, and a pull that changes the required packages must install them.
+  clone-install:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON((startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch') && '["ubuntu-latest","windows-latest","macos-latest"]' || '["ubuntu-latest"]') }}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install from the clone (Linux, macOS)
+        if: runner.os != 'Windows'
+        run: |
+          bash installer/install.sh --yes --no-wizard
+          python="$HOME/.local/share/s2-watch/venv/bin/python"
+          [ "$RUNNER_OS" = macOS ] && python="$HOME/Library/Application Support/S2 Watch/venv/bin/python"
+          echo "VENV_PYTHON=$python" >> "$GITHUB_ENV"
+      - name: Install from the clone (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          & powershell -NoProfile -ExecutionPolicy Bypass -File "installer\install.ps1" -Yes -NoWizard
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          "VENV_PYTHON=$env:LOCALAPPDATA\S2Watch\venv\Scripts\python.exe" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+      - name: Runs from the clone, and a pulled package change is installed at start
+        shell: bash
+        run: |
+          "$VENV_PYTHON" -c "import s2_watch.checkout as c; assert c.editable_checkout(), 'not an editable install of the clone'"
+          # What a pull adding a dependency looks like; S2 Watch installs it when it starts.
+          "$VENV_PYTHON" - <<'PY'
+          import pathlib
+          p = pathlib.Path("pyproject.toml")
+          p.write_text(p.read_text().replace("dependencies = [", 'dependencies = [\n    "packaging>=23",', 1))
+          PY
+          "$VENV_PYTHON" -c "import s2_watch.checkout as c; assert c.refresh_packages_after_pull(), 'pip did not run'; assert not c.refresh_packages_after_pull()"
+          "$VENV_PYTHON" -c "import packaging"
+
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [tests, installer]
+    needs: [tests, installer, clone-install]
     runs-on: ubuntu-latest
     permissions:
       contents: write

@@ -48,7 +48,7 @@ class EventsTable(QTableWidget):
     EVENT_ROLE = Qt.ItemDataRole.UserRole
 
     # Starting widths (pixels); people drag them, and the table remembers theirs.
-    DEFAULT_WIDTHS = (150, 380, 150, 80, 70, 170, 80, 170, 80, 120)
+    DEFAULT_WIDTHS = (150, 380, 150, 80, 70, 170, 80, 170, 80, 120, 110)
 
     def __init__(self, format_time, parent=None, store=None, state_key: str = "") -> None:
         super().__init__(0, len(self.COLUMNS), parent)
@@ -73,6 +73,15 @@ class EventsTable(QTableWidget):
         saved = store.get_setting(state_key, "") if store is not None and state_key else ""
         if saved:
             header.restoreState(QByteArray.fromBase64(saved.encode()))
+        # Status (added in 0.27) goes next to Last activity, once: a layout saved before it
+        # existed leaves it far right, out of sight. After that the operator's order stands.
+        moved_key = f"{state_key}.status_placed"
+        if store is None or not state_key or store.get_setting(moved_key, "") != "1":
+            status = self.COLUMNS.index("Status")
+            if header.visualIndex(status) != 1:
+                header.moveSection(header.visualIndex(status), 1)
+            if store is not None and state_key:
+                store.set_setting(moved_key, "1")
         self._save_timer = QTimer(self)
         self._save_timer.setSingleShot(True)
         self._save_timer.setInterval(500)

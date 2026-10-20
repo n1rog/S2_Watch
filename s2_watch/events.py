@@ -21,7 +21,12 @@ DEFAULT_RADIUS_KM = 100
 RADIUS_KM = {"earthquake": 150, "fire": 80, "tropical": 250, "winter": 150, "heat": 200}
 SPECIFIC_LEVELS = {"precise", "city", "county", "grid"}
 INCIDENT_GAP = timedelta(days=30)     # a named fire is one event however long it burns
-STALE_AFTER = timedelta(hours=12)     # no reports this long: the event shows as quiet
+STALE_AFTER = timedelta(hours=12)     # no reports this long: the event shows as quiet (Display setting)
+
+
+def set_quiet_hours(hours: int) -> None:
+    global STALE_AFTER
+    STALE_AFTER = timedelta(hours=max(1, int(hours)))
 # Words too common to show two reports are about the same thing.
 STOP_WORDS = set("""
 THE AND FOR WITH FROM THAT THIS HAVE HAS WERE WILL BEEN THEY THEIR THERE ABOUT AFTER BEFORE INTO

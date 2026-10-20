@@ -21,15 +21,17 @@ from s2_watch.locating import LocationResolver, ResolvedLocation
 from s2_watch.models import Message, WatchForm
 from s2_watch.monitoring import Monitor, analyzer_name
 from s2_watch.overlays import CoverageTracker
-from s2_watch.storage import ReportInfo, SQLiteStore
+from s2_watch.storage import OFFICIAL_SENDERS, ReportInfo, SQLiteStore
 
 BATCH_SIZE = 200
 
 
 def closing_text(message: Message) -> str:
-    """The words that may close a report's event ("power restored"). News headlines don't:
-    "suspects arrested" is often where a story starts."""
-    return "" if message.fields.get("type") == "NEWS" else readable_text(message)
+    """The words that may close a report's event ("power restored"): radio and official
+    reports only. News headlines don't: "suspects arrested" is often where a story starts."""
+    if message.source_application == "OSINT" and message.fields.get("sender", "") not in OFFICIAL_SENDERS:
+        return ""
+    return readable_text(message)
 
 
 @dataclass
@@ -96,6 +98,10 @@ class MonitorWorker(QObject):
                                     summary or message.raw_content[:120], incident_key(message), key_terms(text),
                                     closing_text(message))
             grouped += 1
+        # Once: events whose all-clear arrived before events could close (before 0.28).
+        if self.store.get_setting("migrations.history_all_clear") != "1":
+            grouped += self.store.close_events_from_history(since)
+            self.store.set_setting("migrations.history_all_clear", "1")
         if grouped:
             self.events_changed.emit()
 
