@@ -35,7 +35,9 @@ def _is_ignored(event) -> bool:
 
 def priority_key(event, focus: set[int]):
     radio = any(source != "OSINT" for source in event.sources)
-    return (bool(focus) and event.region in focus, URGENCY_RANK.get(event.urgency, 0), radio, event.reports,
+    from s2_watch.focus import event_in_focus
+
+    return (event_in_focus(event, focus), URGENCY_RANK.get(event.urgency, 0), radio, event.reports,
             event.last_seen)
 
 

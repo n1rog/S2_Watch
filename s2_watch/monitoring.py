@@ -4,6 +4,7 @@ from collections.abc import Callable, Iterable
 
 from s2_watch.adapters.base import ApplicationAdapter
 from s2_watch.analysis.base import AnalysisResult, NewsAnalyzer
+from s2_watch.adapters.analyst import ENTRY_TYPE
 from s2_watch.digest import split_digest
 from s2_watch.exercise import mark_exercise
 from s2_watch.models import ANY_APPLICATION, Message, WatchForm
@@ -98,13 +99,20 @@ class Monitor:
     def _process(self, message: Message) -> bool:
         """Match, analyse, save and report one message; True if a watch form matched it."""
         matching = [form for form in self.forms if form.matches(message)]
+        entry = message.fields.get("type") == ENTRY_TYPE and message.source_application == "OSINT"
+        if entry and not matching:     # the operator's own entries are always kept
+            matching = [WatchForm("OSINT", "Analyst entries", "")]
         if not matching:
             if self.on_unmatched:
                 self.on_unmatched(message)
             return False
         matched = replace(message, form_name=matching[0].name)
         result = None
-        if self.analyzer:
+        if entry:   # the operator chose its category and urgency
+            result = AnalysisResult(True, message.fields.get("category") or "routine",
+                                    message.fields.get("urgency") or "medium",
+                                    " ".join(message.raw_content.split())[:160], 1.0, ("analyst entry",))
+        elif self.analyzer:
             # A message read again (every launch) reuses this analyzer's saved result: an AI
             # model takes seconds per message, so only new messages are sent to it.
             known = self.store.find_message_id(message_key(message), legacy_message_key(message))

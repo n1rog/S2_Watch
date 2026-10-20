@@ -29,7 +29,8 @@ BATCH_SIZE = 200
 def closing_text(message: Message) -> str:
     """The words that may close a report's event ("power restored"): radio and official
     reports only. News headlines don't: "suspects arrested" is often where a story starts."""
-    if message.source_application == "OSINT" and message.fields.get("sender", "") not in OFFICIAL_SENDERS:
+    if (message.source_application == "OSINT" and message.fields.get("sender", "") not in OFFICIAL_SENDERS
+            and message.fields.get("official") != "1"):
         return ""
     return readable_text(message)
 

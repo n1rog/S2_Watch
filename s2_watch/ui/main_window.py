@@ -21,6 +21,12 @@ from s2_watch.backups import back_up_in_background, backup_folder
 from s2_watch.s2_report import DEFAULT_MAGCON, briefing_report as s2_briefing_report, followup_report as s2_followup_report, js8_report
 from s2_watch.followup import FollowUpFacts
 from s2_watch.ui.drafts_dialog import DraftsDialog
+from s2_watch import focus
+from s2_watch.focus import FocusArea
+from s2_watch.silence import quiet_near
+from s2_watch.ui.focus_area_dialog import FocusAreaDialog
+from s2_watch.adapters.analyst import AnalystAdapter, entry_message
+from s2_watch.ui.analyst_entry_dialog import AnalystEntriesDialog, AnalystEntryDialog
 from s2_watch.ui.fix_location_dialog import FixLocationDialog
 from s2_watch.ui.keyword_noise_dialog import KeywordNoiseDialog
 from s2_watch.ui.senders_dialog import SendersDialog
@@ -123,6 +129,8 @@ class MainWindow(QMainWindow):
         self.focus_regions: set[int] = {
             int(value) for value in self.store.get_setting("focus.regions", "").split(",") if value.strip().isdigit()
         }
+        # And optionally an area of responsibility: a radius around a place.
+        focus.set_area(FocusArea.from_json(self.store.get_setting("focus.area", "")))
         self.host = QLineEdit(self.store.get_setting("js8call.host", "127.0.0.1"))
         self.port = QSpinBox()
         self.port.setRange(1, 65535)
@@ -471,7 +479,7 @@ class MainWindow(QMainWindow):
         focus_menu.setToolTipsVisible(True)
         self.no_focus_action = focus_menu.addAction("All of the U.S. (no focus)")
         self.no_focus_action.setCheckable(True)
-        self.no_focus_action.setChecked(not self.focus_regions)
+        self.no_focus_action.setChecked(not focus.has_focus(self.focus_regions))
         self.no_focus_action.triggered.connect(self.clear_focus_regions)
         focus_menu.addSeparator()
         self.focus_actions: list[QAction] = []
@@ -482,6 +490,15 @@ class MainWindow(QMainWindow):
             action.setData(region)
             action.triggered.connect(self.focus_regions_changed)
             self.focus_actions.append(action)
+        focus_menu.addSeparator()
+        self.focus_area_action = focus_menu.addAction("Custom Area…")
+        self.focus_area_action.setToolTip("Your area of responsibility: a radius around a place")
+        self.focus_area_action.setCheckable(True)
+        self.focus_area_action.setChecked(focus.AREA is not None)
+        self.focus_area_action.triggered.connect(self.choose_focus_area)
+        self.clear_area_action = focus_menu.addAction("Clear Custom Area")
+        self.clear_area_action.setEnabled(focus.AREA is not None)
+        self.clear_area_action.triggered.connect(lambda: self.set_focus_area(None))
         self.exercise_action = configuration_menu.addAction("Exercise in Progress")
         self.exercise_action.setCheckable(True)
         self.exercise_action.setChecked(self.exercise_in_progress())
@@ -527,6 +544,10 @@ class MainWindow(QMainWindow):
         reports_menu.addAction("Saved Reports && Briefings…").triggered.connect(self.show_saved_drafts)
         reports_menu.addAction("Sender Track Records…").triggered.connect(self.show_sender_records)
         reports_menu.addAction("Keyword Noise…").triggered.connect(self.show_keyword_noise)
+        reports_menu.addSeparator()
+        reports_menu.addAction("Add Intelligence Entry…").triggered.connect(self.add_analyst_entry)
+        reports_menu.addAction("Intelligence Entries…").triggered.connect(self.show_analyst_entries)
+        self._entries_dialog = None
         self._noise_dialog = None
         reports_menu.addSeparator()
         reports_menu.addAction("Show Events").triggered.connect(lambda: self.tabs.setCurrentWidget(self.events_view))
@@ -730,6 +751,7 @@ class MainWindow(QMainWindow):
         self.worker_config.connect(self._worker.configure)
         self._worker.batch_ready.connect(self.handle_batch)
         self._worker.coverage_ready.connect(self.map_view.set_coverage)
+        self._worker.coverage_ready.connect(self.coverage_updated)
         self._worker.events_changed.connect(self.events_data_changed)
         self._worker_thread.start()
         self.refresh_forms()
@@ -832,6 +854,7 @@ class MainWindow(QMainWindow):
         self.commstat_adapter = CommstatSQLiteAdapter(self.commstat_path.text().strip(), lookback)
         self.flmsg_adapter = FLMSGFileAdapter(self.flmsg_path.text().strip(), lookback)
         self.superspotter_adapter = JS8SuperSpotterSQLiteAdapter(self.superspotter_path.text().strip(), lookback)
+        self.analyst_adapter = AnalystAdapter(self.store.analyst_entries(datetime.now(timezone.utc) - lookback))
         enabled = self.enabled_osint_sources()
         self.osint_adapter = OsintAdapter(lookback, {name: fetch for name, fetch in osint_sources.FETCHERS.items()
                                                      if name in enabled})
@@ -972,7 +995,17 @@ class MainWindow(QMainWindow):
         menu.addAction("Show its reports").triggered.connect(lambda: self.show_reports(report_ids))
         menu.exec(position)
 
+    def coverage_updated(self, cells: list[dict]) -> None:
+        self.coverage_cells = cells
+
+    def quiet_near_event(self, event) -> list[dict]:
+        """Grid squares near an open event whose stations have gone quiet."""
+        gazetteer = self._official_resolver.gazetteer
+        return quiet_near(event, getattr(self, "coverage_cells", []), datetime.now(timezone.utc),
+                          lambda lat, lon: gazetteer.locate_point(lat, lon)[1])
+
     def connect_event_detail(self, detail: EventDetail) -> None:
+        detail.quiet_for = self.quiet_near_event
         detail.show_on_map.connect(self.show_event_id_on_map)
         detail.draft_followup.connect(self.draft_followup_for_event)
         detail.mark.connect(lambda event_id, status: self.mark_reports(self.event_report_ids(event_id), status))
@@ -1146,6 +1179,8 @@ class MainWindow(QMainWindow):
                 adapters.append(self.superspotter_adapter)
             if self.osint_adapter:
                 adapters.append(self.osint_adapter)
+            if getattr(self, "analyst_adapter", None):
+                adapters.append(self.analyst_adapter)
             self._monitor_forms = self.store.list_watch_forms()
             self._analyzer = self.create_analyzer()
             self.worker_config.emit(MonitorConfig(
@@ -1182,6 +1217,38 @@ class MainWindow(QMainWindow):
         self.refresh_forms()        # a new analyzer, and the watch period checked again
         if self._noise_dialog is not None:
             self._noise_dialog.refresh(self.excluded_keywords())
+
+    def add_analyst_entry(self) -> None:
+        dialog = AnalystEntryDialog(LocationResolver(), self.store.get_setting("analyst.last_source", ""),
+                                    self._entries_dialog or self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        entry = dialog.entry()
+        self.store.set_setting("analyst.last_source", entry["source"])
+        entry_id = self.store.add_analyst_entry(**entry)
+        if dialog.location is not None:      # placed exactly where the operator said
+            saved = next(e for e in self.store.analyst_entries(include_removed=True) if e["id"] == entry_id)
+            self.store.save_place_correction(f"#msg:{message_hash(entry_message(saved))}", dialog.location)
+        self.rescan_sources()                # read with the rest of the watch period
+        if self._entries_dialog is not None:
+            self._entries_dialog.refresh()
+
+    def show_analyst_entries(self) -> None:
+        self._entries_dialog = AnalystEntriesDialog(self.store, self.format_display_time, self)
+        self._entries_dialog.add_requested.connect(self.add_analyst_entry)
+        self._entries_dialog.remove_requested.connect(self.withdraw_analyst_entry)
+        self._entries_dialog.exec()
+        self._entries_dialog = None
+
+    def withdraw_analyst_entry(self, entry_id: int) -> None:
+        entry = next((e for e in self.store.analyst_entries() if e["id"] == entry_id), None)
+        if entry is None:
+            return
+        self.store.remove_analyst_entry(entry_id, message_key(entry_message(entry)))
+        self.rescan_sources()
+        self.event_states_changed()
+        if self._entries_dialog is not None:
+            self._entries_dialog.refresh()
 
     def show_keyword_noise(self) -> None:
         self._noise_dialog = KeywordNoiseDialog(self.store, self.excluded_keywords(), self)
@@ -1418,7 +1485,7 @@ class MainWindow(QMainWindow):
                 # Alert once per report, and not again for reports re-read by a re-scan.
                 ignored = report is not None and report.status == "ignored"
                 # Outside the focus regions only high-urgency reports alert.
-                secondary = not self.in_focus(report.region if report else None)
+                secondary = not self.in_focus(report.region if report else None, processed.locations)
                 if secondary and processed.result.urgency != "high":
                     ignored = True
                 if (report is None or report.new_report) and not ignored and self.should_alert(processed.result):
@@ -1606,11 +1673,11 @@ class MainWindow(QMainWindow):
 
     def update_news_label(self) -> None:
         # The table holds reports from the review window read at startup plus new traffic.
-        focus = ", ".join(f"R{region}" for region in sorted(self.focus_regions))
+        chosen = self.focus_label()
         kind = "Events" if getattr(self, "news_mode", "events") == "events" else "Reports"
         self.news_label.setText(
             f"<b>Newsworthiness: {kind}</b> — from the last {self.review_duration.currentText()}"
-            + (f", <b>focus {focus} first</b>, then the rest of the U.S." if focus else "")
+            + (f", <b>focus {chosen} first</b>, then the rest of the U.S." if chosen else "")
             + " <span style='color:gray'>(focus: Configuration → Focus Regions)</span>"
         )
 
@@ -1719,17 +1786,20 @@ class MainWindow(QMainWindow):
 
     # -- focus regions ------------------------------------------------------------------
 
-    def in_focus(self, region: int | None) -> bool:
-        """With no focus regions chosen, every report is primary."""
-        return not self.focus_regions or region in self.focus_regions
+    def in_focus(self, region: int | None, locations=None) -> bool:
+        """In a focus region or the area of responsibility; with neither chosen, every report
+        is primary."""
+        points = [(location.lat, location.lon) for location in locations or ()
+                  if location.level not in ("state", "region")]
+        return not focus.has_focus(self.focus_regions) or focus.point_in_focus(region, points, self.focus_regions)
 
     def set_priority_key(self, item: QTableWidgetItem) -> None:
         region = item.data(self.REGION_ROLE)
         received = datetime.fromisoformat(str(item.data(Qt.ItemDataRole.UserRole)))
         if received.tzinfo is None:
             received = received.replace(tzinfo=timezone.utc)
-        focus = "1" if self.in_focus(region if region is None else int(region)) else "0"
-        item.setData(PriorityItem.SORT_ROLE, f"{focus}|{received.astimezone(timezone.utc).isoformat()}")
+        primary = self.in_focus(region if region is None else int(region), item.data(self.LOCATIONS_ROLE))
+        item.setData(PriorityItem.SORT_ROLE, f"{'1' if primary else '0'}|{received.astimezone(timezone.utc).isoformat()}")
 
     @staticmethod
     def region_text(report) -> str:
@@ -1742,14 +1812,31 @@ class MainWindow(QMainWindow):
 
     def focus_regions_changed(self) -> None:
         self.focus_regions = {int(action.data()) for action in self.focus_actions if action.isChecked()}
-        self.no_focus_action.setChecked(not self.focus_regions)
+        self.no_focus_action.setChecked(not focus.has_focus(self.focus_regions))
         self.store.set_setting("focus.regions", ",".join(str(region) for region in sorted(self.focus_regions)))
         self.apply_focus(fit_map=True)
 
     def clear_focus_regions(self) -> None:
         for action in self.focus_actions:
             action.setChecked(False)
+        if focus.AREA is not None:
+            self.set_focus_area(None)
         self.focus_regions_changed()
+
+    def choose_focus_area(self) -> None:
+        dialog = FocusAreaDialog(focus.AREA, LocationResolver(), self)
+        if dialog.exec() == QDialog.DialogCode.Accepted and dialog.area() is not None:
+            self.set_focus_area(dialog.area())
+        else:
+            self.focus_area_action.setChecked(focus.AREA is not None)
+
+    def set_focus_area(self, area) -> None:
+        focus.set_area(area)
+        self.store.set_setting("focus.area", area.to_json() if area else "")
+        self.focus_area_action.setChecked(area is not None)
+        self.clear_area_action.setEnabled(area is not None)
+        self.no_focus_action.setChecked(not focus.has_focus(self.focus_regions))
+        self.apply_focus(fit_map=False)
 
     def apply_focus(self, fit_map: bool = False) -> None:
         """Re-rank Newsworthiness and update the map and Metrics for the focus regions."""
@@ -1760,13 +1847,20 @@ class MainWindow(QMainWindow):
         self.analysis.sortItems(0, Qt.SortOrder.DescendingOrder)
         self.apply_news_rows_limit()
         self.map_view.set_focus_regions(sorted(self.focus_regions), fit_map)
+        self.map_view.set_focus_area(focus.AREA)
         self.aircraft_poller.set_focus(self.focus_regions)
         self.metrics_view.set_focus_regions(self.focus_regions)
         self.events_view.set_focus_regions(self.focus_regions)
         self.refresh_map_events()
-        focus = ", ".join(f"R{region}" for region in sorted(self.focus_regions))
         self.update_news_label()
-        self.setWindowTitle(f"S2 Watch {APP_VERSION}" + (f" — focus {focus}" if focus else ""))
+        chosen = self.focus_label()
+        self.setWindowTitle(f"S2 Watch {APP_VERSION}" + (f" — focus {chosen}" if chosen else ""))
+
+    def focus_label(self) -> str:
+        parts = [", ".join(f"R{region}" for region in sorted(self.focus_regions))] if self.focus_regions else []
+        if focus.AREA is not None:
+            parts.append(focus.AREA.describe())
+        return " + ".join(parts)
 
     def status_text(self, status: str, note: str = "") -> str:
         label = self.STATUS_LABELS.get(status, "")
@@ -1874,7 +1968,8 @@ class MainWindow(QMainWindow):
             events = self.events_view.visible_events()
         text = s2_briefing_report(events, now, hours, self.focus_regions, last_briefing,
                                   magcon=self.store.get_setting("magcon.status", DEFAULT_MAGCON),
-                                  reports_of=self.store.event_reports, grades=self.sender_grades())
+                                  reports_of=self.store.event_reports, grades=self.sender_grades(),
+                                  quiet_for=self.quiet_near_event)
         ollama = None
         if self.analysis_mode.checkedAction().data() == "ollama":
             ollama = (self.ollama_endpoint.text().strip() or "http://127.0.0.1:11434",

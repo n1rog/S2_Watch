@@ -97,6 +97,26 @@ MagCommstat or MAGNET date-time stamp) is shown beside when it was heard, and fo
 timelines use it. Forecast wording ("until 1800Z", "expected at") and times later than
 the message was heard don't count. Radio lead still compares when reports were heard.
 
+**Radio silence.** S2 Watch notes when each grid square's stations are heard. When a
+square near an open event (within 150 km, or in its MARS region) has gone quiet (at its
+usual rate at least four messages would have arrived, and none has for two hours or
+more), the event panel says so ("Radio silence nearby: stations around EM26 usually send
+about 6 messages every 3 hours and haven't been heard for 5 hours") and briefings add it
+to the event's line. A quiet square on its own is often just a lull, so it's only
+reported next to an event.
+
+## Intelligence entries
+
+**Reports → Add Intelligence Entry…** records a summary you're cleared to share, from a
+source S2 Watch can't read itself (HSIN, a fusion center, an EOC briefing): source,
+handling (TLP:CLEAR, approved for release, public), when, category, urgency, where, and
+the summary. Saving requires confirming it's cleared for release to the network. Entries
+are always kept, as open-source items with the category and urgency you chose; they join
+events, the map and briefings, and appear in MAGNET source lists as "analyst entry,
+TLP:CLEAR". Tick **official source** and an entry confirms its event like NWS or USGS
+(reliability A). **Reports → Intelligence Entries…** lists them; **Withdraw** takes one
+off the news lists and events.
+
 ## Keyword noise
 
 **Reports → Keyword Noise** lists the keywords that flagged newsworthy reports you then
@@ -538,11 +558,17 @@ regions faded; aircraft traffic is shown in full inside them; and Metrics offers
 Scope of "My focus regions" or "All of the U.S.". Reports with no known location count
 as secondary. The window title shows the focus, e.g. "S2 Watch 0.3.0 — focus R8".
 
+**Custom area** (Configuration → Focus Regions → Custom Area…) adds an area of
+responsibility: a radius (10–1500 km) around a town, county, coordinates or grid square.
+Reports and events inside it are in focus as well as those in any chosen regions: they
+come first in the lists and briefings, and alert like focus-region reports. The map draws
+the area as a dashed circle. Metrics and aircraft still use the regions.
+
 **OSINT** is a sixth source alongside the radio applications, with its own status
 light and an "All OSINT reports" watch form. It collects free, keyless open and
 official sources on a background thread: US news about protests, riots, unrest,
 shootings, bombings and terrorism from the GDELT news search (news-derived, not
-official; every 15 minutes), FAA security flight restrictions (mostly VIP movements
+official; every 30 minutes), FAA security flight restrictions (mostly VIP movements
 and security events; every 30 minutes), State Department travel advisories whose
 level or risks changed in the last 30 days, FEMA disaster and emergency declarations
 (hourly), USGS earthquakes (every 10 minutes), SPC tornado, wind and hail reports

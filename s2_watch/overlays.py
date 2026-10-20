@@ -156,7 +156,8 @@ class CoverageTracker:
             return
         self._counted.add(identity)
         when = message.received_at if message.received_at.tzinfo else message.received_at.replace(tzinfo=timezone.utc)
-        cell = self.cells.setdefault(grid, {"last": when, "messages": 0, "stations": Counter()})
+        cell = self.cells.setdefault(grid, {"first": when, "last": when, "messages": 0, "stations": Counter()})
+        cell["first"] = min(cell["first"], when)
         cell["last"] = max(cell["last"], when)
         cell["messages"] += 1
         sender = message.fields.get("sender") or message.fields.get("from") or ""
@@ -175,6 +176,7 @@ class CoverageTracker:
             lat = (ord(grid[1]) - ord("A")) * 10 - 90 + int(grid[3])
             result.append({
                 "grid": grid, "south": lat, "west": lon,
+                "first": cell["first"].astimezone(timezone.utc).isoformat(timespec="seconds"),
                 "last": cell["last"].astimezone(timezone.utc).isoformat(timespec="seconds"),
                 "messages": cell["messages"],
                 "stations": [station for station, _count in cell["stations"].most_common(6)],

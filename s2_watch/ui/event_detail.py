@@ -52,6 +52,7 @@ class EventDetail(QWidget):
         self.store = store
         self.format_time = format_time
         self.current = None
+        self.quiet_for = None          # event -> quiet coverage cells near it (s2_watch.silence)
         self._shown_id = self._shown_html = None
         self.browser = QTextBrowser()
         self.browser.setOpenLinks(False)          # web links open in the browser; s2watch: links act here
@@ -156,6 +157,11 @@ class EventDetail(QWidget):
         if event.single_source(now):
             out.append(f"<p style='color:#e65100'>⚠ <b>Single source:</b> only one station or outlet has reported "
                        f"this, and nothing has confirmed it in {quiet_hours(now - event.first_seen)} hours.</p>")
+        for cell in (self.quiet_for(event) if self.quiet_for else [])[:3]:
+            stations = ", ".join(cell["stations"][:3])
+            out.append(f"<p style='color:#e65100'>📡 <b>Radio silence nearby:</b> stations around {e(cell['grid'])}"
+                       f"{' (' + e(stations) + ')' if stations else ''} usually send about {cell['usual_per_3h']} "
+                       f"messages every 3 hours and haven't been heard for {cell['silent_hours']} hours.</p>")
         if event.official:
             lead = (f" Radio reported it <b>{event.radio_lead_minutes} minutes</b> before the official source."
                     if event.radio_lead_minutes else "")

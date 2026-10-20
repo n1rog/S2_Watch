@@ -187,6 +187,11 @@ class MapView(QWidget):
         self._focus_regions = list(regions)
         self._run(f"setFocusRegions({json.dumps(self._focus_regions)}, {str(fit).lower()})")
 
+    def set_focus_area(self, area) -> None:
+        """Draw the operator's area of responsibility (a FocusArea), or remove it (None)."""
+        self._focus_area = None if area is None else [area.lat, area.lon, area.km * 1000, area.describe()]
+        self._run(f"setFocusArea({json.dumps(self._focus_area)})")
+
     def show_area(self, points: list[tuple[float, float]]) -> None:
         """Zoom the map to these points (an event's reports)."""
         if points:
@@ -332,6 +337,8 @@ class MapView(QWidget):
             if self._coverage is not None:
                 self._run(f"setCoverage({json.dumps(self._coverage)})")
             self._run(f"setFocusRegions({json.dumps(self._focus_regions)}, true)")
+            if getattr(self, "_focus_area", None):
+                self._run(f"setFocusArea({json.dumps(self._focus_area)})")
             if self._aircraft_kinds:
                 self._run(f"setAircraftKinds({json.dumps(self._aircraft_kinds)})")
             if self._aircraft is not None:
@@ -490,6 +497,16 @@ function setFocusRegions(regions, fit) {{
   }} else if (fit) {{
     map.setView([39.5, -98.35], 4);
   }}
+}}
+// The operator's area of responsibility: one circle, replaced only when it changes.
+let focusArea = null;
+function setFocusArea(area) {{
+  if (focusArea) {{ map.removeLayer(focusArea); focusArea = null; }}
+  if (!area) return;
+  const [lat, lon, metres, label] = area;
+  focusArea = L.circle([lat, lon], {{radius: metres, color: '#1e88e5', weight: 2, dashArray: '6 6',
+                                      fill: true, fillOpacity: 0.04, interactive: false}}).addTo(map);
+  focusArea.bindTooltip('Area of responsibility: ' + label);
 }}
 function setRegionsVisible(visible) {{
   if (visible && !map.hasLayer(regionLayer)) regionLayer.addTo(map);

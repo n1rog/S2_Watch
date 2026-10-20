@@ -111,6 +111,8 @@ class SQLiteStore:
         for column in ("status", "status_note", "status_changed", "corroboration", "exercise", "event_time"):
             if column not in report_columns:
                 self._add_column(f"ALTER TABLE reports ADD COLUMN {column} TEXT NOT NULL DEFAULT ''")
+        if "official" not in report_columns:   # an official source the operator entered (confirms events)
+            self._add_column("ALTER TABLE reports ADD COLUMN official INTEGER NOT NULL DEFAULT 0")
         self.connection.execute("CREATE INDEX IF NOT EXISTS reports_first_seen ON reports(first_seen)")
         # Where a report is (its most specific point) and the event it belongs to.
         for column, kind in (("lat", "REAL"), ("lon", "REAL"), ("place_level", "TEXT NOT NULL DEFAULT ''"),
@@ -150,6 +152,23 @@ class SQLiteStore:
                 report_id INTEGER,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
+            )"""
+        )
+        # Intelligence the operator entered (summaries cleared for release, e.g. from HSIN or
+        # a fusion center): delivered as OSINT items of type "ANALYST ENTRY".
+        self.connection.execute(
+            """CREATE TABLE IF NOT EXISTS analyst_entries (
+                id INTEGER PRIMARY KEY,
+                created_at TEXT NOT NULL,
+                happened_at TEXT NOT NULL,
+                source TEXT NOT NULL,
+                handling TEXT NOT NULL,
+                official INTEGER NOT NULL DEFAULT 0,
+                category TEXT NOT NULL,
+                urgency TEXT NOT NULL,
+                place TEXT NOT NULL DEFAULT '',
+                text TEXT NOT NULL,
+                removed INTEGER NOT NULL DEFAULT 0
             )"""
         )
         # The operator's location corrections: a phrase ("BIXBY") or one message ("#msg:<hash>")
@@ -313,6 +332,7 @@ class SQLiteStore:
         kind = exercise_kind(message)
         stated = None if message.source_application == "OSINT" else event_time(readable_text(message), message.received_at)
         stated_at = utc_iso(stated) if stated else ""
+        official = int(message.fields.get("official") == "1")
         row = self.connection.execute(
             "SELECT report_id FROM messages WHERE id = ?", (message_id,)
         ).fetchone()
@@ -322,10 +342,11 @@ class SQLiteStore:
                 # The report follows the latest analysis of its first copy (a later, better
                 # analyzer such as Ollama can find a rules match was routine chat).
                 self.connection.execute(
-                    """UPDATE reports SET newsworthy = ?, category = ?, urgency = ?, exercise = ?, event_time = ?
+                    """UPDATE reports SET newsworthy = ?, category = ?, urgency = ?, exercise = ?, event_time = ?,
+                         official = ?
                        WHERE id = ? AND (SELECT MIN(id) FROM messages WHERE report_id = ?) = ?""",
-                    (int(result.newsworthy), result.category, result.urgency, kind, stated_at, report_id, report_id,
-                     message_id))
+                    (int(result.newsworthy), result.category, result.urgency, kind, stated_at, official, report_id,
+                     report_id, message_id))
                 self.connection.commit()
             return self._report_info(report_id, new_report=False)
         text = report_text(message.raw_content)
@@ -345,10 +366,10 @@ class SQLiteStore:
         if match is None:
             cursor = self.connection.execute(
                 """INSERT INTO reports(report_text, first_seen, last_seen, copies, sources, first_source,
-                     sender, newsworthy, category, urgency, state, region, exercise, event_time)
-                   VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                     sender, newsworthy, category, urgency, state, region, exercise, event_time, official)
+                   VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (text, utc_iso(seen), utc_iso(seen), message.source_application, message.source_application,
-                 sender, int(newsworthy), category, urgency, state, region, kind, stated_at),
+                 sender, int(newsworthy), category, urgency, state, region, kind, stated_at, official),
             )
             report_id, new_report = cursor.lastrowid, True
         else:
@@ -737,6 +758,32 @@ class SQLiteStore:
         self.connection.commit()
         return int(event_id)
 
+    def add_analyst_entry(self, happened_at: datetime, source: str, handling: str, official: bool, category: str,
+                          urgency: str, place: str, text: str) -> int:
+        cursor = self.connection.execute(
+            """INSERT INTO analyst_entries(created_at, happened_at, source, handling, official, category, urgency,
+                                           place, text) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (utc_iso(datetime.now(timezone.utc)), utc_iso(happened_at), source.strip(), handling.strip(),
+             int(official), category, urgency, place.strip(), text.strip()))
+        self.connection.commit()
+        return int(cursor.lastrowid)
+
+    def analyst_entries(self, since: datetime | None = None, include_removed: bool = False) -> list[dict]:
+        keys = ("id", "created_at", "happened_at", "source", "handling", "official", "category", "urgency", "place",
+                "text", "removed")
+        rows = self.connection.execute(
+            f"""SELECT {", ".join(keys)} FROM analyst_entries WHERE happened_at >= ? {"" if include_removed else
+                "AND removed = 0"} ORDER BY happened_at DESC""", (utc_iso(since) if since else "",)).fetchall()
+        return [dict(zip(keys, row)) for row in rows]
+
+    def remove_analyst_entry(self, entry_id: int, message_key: str) -> None:
+        """Withdraw an entry: it leaves the news lists and events (its report stays in history)."""
+        self.connection.execute("UPDATE analyst_entries SET removed = 1 WHERE id = ?", (entry_id,))
+        self.connection.execute(
+            "UPDATE reports SET newsworthy = 0 WHERE id IN (SELECT report_id FROM messages WHERE source_key = ?)",
+            (message_key,))
+        self.connection.commit()
+
     def save_place_correction(self, phrase: str, location) -> None:
         """Remember where ``phrase`` (or one message, "#msg:<hash>") really is."""
         self.connection.execute(
@@ -786,15 +833,15 @@ class SQLiteStore:
         from s2_watch.events import all_clear
 
         rows = self.connection.execute(
-            """SELECT r.event_id, r.first_seen, m.source_application, m.raw_content, r.sender
+            """SELECT r.event_id, r.first_seen, m.source_application, m.raw_content, r.sender, r.official
                FROM reports r
                JOIN events e ON e.id = r.event_id
                JOIN messages m ON m.id = (SELECT MIN(id) FROM messages WHERE report_id = r.id)
                WHERE r.newsworthy = 1 AND e.closed_at = '' AND e.last_seen >= ?
                ORDER BY r.event_id, r.first_seen""", (utc_iso(since),)).fetchall()
         closing: dict[int, tuple[str, str] | None] = {}
-        for event_id, first_seen, application, raw, sender in rows:
-            may_close = application != "OSINT" or sender in OFFICIAL_SENDERS
+        for event_id, first_seen, application, raw, sender, entered in rows:
+            may_close = application != "OSINT" or sender in OFFICIAL_SENDERS or bool(entered)
             clear = all_clear(readable_text(Message(application, raw))) if may_close else ""
             if clear:
                 closing[event_id] = (first_seen, clear)
@@ -854,7 +901,7 @@ class SQLiteStore:
         rows = self.connection.execute(
             """SELECT e.id, e.title, e.category, e.state, e.region, e.first_seen, e.last_seen,
                       r.first_seen, r.sources, r.first_source, r.urgency, r.corroboration, r.status, r.lat, r.lon,
-                      r.sender, e.closed_at, e.close_reason, e.closed_by, r.exercise
+                      r.sender, e.closed_at, e.close_reason, e.closed_by, r.exercise, r.official
                FROM events e JOIN reports r ON r.event_id = e.id
                WHERE e.last_seen >= ? AND r.newsworthy = 1
                ORDER BY e.last_seen DESC, r.first_seen""",
@@ -863,7 +910,7 @@ class SQLiteStore:
         rank = {"low": 1, "medium": 2, "high": 3}
         events: dict[int, dict] = {}
         for (event_id, title, category, state, region, first, last, seen, sources, first_source, urgency,
-             corroboration, status, lat, lon, sender, closed_at, close_reason, closed_by, exercise) in rows:
+             corroboration, status, lat, lon, sender, closed_at, close_reason, closed_by, exercise, entered) in rows:
             event = events.setdefault(event_id, {
                 "title": title, "category": category, "state": state, "region": region,
                 "first": datetime.fromisoformat(first), "last": datetime.fromisoformat(last),
@@ -881,7 +928,7 @@ class SQLiteStore:
             if rank.get(urgency, 0) > rank.get(event["urgency"], 0):
                 event["urgency"] = urgency
             when = datetime.fromisoformat(seen)
-            if first_source == "OSINT" and sender in OFFICIAL_SENDERS:
+            if first_source == "OSINT" and (sender in OFFICIAL_SENDERS or entered):
                 event["official"] = event["official"] or sender
                 if event["official_time"] is None or when < event["official_time"]:
                     event["official_time"] = when
@@ -925,7 +972,7 @@ class SQLiteStore:
         placeholders = ",".join("?" * len(OFFICIAL_SENDERS))
         confirmed_events = {row[0] for row in self.connection.execute(
             f"""SELECT DISTINCT event_id FROM reports WHERE event_id IS NOT NULL AND newsworthy = 1
-                AND first_source = 'OSINT' AND sender IN ({placeholders})""", sorted(OFFICIAL_SENDERS))}
+                AND first_source = 'OSINT' AND (sender IN ({placeholders}) OR official = 1)""", sorted(OFFICIAL_SENDERS))}
         rows = self.connection.execute(
             """SELECT r.first_source, r.sender, r.status, r.corroboration, r.first_seen, r.event_id,
                       CASE WHEN r.sender = '' THEN m.raw_content ELSE '' END
@@ -973,7 +1020,7 @@ class SQLiteStore:
         rows = self.connection.execute(
             """SELECT r.id, r.first_seen, r.last_seen, r.copies, r.sources, r.first_source, r.sender, r.urgency,
                       r.corroboration, r.status, r.lat, r.lon, COALESCE(a.summary, ''), m.raw_content, r.status_note,
-                      r.exercise, r.state, r.region, r.place_level, r.event_time, m.fields_json
+                      r.exercise, r.state, r.region, r.place_level, r.event_time, r.official, m.fields_json
                FROM reports r
                JOIN messages m ON m.id = (SELECT MIN(id) FROM messages WHERE report_id = r.id)
                LEFT JOIN analysis_results a ON a.message_id = m.id
@@ -982,7 +1029,7 @@ class SQLiteStore:
         ).fetchall()
         keys = ("report_id", "first_seen", "last_seen", "copies", "sources", "source", "sender", "urgency",
                 "corroboration", "status", "lat", "lon", "summary", "text", "status_note", "exercise", "state",
-                "region", "place_level", "event_time")
+                "region", "place_level", "event_time", "official")
         reports = []
         for row in rows:
             report = dict(zip(keys, row[:-1]))

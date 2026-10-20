@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 
 from PySide6.QtCore import QByteArray, QPoint, Qt, QTimer, Signal
 from PySide6.QtGui import QBrush, QColor, QFont, QPalette
+from s2_watch.focus import event_in_focus, has_focus
 from s2_watch.ui.event_detail import EventDetail
 from PySide6.QtWidgets import (
     QAbstractItemView, QCheckBox, QComboBox, QHBoxLayout, QHeaderView, QLabel, QPushButton, QSplitter, QTableWidget,
@@ -128,7 +129,7 @@ class EventsTable(QTableWidget):
             self.insertRow(row)
             area = ", ".join(part for part in (event.state, f"R{event.region}" if event.region else "") if part)
             lead = f"{event.radio_lead_minutes} min" if event.radio_lead_minutes else ""
-            in_focus = bool(focus) and event.region in focus
+            in_focus = event_in_focus(event, focus)
             cells = (
                 SortKeyItem(self.format_time(event.last_seen), (in_focus, event.last_seen.timestamp())),
                 QTableWidgetItem(event.title),
@@ -247,7 +248,8 @@ class EventsView(QWidget):
         self.multi_only = QCheckBox("Only events with 2+ reports")
         self.multi_only.setChecked(self.store.get_setting("events.multi_only", "0") == "1")
         self.multi_only.toggled.connect(self._filter_changed)
-        self.focus_only = QCheckBox("Focus regions only")
+        self.focus_only = QCheckBox("Focus only")
+        self.focus_only.setToolTip("Only events in your focus regions or custom area")
         self.focus_only.setChecked(self.store.get_setting("events.focus_only", "0") == "1")
         self.focus_only.toggled.connect(self._filter_changed)
         self.hide_closed = QCheckBox("Hide closed events")
@@ -296,7 +298,7 @@ class EventsView(QWidget):
 
     def set_focus_regions(self, regions) -> None:
         self.focus_regions = set(regions)
-        self.focus_only.setEnabled(bool(self.focus_regions))
+        self.focus_only.setEnabled(has_focus(self.focus_regions))
         self.refresh()
 
     def period_hours(self) -> int:
@@ -304,8 +306,9 @@ class EventsView(QWidget):
 
     def visible_events(self):
         since = datetime.now(timezone.utc) - timedelta(hours=self.period_hours())
-        regions = self.focus_regions if self.focus_only.isChecked() and self.focus_regions else None
-        events = self.store.events_since(since, regions)
+        events = self.store.events_since(since)
+        if self.focus_only.isChecked() and has_focus(self.focus_regions):
+            events = [event for event in events if event_in_focus(event, self.focus_regions)]
         if self.multi_only.isChecked():
             events = [event for event in events if event.reports > 1]
         if self.hide_closed.isChecked():
