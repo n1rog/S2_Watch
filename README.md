@@ -590,7 +590,8 @@ Added in 0.29 (each can be switched off under Configuration → Watch Forms):
 - **National Hurricane Center** active storms with position, winds and movement.
 - **Local public alerts (FEMA IPAWS)**: evacuations, shelter-in-place, law enforcement
   warnings, AMBER and missing-person alerts, road closures, from local authorities (the
-  weather service's own are left out). FEMA's archive runs about a day behind.
+  weather service's own are left out). FEMA's archive runs about a day behind, so these
+  alerts only appear with a watch period of 2 days or more (Configuration → Sources).
 - **Space weather (NOAA SWPC)**: radio blackouts R2+, radiation storms S2+, geomagnetic
   storms G3+, which affect HF propagation.
 - **Internet outages by state (IODA, Georgia Tech)**: critical outages.

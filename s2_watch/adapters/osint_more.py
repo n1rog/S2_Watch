@@ -428,7 +428,8 @@ SOURCE_LABELS = {
     "lsr": "NWS storm reports: floods, snow, ice, wildfire (Iowa State archive)",
     "rivers": "NWS river gauges at moderate or major flood stage",
     "nhc": "National Hurricane Center active storms",
-    "ipaws": "Local public alerts: evacuations, shelter in place, police (FEMA IPAWS, about a day behind)",
+    "ipaws": "Local public alerts: evacuations, shelter in place, police (FEMA IPAWS; a day behind, so they "
+             "show with a watch period of 2 days or more)",
     "space": "Space weather affecting HF radio (NOAA SWPC)",
     "ioda": "Internet outages by state (IODA, Georgia Tech)",
     "airports": "Airport closures and ground stops (FAA)",
