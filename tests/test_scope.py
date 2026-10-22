@@ -76,3 +76,20 @@ def test_an_official_entry_becomes_news_and_confirms_its_event(tmp_path: Path) -
     assert store.analyst_entries() == []
     [flood] = [e for e in store.events_since(T0 - timedelta(hours=1)) if e.event_id == radio]
     assert flood.reports == 1 and not flood.official
+
+
+def test_the_map_reloads_itself_when_its_engine_is_killed(monkeypatch) -> None:
+    from PySide6.QtWebEngineCore import QWebEnginePage
+
+    from s2_watch.ui import map_view as module
+
+    view = module.MapView()
+    reloads, messages = [], []
+    monkeypatch.setattr(module.QTimer, "singleShot", lambda ms, callback: reloads.append(ms))
+    view.engine_restarted.connect(messages.append)
+    killed = QWebEnginePage.RenderProcessTerminationStatus.KilledTerminationStatus
+    view._engine_ended(killed, 9)
+    view._engine_ended(killed, 9)                         # again soon after: wait longer
+    view._engine_ended(QWebEnginePage.RenderProcessTerminationStatus.NormalTerminationStatus, 0)   # closing: nothing
+    assert reloads == [2000, 10000] and not view._page_ready
+    assert messages[0] == "The map was stopped (the computer may have run out of memory); reloading it in 2 s."

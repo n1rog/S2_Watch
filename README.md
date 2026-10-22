@@ -229,6 +229,11 @@ started from the Actions tab (CI → Run workflow).
 `python tools/soak_monitor.py --hours 12` watches a running S2 Watch (Linux) and
 reports whether its memory keeps growing, following it across restarts.
 
+The map runs in its own engine process, which the system stops first when the computer
+runs out of memory (whatever program is using it). S2 Watch then reloads the map by
+itself, with all its layers, after 2 seconds (longer if it keeps being stopped: 10 s,
+1 min, 5 min within an hour), and the status bar says so.
+
 ## Development
 
 ```bash

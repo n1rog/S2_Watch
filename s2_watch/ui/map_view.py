@@ -15,7 +15,7 @@ from s2_watch.geocoding import NominatimGeocoder
 try:
     from PySide6.QtWebEngineWidgets import QWebEngineView
     from PySide6.QtWebChannel import QWebChannel
-    from PySide6.QtWebEngineCore import QWebEngineSettings
+    from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineSettings
 except ImportError:
     QWebEngineView = None
     QWebChannel = None
@@ -70,6 +70,9 @@ class MapBridge(QObject):
 
 
 class MapView(QWidget):
+    # The map's engine process died and the map was loaded again (the message says why).
+    engine_restarted = Signal(str)
+    RESTART_DELAYS_S = (2, 10, 60, 300)   # waits before reloading, longer if it keeps dying
     CATEGORY_ICONS = {
         "Civil Unrest": ("⚠", "#8e24aa"),
         "Climate / Environment": ("⛈", "#2e7d32"),
@@ -142,6 +145,8 @@ class MapView(QWidget):
         if self._web_view:
             layout.addWidget(self._web_view)
             self._web_view.loadFinished.connect(self._page_loaded)
+            self._web_view.page().renderProcessTerminated.connect(self._engine_ended)
+            self._restarts: list[float] = []      # when the engine was restarted (monotonic seconds)
             self._load_page()
         else:
             layout.addWidget(self._fallback)
@@ -328,6 +333,24 @@ class MapView(QWidget):
                 )
             )
         ]
+
+    def _engine_ended(self, status, exit_code: int) -> None:
+        """The map's engine process ended: killed when the computer ran out of memory, or it
+        crashed. Load the page again; every layer is sent again when it loads, from what this
+        view keeps. A map that keeps dying is reloaded less often."""
+        if status == QWebEnginePage.RenderProcessTerminationStatus.NormalTerminationStatus:
+            return
+        import time
+
+        self._page_ready = False
+        now = time.monotonic()
+        self._restarts = [when for when in self._restarts if now - when < 3600] + [now]
+        delay = self.RESTART_DELAYS_S[min(len(self._restarts), len(self.RESTART_DELAYS_S)) - 1]
+        killed = status == QWebEnginePage.RenderProcessTerminationStatus.KilledTerminationStatus
+        what = ("The map was stopped (the computer may have run out of memory)" if killed
+                else f"The map crashed (code {exit_code})")
+        self.engine_restarted.emit(f"{what}; reloading it in {delay} s.")
+        QTimer.singleShot(delay * 1000, self._load_page)
 
     def _page_loaded(self, ok: bool) -> None:
         self._page_ready = ok

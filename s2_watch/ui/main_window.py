@@ -772,6 +772,7 @@ class MainWindow(QMainWindow):
         self._worker.batch_ready.connect(self.handle_batch)
         self._worker.coverage_ready.connect(self.map_view.set_coverage)
         self._worker.coverage_ready.connect(self.coverage_updated)
+        self.map_view.engine_restarted.connect(lambda text: self.statusBar().showMessage(text, 60_000))
         self._worker.events_changed.connect(self.events_data_changed)
         self._worker_thread.start()
         self.refresh_forms()
