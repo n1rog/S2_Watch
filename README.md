@@ -157,6 +157,10 @@ official sources. MAGNET reports use the grade in each station's source rating (
 [B2]), and the event panel shows it beside each report. Exercise and test traffic doesn't
 count.
 
+The **History** tab searches every saved message: each word typed must appear in the
+message, its sender's call sign, its watch form or its headline (e.g. `K9DGY yemen`), with
+category, urgency and newsworthy filters; results show who each message is from.
+
 **Search** (above the list under the map, and on the Events tab) keeps the events or
 reports containing every word typed: for an event, its title, category, area, sources,
 labels, status and the full text, senders and notes of its reports. While searching,

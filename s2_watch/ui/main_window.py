@@ -281,7 +281,15 @@ class MainWindow(QMainWindow):
         self.edit_note_action.triggered.connect(self.edit_selected_note)
         self.analysis.addAction(self.edit_note_action)
         self.history_search = QLineEdit()
-        self.history_search.setPlaceholderText("Search message text or form name")
+        self.history_search.setPlaceholderText("Search words or a call sign, e.g. K9DGY yemen")
+        self.history_search.setClearButtonEnabled(True)
+        # As you type (after a pause), and on Enter.
+        self._history_timer = QTimer(self)
+        self._history_timer.setSingleShot(True)
+        self._history_timer.setInterval(400)
+        self._history_timer.timeout.connect(self.search_history)
+        self.history_search.textChanged.connect(lambda _text: self._history_timer.start())
+        self.history_search.returnPressed.connect(self.search_history)
         self.history_category = QComboBox()
         self.history_category.addItem("Any category", "")
         self.history_category.addItems(NEWS_CATEGORIES)
@@ -290,6 +298,9 @@ class MainWindow(QMainWindow):
         for urgency in ("low", "medium", "high"):
             self.history_urgency.addItem(urgency.title(), urgency)
         self.history_newsworthy = QCheckBox("Newsworthy only")
+        self.history_category.currentIndexChanged.connect(lambda _index: self.search_history())
+        self.history_urgency.currentIndexChanged.connect(lambda _index: self.search_history())
+        self.history_newsworthy.toggled.connect(lambda _on: self.search_history())
         search_history = QPushButton("Search history")
         search_history.clicked.connect(self.search_history)
         self.history = QListWidget()
@@ -613,12 +624,17 @@ class MainWindow(QMainWindow):
         live_layout.addWidget(self.messages)
 
         history_layout = QVBoxLayout()
-        history_layout.addWidget(QLabel("Search message text or form name"))
-        history_layout.addWidget(self.history_search)
-        history_layout.addWidget(self.history_category)
-        history_layout.addWidget(self.history_urgency)
-        history_layout.addWidget(self.history_newsworthy)
-        history_layout.addWidget(search_history)
+        history_layout.addWidget(QLabel("Search saved messages: every word must appear in the text, the sender's "
+                                        "call sign, the watch form or the headline"))
+        history_filters = QHBoxLayout()
+        history_filters.addWidget(self.history_search, 1)
+        history_filters.addWidget(self.history_category)
+        history_filters.addWidget(self.history_urgency)
+        history_filters.addWidget(self.history_newsworthy)
+        history_filters.addWidget(search_history)
+        history_layout.addLayout(history_filters)
+        self.history_count = QLabel()
+        history_layout.addWidget(self.history_count)
         history_layout.addWidget(self.history)
         self.map_filter_menu = QMenu(self)
         filter_action = QWidgetAction(self.map_filter_menu)
@@ -2301,12 +2317,17 @@ class MainWindow(QMainWindow):
             urgency=str(self.history_urgency.currentData()),
             newsworthy_only=self.history_newsworthy.isChecked(),
         )
-        for received_at, application, form_name, content, category, confidence in rows:
+        for received_at, application, form_name, content, category, confidence, sender in rows:
             confidence_text = f"{confidence:.0%}" if confidence is not None else "n/a"
+            source = f"{application} from {sender}" if sender else application
             self.history.addItem(
-                f"[{self.format_display_time(received_at)}] {application} | {form_name or 'unassigned'} | "
+                f"[{self.format_display_time(received_at)}] {source} | {form_name or 'unassigned'} | "
                 f"{category or 'unanalyzed'} | {confidence_text} | {content}"
             )
+        if hasattr(self, "history_count"):
+            words = self.history_search.text().strip()
+            self.history_count.setText(f"{len(rows)} message{'s' if len(rows) != 1 else ''}"
+                                       + (f" match “{words}”" if words else ""))
 
     def restore_window_state(self) -> None:
         geometry = self.store.get_setting("ui.geometry")

@@ -1138,13 +1138,18 @@ class SQLiteStore:
         category: str = "",
         urgency: str = "",
         newsworthy_only: bool = False,
-    ) -> list[tuple[str, str, str, str, str, float | None]]:
+    ) -> list[tuple[str, str, str, str, str, float | None, str]]:
+        """Saved messages, newest first: (received, application, form, text, category, confidence,
+        sender). ``text`` keeps the messages containing every word of it, in the message, its
+        sender (a call sign), its watch form or its headline."""
+        sender = ("CASE WHEN json_valid(m.fields_json) THEN COALESCE(json_extract(m.fields_json, '$.sender'), "
+                  "json_extract(m.fields_json, '$.from'), '') ELSE '' END")
         clauses = []
         parameters: list[object] = []
-        if text:
-            clauses.append("(m.raw_content LIKE ? OR m.form_name LIKE ?)")
-            wildcard = f"%{text}%"
-            parameters.extend((wildcard, wildcard))
+        for word in text.split():
+            clauses.append(f"(m.raw_content LIKE ? OR m.form_name LIKE ? OR {sender} LIKE ? "
+                           f"OR COALESCE(a.summary, '') LIKE ?)")
+            parameters.extend([f"%{word}%"] * 4)
         if category:
             clauses.append("COALESCE(a.category, '') = ?")
             parameters.append(category)
@@ -1156,7 +1161,7 @@ class SQLiteStore:
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         rows = self.connection.execute(
             f"""SELECT m.received_at, m.source_application, m.form_name, m.raw_content,
-                       COALESCE(a.category, ''), a.confidence
+                       COALESCE(a.category, ''), a.confidence, {sender}
                 FROM messages m
                 LEFT JOIN analysis_results a ON a.message_id = m.id
                 {where}

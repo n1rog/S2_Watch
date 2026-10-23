@@ -40,3 +40,18 @@ def test_the_list_under_the_map_can_show_400_rows_and_zulu_reaches_the_events(tm
         assert text.endswith("Z") and window.events_view.table.item(0, 0).text().endswith("L")
     finally:
         window.close()
+
+
+def test_history_finds_a_station_by_its_call_sign_and_every_word(tmp_path) -> None:
+    from s2_watch.models import Message
+    from s2_watch.monitoring import message_key
+
+    store = SQLiteStore(tmp_path / "s2.db")
+    for text, sender in (("QST YEMEN LL45 SAUDI-LED COALITION AIRSTRIKES", "K9DGY"),
+                         ("QST RETAIL CYBER UPDATE", "K9DGY"), ("YEMEN NET CHECK-IN", "W1AW")):
+        message = Message("MagCommstat", text, fields={"sender": sender})
+        store.save_message(message, message_key(message))
+    assert [row[6] for row in store.search_history(text="k9dgy")] == ["K9DGY", "K9DGY"]   # the sender, not the text
+    assert [row[3] for row in store.search_history(text="K9DGY yemen")] == ["QST YEMEN LL45 SAUDI-LED COALITION AIRSTRIKES"]
+    assert len(store.search_history(text="yemen")) == 2
+    assert store.search_history(text="K9DGJ") == []
