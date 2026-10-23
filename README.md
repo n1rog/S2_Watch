@@ -157,6 +157,11 @@ official sources. MAGNET reports use the grade in each station's source rating (
 [B2]), and the event panel shows it beside each report. Exercise and test traffic doesn't
 count.
 
+**Search** (above the list under the map, and on the Events tab) keeps the events or
+reports containing every word typed: for an event, its title, category, area, sources,
+labels, status and the full text, senders and notes of its reports. While searching,
+every match shows, past the row limit (Display → Newsworthiness rows shown, up to 400).
+
 Under the map, **Show: Events | Reports** switches the Newsworthiness list between events
 (the default) and individual reports. Right-click events to label all their reports,
 edit a note, draft a follow-up (from the newest radio report), show them on the map, or

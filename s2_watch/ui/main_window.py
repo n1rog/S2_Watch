@@ -32,7 +32,7 @@ from s2_watch.ui.help_view import HelpDialog
 from s2_watch.ui.keyword_noise_dialog import KeywordNoiseDialog
 from s2_watch.ui.senders_dialog import SendersDialog
 from s2_watch.ui.event_detail import EventDetail
-from s2_watch.ui.events_view import EventsTable, EventsView
+from s2_watch.ui.events_view import EventsTable, EventsView, search_box
 from s2_watch.ui.misses_view import MissesView
 from s2_watch.missed_news import MissedNewsScanner
 from s2_watch.events import incident_key, key_terms, place_from_locations, report_hazards, set_quiet_hours
@@ -158,12 +158,12 @@ class MainWindow(QMainWindow):
         self.review_duration.setCurrentIndex(index if index >= 0 else 2)
         self.review_duration.currentIndexChanged.connect(self.review_duration_changed)
         self.news_rows = QSpinBox()
-        self.news_rows.setRange(1, 100)
+        self.news_rows.setRange(1, 400)
         try:
             saved_news_rows = int(self.store.get_setting("news.rows", "10"))
         except ValueError:
             saved_news_rows = 10
-        self.news_rows.setValue(min(100, max(1, saved_news_rows)))
+        self.news_rows.setValue(min(400, max(1, saved_news_rows)))
         self.news_rows.valueChanged.connect(self.news_rows_changed)
         self.theme = self.create_choice_group(
             (("Light", "light"), ("Dark", "dark")),
@@ -685,6 +685,12 @@ class MainWindow(QMainWindow):
         switch_row = QHBoxLayout()
         self.news_label = QLabel()
         switch_row.addWidget(self.news_label, 1)
+        self.news_search = search_box("Search events and reports", self.search_news)
+        self.news_search.setToolTip("Every word must appear: in an event's title, sources, labels or its reports' "
+                                    "full text, or in a report's text and columns. Shows every match.")
+        switch_row.addWidget(self.news_search)
+        self.news_found = QLabel()
+        switch_row.addWidget(self.news_found)
         switch_row.addWidget(QLabel("Show:"))
         mode_group = QButtonGroup(self)
         mode_group.setExclusive(True)
@@ -1001,6 +1007,8 @@ class MainWindow(QMainWindow):
         self.news_mode_buttons[mode].setChecked(True)
         self.news_stack.setCurrentWidget(self.map_events_page if mode == "events" else self.analysis)
         self.update_news_label()
+        if hasattr(self, "news_search") and self.news_search.text().strip():
+            self.search_news(self.news_search.text())
         if mode == "events":
             self.refresh_map_events()
 
@@ -1167,10 +1175,36 @@ class MainWindow(QMainWindow):
 
     def apply_news_rows_limit(self) -> None:
         visible_rows = self.news_rows.value()
+        words = self.news_search.text().lower().split() if hasattr(self, "news_search") else []
         for row in range(self.analysis.rowCount()):
+            if words:   # searching: every match, however far down
+                self.analysis.setRowHidden(row, not all(word in self.report_row_text(row) for word in words))
+                continue
             status_item = self.analysis.item(row, self.STATUS_COLUMN)
             pinned = status_item is not None and status_item.data(self.STATUS_ROLE) in self.PINNED_STATUSES
             self.analysis.setRowHidden(row, row >= visible_rows and not pinned)
+
+    def report_row_text(self, row: int) -> str:
+        """A Reports-list row's searchable text: its cells and the full message."""
+        cells = [self.analysis.item(row, column).text() for column in range(self.analysis.columnCount())
+                 if self.analysis.item(row, column) is not None]
+        first = self.analysis.item(row, 0)
+        message = first.data(Qt.ItemDataRole.UserRole + 1) if first is not None else None
+        if isinstance(message, Message):
+            cells += [message.raw_content, message.fields.get("sender", "")]
+        return " ".join(cells).lower()
+
+    def search_news(self, text: str) -> None:
+        """Search the list under the map (events or reports, whichever is shown)."""
+        found = self.map_events.set_search(text)
+        self.apply_news_rows_limit()
+        if not text.strip():
+            self.news_found.setText("")
+        elif self.news_mode == "events":
+            self.news_found.setText(f"{found} found")
+        else:
+            shown = sum(not self.analysis.isRowHidden(row) for row in range(self.analysis.rowCount()))
+            self.news_found.setText(f"{shown} found")
 
     def theme_changed(self) -> None:
         theme = str(self.theme.checkedAction().data())
@@ -1218,6 +1252,11 @@ class MainWindow(QMainWindow):
                     if timestamp:
                         item.setText(self.format_display_time(timestamp))
         self.search_history()
+        # The events lists (Map and Events tabs), their panels, and Possible Misses show times too.
+        if hasattr(self, "events_view"):      # (not yet built while the window starts)
+            self.refresh_map_events()
+            self.events_view.refresh()
+            self.misses_view.refresh()
 
     def refresh_forms(self) -> None:
         install_default_forms(self.store)

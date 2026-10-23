@@ -14,7 +14,8 @@ from PySide6.QtGui import QBrush, QColor, QFont, QPalette
 from s2_watch.focus import event_in_focus, has_focus
 from s2_watch.ui.event_detail import EventDetail
 from PySide6.QtWidgets import (
-    QAbstractItemView, QCheckBox, QComboBox, QHBoxLayout, QHeaderView, QLabel, QPushButton, QSplitter, QTableWidget,
+    QAbstractItemView, QCheckBox, QComboBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QPushButton, QSplitter,
+    QTableWidget,
     QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
@@ -23,6 +24,20 @@ URGENCY_RANK = {"high": 3, "medium": 2, "low": 1}
 PINNED_STATUSES = {"interest", "followup"}
 STATUS_RANK = {"active": 2, "quiet": 1, "closed": 0}
 HIGHLIGHT_SECONDS = 15
+
+
+def search_box(placeholder: str, on_search) -> QLineEdit:
+    """A search field that calls ``on_search(text)`` once typing pauses."""
+    box = QLineEdit()
+    box.setPlaceholderText(placeholder)
+    box.setClearButtonEnabled(True)
+    box.setMinimumWidth(220)
+    timer = QTimer(box)
+    timer.setSingleShot(True)
+    timer.setInterval(250)
+    timer.timeout.connect(lambda: on_search(box.text()))
+    box.textChanged.connect(lambda _text: timer.start())
+    return box
 
 
 class SortKeyItem(QTableWidgetItem):
@@ -59,6 +74,9 @@ class EventsTable(QTableWidget):
         self.events = []
         self._seen: dict[int, datetime] = {}       # event id -> last activity at the previous fill
         self._highlight_until: dict[int, float] = {}
+        self._limit: int | None = None
+        self._query: list[str] = []                       # search words, lower case
+        self._haystacks: dict[tuple[int, str, str], str] = {}
         self.setHorizontalHeaderLabels(self.COLUMNS)
         self.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
@@ -117,6 +135,8 @@ class EventsTable(QTableWidget):
             if not first_fill and (previous is None or event.last_seen > previous):
                 self._highlight_until[event.event_id] = now + HIGHLIGHT_SECONDS   # new, or a new report
         self._seen = {event.event_id: event.last_seen for event in events}
+        current = {(event.event_id, event.last_seen.isoformat()) for event in events}
+        self._haystacks = {key: text for key, text in self._haystacks.items() if key[:2] in current}
         self.events = list(events)
         sorting = self.isSortingEnabled()
         self.setSortingEnabled(False)
@@ -174,11 +194,40 @@ class EventsTable(QTableWidget):
             self.store.set_setting(self.state_key, bytes(self.horizontalHeader().saveState().toBase64()).decode())
 
     def apply_limit(self, limit: int | None) -> None:
+        """Show the first ``limit`` rows (plus labelled ones); while searching, every match."""
+        self._limit = limit
         events = {event.event_id: event for event in self.events}
         for row in range(self.rowCount()):
             event = events.get(self.item(row, 0).data(self.EVENT_ROLE))
+            if self._query:
+                self.setRowHidden(row, event is None or not self.matches(event))
+                continue
             pinned = event is not None and bool(PINNED_STATUSES & set(event.statuses))
             self.setRowHidden(row, limit is not None and row >= limit and not pinned)
+
+    def set_search(self, query: str) -> int:
+        """Show only the events with every word of ``query`` (in the event or its reports'
+        text); the number that match. Empty: the usual list."""
+        self._query = query.lower().split()
+        self.apply_limit(self._limit)
+        return sum(self.matches(event) for event in self.events) if self._query else len(self.events)
+
+    def matches(self, event) -> bool:
+        haystack = self._haystack(event)
+        return all(word in haystack for word in self._query)
+
+    def _haystack(self, event) -> str:
+        key = (event.event_id, event.last_seen.isoformat(), event.close_reason + ",".join(event.statuses))
+        if key not in self._haystacks:
+            parts = [event.title, event.category, event.state, f"R{event.region}" if event.region else "",
+                     " ".join(event.sources), event.official, " ".join(event.statuses), event.close_reason,
+                     "closed" if event.closed_at is not None else "", "exercise" if event.exercise else ""]
+            if self.store is not None:     # its reports: full text, senders, headlines, notes
+                for report in self.store.event_reports(event.event_id):
+                    parts += [report.get("text") or "", report.get("sender") or "", report.get("summary") or "",
+                              report.get("status_note") or ""]
+            self._haystacks[key] = " ".join(parts).lower()
+        return self._haystacks[key]
 
     def _paint_highlights(self) -> None:
         now = time.monotonic()
@@ -268,6 +317,8 @@ class EventsView(QWidget):
         top.addWidget(self.focus_only)
         top.addWidget(self.hide_closed)
         top.addStretch(1)
+        self.search = search_box("Search events and their reports", lambda _text: self._show_count())
+        top.addWidget(self.search)
         top.addWidget(self.count)
         top.addWidget(briefing)
 
@@ -318,9 +369,17 @@ class EventsView(QWidget):
     def refresh(self) -> None:
         events = self.visible_events()
         self.table.set_events(events, self.focus_regions)
-        multi = sum(event.reports > 1 for event in events)
-        self.count.setText(f"{len(events)} events, {multi} with several reports")
+        self._show_count()
         self._selection_changed()
+
+    def _show_count(self) -> None:
+        events = self.table.events
+        found = self.table.set_search(self.search.text())
+        if self.search.text().strip():
+            self.count.setText(f"{found} of {len(events)} events match")
+        else:
+            multi = sum(event.reports > 1 for event in events)
+            self.count.setText(f"{len(events)} events, {multi} with several reports")
 
     def selected_event(self) -> int | None:
         selected = self.table.selected_events()
