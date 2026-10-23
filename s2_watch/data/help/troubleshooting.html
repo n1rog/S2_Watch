@@ -1,0 +1,20 @@
+<h1>Troubleshooting</h1>
+<table>
+<tr><th>What you see</th><th>Why, and what to do</th></tr>
+<tr><td>No reports at all; source lights grey “Not monitored”</td><td>No watch form is ticked. Tick the Topics (or a Whole applications
+form) under <a href="help:watch-forms">Watch forms</a>.</td></tr>
+<tr><td>JS8Call: Disconnected</td><td>JS8Call isn't running, or its TCP server API is off (JS8Call: File → Settings → Reporting). Check host and
+port (<code>127.0.0.1</code>, <code>2442</code>) under Configuration → Sources…, then <b>Connect to monitored applications</b>.</td></tr>
+<tr><td>A real report wasn't flagged</td><td>No keyword matched. Look under Possible Misses (with Ollama), add a keyword there, or widen a watch form.</td></tr>
+<tr><td>Chat flagged as news</td><td>Mark it Ignored (<kbd>X</kbd>). If one word keeps causing it, stop it under Reports → Keyword Noise.</td></tr>
+<tr><td>A report is in the wrong place</td><td>Use <b>fix location</b> in the event panel (<a href="help:reliability">Reliability tools</a>).</td></tr>
+<tr><td>Two incidents merged, or one split</td><td>Grouping is a best guess; it errs toward keeping reports apart. Tell N1ROG with the event titles.</td></tr>
+<tr><td>“failing: gdelt” in the status bar</td><td>GDELT news refused the request (“429 Too Many Requests”). S2 Watch retries in 30 minutes.</td></tr>
+<tr><td>No FEMA public alerts (IPAWS)</td><td>The archive runs a day behind: use a watch period of 2 days or more.</td></tr>
+<tr><td>APRS: “server refused the login”</td><td>APRS-IS needs a real call sign: enter yours with an SSID under Configuration → Sources…</td></tr>
+<tr><td>“The map was stopped … reloading it”</td><td>The computer ran short of memory and the map's engine was stopped; S2 Watch reloads it. If it keeps happening,
+close memory-hungry programs (browsers with many tabs).</td></tr>
+<tr><td>Markers vanish while zooming</td><td>Configuration → Display… → Software map rendering, then restart.</td></tr>
+<tr><td>An exercise inject shows as real</td><td>It had no exercise marker (<a href="help:exercises">Exercises</a>).</td></tr>
+</table>
+<p>Still stuck? Note what you did, what you expected and what happened (a screenshot helps), and send it to N1ROG.</p>

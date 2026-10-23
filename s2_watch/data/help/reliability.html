@@ -1,0 +1,45 @@
+<h1>Reliability tools</h1>
+<p>These help judge how far to trust a report. Each is a prompt for the analyst, never a verdict.</p>
+
+<h2>Station track records</h2>
+<p><b>Reports → Sender Track Records…</b> shows how each station's newsworthy radio reports have held up. A report counts
+<b>for</b> the station when an official source confirmed its event, or you marked it Of interest or Follow-up; <b>against</b> it
+when you marked it Ignored. With 5 or more judged reports the share that held up suggests a grade:</p>
+<table>
+<tr><th>Grade</th><th>Means</th><th>Held up</th></tr>
+<tr><td>B</td><td>usually reliable</td><td>85% or more</td></tr>
+<tr><td>C</td><td>fairly reliable</td><td>65% or more</td></tr>
+<tr><td>D</td><td>not usually reliable</td><td>40% or more</td></tr>
+<tr><td>E</td><td>unreliable</td><td>under 40%</td></tr>
+<tr><td>F</td><td>cannot be judged</td><td>fewer than 5 judged reports</td></tr>
+</table>
+<p>A is left to official sources. The grade appears beside each report in the event panel and in MAGNET source ratings.</p>
+<div class="example"><p><b>Example.</b> K6NLX has 8 reports; 5 had their events confirmed by NWS, none were ignored:
+<i>B — usually reliable (5 of 5 judged reports held up)</i>. KI6QDB has 5 reports, 1 marked useful: <i>F — too few judged reports (1 of 5 needed)</i>.</p></div>
+
+<h2>Keyword noise</h2>
+<p><b>Reports → Keyword Noise…</b> lists keywords that flagged reports you then marked Ignored, noisiest first, with how many came from
+radio and how many from official feeds. <b>Stop using this word</b> stops it making reports news in that category (other words in the
+same message still can); <b>Use again</b> undoes it.</p>
+<div class="example"><p><b>Example.</b> <i>Infrastructure · outage · 40 reports · 18 ignored (45%) · radio 18</i> — net check-ins saying
+“no outages” keep getting flagged. Stopping “outage” for Infrastructure leaves “power outage”, “blackout” and the rest working.
+By contrast, <i>Climate · hail · feeds 18</i> means minor official hail reports were ignored: the word is fine, keep it.</p></div>
+
+<h2>Time in message</h2>
+<p>When a radio report gives its own time, the event panel shows it beside when it was heard, and follow-up timelines use it.</p>
+<div class="example"><pre>TORNADO TOUCHDOWN AT 1420Z NEAR BIXBY          → 1420Z
+152330Z POWER OUT                              → 2330Z on the 15th
+POWER OUT SINCE 9:15 AM CDT                    → 1415Z
+DA[261016-0544Z]  (MagCommstat stamp)          → 0544Z 16 Oct
+STORM EXPECTED AT 1800Z                        → ignored (a forecast)
+WARNING UNTIL 1645Z                            → ignored</pre>
+<p>A time later than when the message was heard is ignored, except just before midnight. Radio lead still uses when reports were heard.</p></div>
+
+<h2>Fixing a location</h2>
+<p>Each report in the event panel shows where it was placed and a <b>fix location</b> link. Type where it really is:
+<code>Tulsa, OK</code>, <code>Osage County, OK</code>, <code>36.06, -95.88</code> or <code>EM26ab</code>. A town S2 Watch doesn't know
+can be looked up on OpenStreetMap with a button (nothing is sent unless you press it).</p>
+<div class="example"><p><b>Example.</b> Messages about “BIXBY” land only at the state level, because Bixby isn't in S2 Watch's place list.
+Fix one report, look up <code>Bixby, OK</code>, tick <b>Remember: wherever a message says</b> <code>BIXBY</code>: every report
+mentioning Bixby is placed there from then on. Unticked, the fix applies to that one message.</p></div>
+<p>See also: <a href="help:events">single source and radio silence</a> in the event panel.</p>

@@ -1,0 +1,45 @@
+<h1>Getting started</h1>
+<p>S2 Watch reads the radio messaging applications you already run and a set of official and open
+sources, picks out the reports that matter, groups them into events, checks them against official
+sources, and drafts MAGNET S2 reports and briefings. It only reads: it never transmits.</p>
+
+<h2>The main window</h2>
+<table>
+<tr><th>Part</th><th>What it is for</th></tr>
+<tr><td><b>Map</b> tab</td><td>The map, and under it the Newsworthiness list. <b>Watch period</b> sets how far back
+the list and map reach; <b>Map filters</b> chooses layers; <b>Draft briefing…</b> starts a shift briefing.</td></tr>
+<tr><td>Newsworthiness: <b>Events | Reports</b></td><td>Events groups reports about one happening into one line
+(the default); Reports lists every report on its own. Select an event and the <a href="help:events">event panel</a>
+beside the list says what it is about.</td></tr>
+<tr><td><b>Events</b> tab</td><td>All events in a period you choose, with filters and the same event panel.</td></tr>
+<tr><td><b>Possible Misses</b></td><td>Radio messages the watch forms didn't keep that the local AI thinks are news
+(<a href="help:local-ai">Local AI</a>).</td></tr>
+<tr><td><b>Live Monitor</b> / <b>History</b></td><td>Every kept message as it arrives / a search of everything saved.</td></tr>
+<tr><td><b>Metrics</b></td><td>Reports by category, region and source over time.</td></tr>
+<tr><td>Clock (top right)</td><td>Local or Zulu time; <b>Show Zulu</b> / <b>Show Local</b> switches every time in the app.</td></tr>
+</table>
+
+<h2>A typical watch</h2>
+<ol>
+<li>Glance at the map and the Events list: new and updated events are highlighted for a few seconds.</li>
+<li>Select an event and read the panel: its reports in full, whether an official source confirms it, how far
+ahead radio was, and any warnings (single source, radio silence).</li>
+<li>Label what matters: <b>Of interest</b>, <b>Follow-up created</b> or <b>Ignored</b> (<a href="help:labels">Labels</a>).</li>
+<li>Draft a follow-up report on an event, or a shift briefing at the end of the watch
+(<a href="help:briefings">Reports and briefings</a>).</li>
+</ol>
+
+<div class="example"><p><b>Example.</b> K6NLX sends a StatRep: <code>NA[NWS PHOENIX: DUST STORM NEAR MARICOPA, AZ]</code>.
+A minute later the same message arrives through JS8SuperSpotter.</p>
+<ul>
+<li>The two copies become one report (2 copies), placed at Maricopa, AZ, category Climate / Environment.</li>
+<li>It becomes the event <b>Dust storm near Maricopa, AZ</b>; an active NWS High Wind Warning there marks it
+<b>✓ Confirmed</b>.</li>
+<li>The panel shows K6NLX's track record (for example <b>B</b>, usually reliable) beside the report.</li>
+<li>Right-click the event → <b>Draft follow-up report…</b> gives a MAGNET S2 report with the timeline and
+sources already filled in.</li>
+</ul></div>
+
+<p>First time? Set your <a href="help:sources">sources</a>, your <a href="help:focus">focus regions</a>, and look at
+the <a href="help:watch-forms">watch forms</a>. The setup walk-through (<code>s2-watch --configure</code>) asks about
+all of these.</p>

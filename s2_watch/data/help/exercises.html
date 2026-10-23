@@ -1,0 +1,46 @@
+<h1>Exercises</h1>
+<p>S2 Watch recognises exercise and test traffic so a drill never passes for a real event.</p>
+
+<h2>Exercise in Progress</h2>
+<p><b>Configuration → Exercise in Progress</b> tells S2 Watch an exercise is running.</p>
+<table>
+<tr><th></th><th>Off (the default)</th><th>On</th></tr>
+<tr><td>Exercise messages</td><td>Kept in Live Monitor and History, marked “EXERCISE:”, but not news</td>
+<td>Judged like real traffic: news lists, events, map, alerts</td></tr>
+<tr><td>Marking</td><td>—</td><td>A red <b>EXERCISE</b> marker by the clock; “EXERCISE:” in the list; a red line in the event panel;
+reports and briefings get “EXERCISE:” in the subject and <code>EXERCISE EXERCISE EXERCISE</code> as first and last lines</td></tr>
+<tr><td>Real traffic</td><td colspan="2">Handled as usual, alongside the exercise</td></tr>
+<tr><td>Test traffic</td><td colspan="2">Never news</td></tr>
+</table>
+<p>Switching it on re-checks the watch period, so injects already received are picked up. <b>Turn it off after ENDEX</b>:
+exercise traffic then leaves the news lists and events. Exercise messages never count toward station track records or keyword noise.</p>
+
+<h2>What counts as exercise traffic</h2>
+<p>Radio messages only (JS8Call, MagCommstat, Commstat, FLMSG, JS8SuperSpotter, APRS), and only with clear markers. Capital letters don't matter.</p>
+<div class="example"><p><b>Recognised as exercise traffic:</b></p>
+<pre>W1AW: @MAGNET EXERCISE EXERCISE EXERCISE DAM FAILURE AT LAKE X
+EXERCISE: TORNADO DAMAGE IN TULSA
+THIS IS A DRILL. BRIDGE COLLAPSE ON I-35
+EXERCISE MESSAGE 3 OF 5 - FLOODING
+FOR EXERCISE PURPOSES ONLY - SHELTER OPEN AT ADA HS
+SIMULATED EMERGENCY: CHEMICAL SPILL ON RT 66
+STARTEX 1400Z
+NOT REAL WORLD - POWER OUT IN OKC</pre></div>
+<div class="example"><p><b>Treated as real traffic:</b></p>
+<pre>REAL WORLD: EXERCISE SUSPENDED, ACTUAL TORNADO IN TULSA     (real world wins)
+NO DUFF NO DUFF EXERCISE EXERCISE INJURED PERSON AT SITE    (no duff wins)
+Report actual events (not exercise or test)                 (no marker)
+Exercise caution on I-40 after the storm                    (a lone word)
+State Dept: Kenya - Level 1: Exercise Normal Precautions    (official feeds never count)</pre></div>
+<div class="example"><p><b>Test traffic (never news):</b></p>
+<pre>THIS IS A TEST OF THE NET
+RFI test message
+TEST TEST DE W1AW</pre></div>
+
+<h2>Tips for exercise planners</h2>
+<ul>
+<li>Start every inject with <code>EXERCISE EXERCISE EXERCISE</code>. A message with no marker looks like real traffic.</li>
+<li>In FLMSG forms, put the marker in the subject or message text: a field that just says “EXERCISE” isn't enough.</li>
+<li>An inject must still be kept by a <a href="help:watch-forms">watch form</a>: one with news words (flood, outage, injured…) is
+kept by the Topics; for injects without them, tick that application's “All … messages” form for the exercise.</li>
+</ul>

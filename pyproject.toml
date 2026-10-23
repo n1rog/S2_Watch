@@ -31,4 +31,4 @@ version = {attr = "s2_watch.__version__"}
 include = ["s2_watch*"]
 
 [tool.setuptools.package-data]
-s2_watch = ["data/*.geojson", "data/*.json", "data/web/*", "data/icons/*"]
+s2_watch = ["data/*.geojson", "data/*.json", "data/web/*", "data/icons/*", "data/help/*"]

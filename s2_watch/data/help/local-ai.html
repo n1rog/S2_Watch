@@ -1,0 +1,27 @@
+<h1>Local AI and Possible Misses</h1>
+<p>S2 Watch works without AI, using keyword rules. With <a href="https://ollama.com">Ollama</a> on the same computer it can read
+meaning as well. Nothing leaves your computer.</p>
+<h2>Setting it up</h2>
+<ol>
+<li>Install Ollama and run <code>ollama pull llama3.2</code>.</li>
+<li><b>Configuration → Analysis Mode → Local Ollama with rules fallback</b>.</li>
+<li>Optional: <b>Analysis Mode → Ollama settings…</b> to change the model or endpoint (default <code>http://127.0.0.1:11434</code>).</li>
+</ol>
+<h2>What it does</h2>
+<ul>
+<li>The rules read every message first; only radio messages they flag go to the model, which keeps S2 Watch quick on a computer without a
+suitable graphics card (about 9 seconds a message). Official feeds stay with the rules.</li>
+<li>The model drops chat the rules mistook for news, e.g. <i>“How often do you feel the earthquakes around your area?”</i>, and writes
+clearer headlines.</li>
+<li>In report drafts, <b>Suggest assessment &amp; gaps (Ollama)</b> drafts the analysis sections. Check every figure: drafts round and embellish.</li>
+<li>If Ollama stops answering, S2 Watch falls back to the rules and says so in the status bar.</li>
+</ul>
+<h2>Possible Misses</h2>
+<p>Tick <b>Analysis Mode → Check unmatched radio traffic in the background (Ollama)</b>. The model then reads, slowly, the radio messages no
+watch form kept, skipping heartbeats, CQs, signal reports and exercise or test traffic, and lists anything it thinks is news in the
+<b>Possible Misses</b> tab. It uses at most about a third of the computer's time.</p>
+<div class="example"><p><b>Example.</b> <code>W5ABC: TREES ACROSS HWY 9 EAST OF ADA, ONE LANE OPEN</code> wasn't kept: none of the
+Infrastructure keywords matched. It shows under Possible Misses as Infrastructure. <b>Add as report…</b> lets you correct the category,
+urgency and headline, and add a keyword (here <code>trees across</code>) to the Infrastructure topic, so the next such message is caught.
+<b>Dismiss</b> hides one that isn't news; <b>Restore</b> and <b>Delete</b> manage dismissed items. Your decisions are given to the model as
+examples, so it learns what this network counts as news.</p></div>

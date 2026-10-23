@@ -6,6 +6,11 @@ future application adapters.
 S2 Watch was created by N1ROG. Use **Help → About S2 Watch** to view the
 application version and a short description.
 
+**Help → S2 Watch Help** (or **F1**) opens the built-in help: sixteen searchable topics,
+from getting started through exercises, reliability tools and troubleshooting, each with
+worked examples. The topics are HTML files in `s2_watch/data/help/`, one per topic, with
+links between them written `help:<topic>`.
+
 The primary adapter connects to JS8Call's local TCP API, so the source
 application can remain minimized while S2 Watch displays matching messages.
 The text-log adapter remains available as a fallback for installations where

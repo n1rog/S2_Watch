@@ -1,0 +1,28 @@
+<h1>Settings, data and updates</h1>
+<h2>The Configuration menu</h2>
+<table>
+<tr><th>Item</th><th>Holds</th></tr>
+<tr><td>Analysis Mode</td><td>Rules only, or local Ollama; Ollama settings; the Possible Misses check</td></tr>
+<tr><td>Theme</td><td>Light or dark</td></tr>
+<tr><td>Focus Regions</td><td>Your MARS regions and custom area (<a href="help:focus">Focus</a>)</td></tr>
+<tr><td>Exercise in Progress</td><td><a href="help:exercises">Exercises</a></td></tr>
+<tr><td>Watch Forms</td><td>The forms page, and a switch for each OSINT source (<a href="help:watch-forms">Watch forms</a>)</td></tr>
+<tr><td>Display…</td><td>Time format (local or Zulu), Newsworthiness rows shown, desktop alerts (all, or high urgency only), place-name lookup,
+software map rendering, and when events go quiet</td></tr>
+<tr><td>Sources…</td><td>Radio application connections, the watch period, the NASA FIRMS key, APRS (<a href="help:sources">Sources</a>)</td></tr>
+<tr><td>Back Up Now / Open Backups Folder</td><td>Database backups</td></tr>
+</table>
+<p>The setup walk-through can be run again at any time: <code>s2-watch --configure</code> (Windows: Start menu → S2 Watch Setup).</p>
+
+<h2>Your data</h2>
+<p>Settings, watch forms, reports, labels, notes, entries and history live in one file, <code>s2_watch.db</code>. Once a day S2 Watch copies
+it to a <code>backups</code> folder beside it and keeps the last 14 copies. To restore one: quit S2 Watch and copy a backup over
+<code>s2_watch.db</code>.</p>
+
+<h2>Updating</h2>
+<div class="example"><p><b>Installed with Git</b> (recommended): quit S2 Watch, then in the folder you cloned:</p>
+<pre>git pull</pre>
+<p>Start S2 Watch again. If an update needs new packages, it installs them as it starts.</p>
+<p><b>Installed from a release package</b>: download the newest release and run its installer the same way. Either way your data is kept.</p></div>
+<p>Full instructions: <a href="https://github.com/n1rog/S2_Watch/blob/main/INSTALL.md">the install page</a>.
+The version is shown under <b>Help → About S2 Watch</b>.</p>

@@ -1,0 +1,43 @@
+<h1>Sources</h1>
+<p>S2 Watch reads six radio sources and about twenty official and open feeds. Radio sources are set under
+<b>Configuration → Sources…</b>; the feeds are switched on and off under <b>Configuration → Watch Forms</b>.</p>
+
+<h2>Radio sources</h2>
+<table>
+<tr><th>Source</th><th>How S2 Watch reads it</th><th>Set up</th></tr>
+<tr><td>JS8Call</td><td>Live, through its TCP interface</td><td>In JS8Call: File → Settings → Reporting → enable the TCP
+server API. In S2 Watch: host <code>127.0.0.1</code>, port <code>2442</code>.</td></tr>
+<tr><td>MagCommstat, Commstat</td><td>Their message databases (<code>traffic.db3</code>)</td><td>The database paths</td></tr>
+<tr><td>FLMSG</td><td>Received forms in its message folder</td><td>The folder, e.g. <code>~/.nbems/ICS/messages</code></td></tr>
+<tr><td>JS8SuperSpotter</td><td>Its database (<code>js8spotter.db</code>)</td><td>The database path</td></tr>
+<tr><td>APRS</td><td>Bulletins (BLN0–BLN9 and named groups) from APRS-IS, receive-only, U.S. stations only</td>
+<td>Tick <b>Read APRS bulletins</b> and enter your call sign with an SSID, e.g. <code>N0ABC-13</code>. Servers refuse
+anonymous logins; nothing is sent to RF.</td></tr>
+</table>
+<p><b>Review existing feeder data from</b> is the watch period: how far back S2 Watch reads each application's history
+when it starts. APRS-IS has no history: you see bulletins from the moment S2 Watch connects.</p>
+
+<h2>Official and open sources (OSINT)</h2>
+<p>NWS alerts, storm reports and river gauges; the National Hurricane Center; USGS earthquakes and volcanoes;
+NOAA SPC storm reports; NIFC wildfires; FEMA declarations and local public alerts (IPAWS); NOAA space weather;
+FAA security restrictions, airport closures and ground stops; State Department advisories; internet outages (IODA);
+news about unrest and violence (GDELT). Off by default: worldwide disasters (GDACS), newly exploited software flaws
+(CISA), closed border crossings (CBP) and satellite fire detections (NASA FIRMS, which needs a free map key entered
+under Sources).</p>
+<p>Each source has a switch, how often it is fetched, and its status: <b>Configuration → Watch Forms</b> (the submenu
+or the page). Turning one off stops it at once and takes its items off the map; reports already saved stay until
+they leave the watch period.</p>
+
+<h2>Status lights</h2>
+<p>Configuration → Sources… shows one light per source: <b>green</b> connected, <b>red</b> not connected,
+<b>grey</b> not monitored (no watch form uses it) or switched off. The status bar at the bottom says the same in a line.</p>
+
+<div class="example"><p><b>Example.</b> The status bar reads
+<code>OSINT: Connected (faa, state, …, volcanoes); failing: gdelt</code>.</p>
+<p>Every OSINT source works except GDELT news, which refused the request (often “429 Too Many Requests”).
+S2 Watch waits 30 minutes before asking again; nothing needs doing.</p></div>
+
+<div class="example"><p><b>Example.</b> FEMA's public alerts (IPAWS) never appear.</p>
+<p>FEMA's archive runs about a day behind, so with a 24-hour watch period every alert arrives already too old.
+Set the watch period to 2 days or more to see them.</p></div>
+<p>See also: <a href="help:confirmation">Official confirmation</a>, <a href="help:troubleshooting">Troubleshooting</a>.</p>

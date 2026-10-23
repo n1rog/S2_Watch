@@ -28,6 +28,7 @@ from s2_watch.ui.focus_area_dialog import FocusAreaDialog
 from s2_watch.adapters.analyst import AnalystAdapter, entry_message
 from s2_watch.ui.analyst_entry_dialog import AnalystEntriesDialog, AnalystEntryDialog
 from s2_watch.ui.fix_location_dialog import FixLocationDialog
+from s2_watch.ui.help_view import HelpDialog
 from s2_watch.ui.keyword_noise_dialog import KeywordNoiseDialog
 from s2_watch.ui.senders_dialog import SendersDialog
 from s2_watch.ui.event_detail import EventDetail
@@ -598,6 +599,11 @@ class MainWindow(QMainWindow):
         self._clock_timer.timeout.connect(self.update_clock)
         self._clock_timer.start(1000)
         self.update_clock()
+        help_action = help_menu.addAction("S2 Watch Help")
+        help_action.setShortcut(QKeySequence("F1"))
+        help_action.triggered.connect(lambda: self.show_help())
+        self._help_dialog = None
+        help_menu.addSeparator()
         about_action = help_menu.addAction("About S2 Watch")
         about_action.triggered.connect(self.show_about)
         self.statusBar().addWidget(self.status, 1)
@@ -1038,6 +1044,16 @@ class MainWindow(QMainWindow):
                 lambda: (self.tabs.setCurrentWidget(self.events_view), self.events_view.table.select_event(event_ids[0])))
         menu.addAction("Show its reports").triggered.connect(lambda: self.show_reports(report_ids))
         menu.exec(position)
+
+    def show_help(self, topic: str = "") -> None:
+        """Help → S2 Watch Help (F1): one window, brought forward if already open."""
+        if self._help_dialog is None:
+            self._help_dialog = HelpDialog(self)
+        if topic:
+            self._help_dialog.show_topic(topic)
+        self._help_dialog.show()
+        self._help_dialog.raise_()
+        self._help_dialog.activateWindow()
 
     def coverage_updated(self, cells: list[dict]) -> None:
         self.coverage_cells = cells

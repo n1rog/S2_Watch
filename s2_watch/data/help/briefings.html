@@ -1,0 +1,47 @@
+<h1>Reports and briefings</h1>
+<p>S2 Watch drafts MAGNET S2 Intelligence Reports. Nothing is sent: you edit, then copy or save.</p>
+
+<h2>Starting a draft</h2>
+<table>
+<tr><th>Product</th><th>Where</th></tr>
+<tr><td>Follow-up report on one event or report</td><td>Right-click it → <b>Draft follow-up report…</b>, or the event panel's <b>Draft follow-up…</b></td></tr>
+<tr><td>Shift briefing for the watch period</td><td><b>Draft briefing…</b> on the Map tab or the Events tab, or <b>Reports → Draft Shift Briefing…</b></td></tr>
+</table>
+
+<h2>The draft window</h2>
+<ol>
+<li><b>1. Full report</b>: the MAGNET S2 report. Write and edit here first. Lines in (parentheses) are prompts to replace.</li>
+<li><b>2. FLMSG</b>: upper-case text wrapped for radio, made from the full report as you edit; <b>Save as text file…</b> for an FLMSG form.</li>
+<li><b>3. JS8Call</b>: a short message from the report's fields, with a character count.</li>
+</ol>
+<p>Buttons: <b>Suggest assessment &amp; gaps (Ollama)</b> if a local model is set up; <b>Copy this tab</b>; <b>Save Word report…</b>
+and <b>Save web page…</b> in our format; <b>Save in S2 Watch</b> to reopen later from <b>Reports → Saved Reports &amp; Briefings…</b>;
+and <b>Mark report “Follow-up created”</b> / <b>Mark briefing sent</b>.</p>
+
+<h2>What the report holds</h2>
+<p>The routing table (Subject, Purpose, DTG, Reporting Period, Geographic Focus, Precedence, MagCon Status, Sources), then Summary (BLUF),
+Background, Situation with a timeline, Comments / Assessment with a probability table, Intelligence Gaps, Mitigation Recommendations,
+MAGNET Guidance, the Source List and tags. S2 Watch fills what its data supports; the analysis sections start as prompts.</p>
+<div class="example"><p><b>Example lines.</b></p>
+<pre>DTG: 261023-1430Z
+~1420Z 23 Oct | MagCommstat (KD0ABC): Flooding on Riverside Dr
+Flooding | HIGH
+[1] MagCommstat (KD0ABC) [B2] — radio report, heard 1425Z 23 Oct
+[2] NWS [A1] — official report, heard 1510Z 23 Oct — https://…</pre>
+<p>In the Word and web versions, “time | event” lines become the timeline and “category | HIGH” lines the probability table.
+Files are named from the subject and DTG, e.g. <code>MAGNET_S2_FLOODING_TULSA_OK_261023-1430Z</code>.</p></div>
+
+<h2>Source ratings</h2>
+<p>Each source gets a suggested Admiralty rating: reliability <b>A</b> for official sources, <b>C</b> for news, and for a radio
+station the grade its <a href="help:reliability">track record</a> suggests (<b>F</b> until it can be judged); credibility <b>1</b>
+when another independent source confirms it, <b>2</b> when several agree, <b>6</b> when it can't yet be judged. Adjust them as the analyst.</p>
+
+<h2>What briefings include</h2>
+<ul>
+<li>priority items: your focus regions and custom area first, then by urgency, radio-reported events ahead of official-only ones;</li>
+<li>for each, any warning: single source, quiet for some hours, radio silence nearby;</li>
+<li>activity by category; events closed in the period under <b>Resolved in the Period</b>;</li>
+<li>what is new since the last briefing marked sent.</li>
+</ul>
+<p>The MagCon status you set in a report becomes the default for the next one. During an exercise, drafts are marked
+EXERCISE at the top, bottom and in the subject (<a href="help:exercises">Exercises</a>).</p>

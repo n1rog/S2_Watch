@@ -1,0 +1,55 @@
+<h1>Events and the event panel</h1>
+<p>An <b>event</b> is one real happening, with every report about it: a StatRep, a JS8Call message, an NWS warning and a
+FEMA declaration about one flood are one event.</p>
+
+<h2>How reports join an event</h2>
+<ul>
+<li>Same category and kind of hazard (flooding with flooding, not with a fire nearby);</li>
+<li>within 48 hours of the event's latest report;</li>
+<li>within about 100 km (150 km for earthquakes, 250 km for hurricanes), or the same state when only the state is known.</li>
+</ul>
+<p>A named official incident (a NIFC fire, a USGS quake, a hurricane, a river gauge) stays one event however long it
+lasts. Stories without a physical hazard (crime, politics) must also share distinctive words. When unsure, S2 Watch
+keeps reports apart: one story shown as two events is safer than two incidents merged.</p>
+
+<h2>Status</h2>
+<table>
+<tr><th>Status</th><th>Means</th></tr>
+<tr><td>Active</td><td>Reports are still coming in.</td></tr>
+<tr><td>Quiet 14 h</td><td>No new report for 14 hours (the threshold is set under Configuration → Display…, 12 hours by default). It may be over.</td></tr>
+<tr><td>Closed: power restored</td><td>A report said it is over, or you closed it. Closed events are greyed; the Events tab can hide them.</td></tr>
+</table>
+
+<div class="example"><p><b>Example: an event closing itself.</b></p>
+<pre>14:05Z  KD0ABC: TULSA OK - POWER OUTAGE ACROSS NORTH TULSA
+16:40Z  KD0ABC: TULSA OK - POWER HAS BEEN RESTORED, OUTAGE OVER</pre>
+<p>The second report joins the event and closes it: <b>Closed: power has been restored</b>. If a third report says
+<code>POWER OUTAGE AGAIN NORTH TULSA</code>, the event reopens.</p>
+<p>Words that close an event: <i>all clear</i>, <i>power restored</i>, <i>warning cancelled</i>, <i>evacuation order lifted</i>,
+<i>bridge reopened</i>, <i>100% contained</i>, <i>suspect in custody</i>, <i>net secured</i>. A negation keeps it open:
+<code>POWER NOT YET RESTORED</code> does not close it. Only radio and official reports close events; a news headline
+such as “suspects arrested” never does.</p></div>
+
+<h2>The event panel</h2>
+<p>Select an event (on the Map tab or the Events tab) and the panel shows:</p>
+<ul>
+<li>category, area, urgency, when it was heard and how many reports from which sources;</li>
+<li>its status, and official confirmation with the radio lead (<a href="help:confirmation">Official confirmation</a>);</li>
+<li>warnings: <b>⚠ Single source</b> or <b>📡 Radio silence nearby</b> (below);</li>
+<li>your labels and notes;</li>
+<li>every report in the order heard: full text, sender and its <a href="help:reliability">track record</a>, the time the
+message gives, its own confirmation, a link for official and news items, where it was placed, and a
+<b>fix location</b> link.</li>
+</ul>
+<p>Buttons: <b>Show on map</b>, <b>Draft follow-up…</b>, <b>Label</b>, <b>Show its reports</b>, <b>Close event…</b> / <b>Reopen event</b>.
+Right-clicking events in either list gives the same actions for several at once.</p>
+
+<div class="example"><p><b>Example: single source.</b> Only W2XYZ has reported a bridge collapse, and two hours later no other
+station and no official source has said so. The panel shows <i>⚠ Single source: only one station or outlet has reported this,
+and nothing has confirmed it in 2 hours</i>, and a briefing asks “Can another station or an official source confirm …?”
+A second station's report, or an official item, clears it. News stories alone are never flagged: most are one article.</p></div>
+
+<div class="example"><p><b>Example: radio silence.</b> A tornado event sits near grid square EM26, whose stations normally send
+about 6 messages every 3 hours. They have sent nothing for 5 hours. The panel shows <i>📡 Radio silence nearby: stations
+around EM26 (KD0ABC, W5XYZ) usually send about 6 messages every 3 hours and haven't been heard for 5 hours.</i> Silence is
+only reported next to an open event: on its own it is usually just a lull.</p></div>

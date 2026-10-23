@@ -1,0 +1,38 @@
+<h1>Watch forms</h1>
+<p>A message is <b>kept</b> when a checked watch form matches it; S2 Watch then decides whether it is news.
+Messages no form keeps are not saved (the local AI can still list them under Possible Misses).</p>
+<p><b>Configuration → Watch Forms → Edit Watch Forms…</b> lists the forms in three groups:</p>
+<ul>
+<li><b>Topics</b>: keywords for each kind of news (Crime, Infrastructure, Climate / Environment…), checked in every
+application's messages. Each says what it matches, e.g. <i>Keywords: shooting, shooter, shots fired… (+32 more)</i>;
+hover for the full pattern.</li>
+<li><b>Whole applications</b>: every message from one application, e.g. <i>All JS8Call messages</i>.</li>
+<li><b>Your forms</b>: forms you added or imported.</li>
+</ul>
+<p>Tick or untick a form to turn it on or off; double-click to edit; right-click to edit or remove.</p>
+
+<h2>Adding a form</h2>
+<p><b>Add form…</b> asks for a name, which application to watch, and what to keep:</p>
+<table>
+<tr><th>Keep</th><th>Example</th><th>Keeps</th><th>Doesn't keep</th></tr>
+<tr><td>Every message</td><td>Watch messages from <i>FLMSG</i></td><td>every FLMSG form</td><td>—</td></tr>
+<tr><td>Messages containing this text</td><td><code>SKYWARN</code></td><td><code>W5ABC: SKYWARN NET ACTIVATED</code></td>
+<td><code>W5ABC: WX SPOTTER NET</code></td></tr>
+<tr><td>Messages with any of these words</td><td><code>bridge out, road closed, washout</code></td>
+<td><code>BRIDGE OUT ON RT 9</code></td><td><code>THE BRIDGE IS OPEN</code></td></tr>
+<tr><td>Regular expression (advanced)</td><td><code>\bboil\s+water\b</code></td><td><code>BOIL WATER NOTICE FOR ADA</code></td>
+<td><code>BOILER ROOM</code></td></tr>
+</table>
+<p>“Any of these words” matches whole words: <code>ice</code> doesn't match “police”. Capital letters never matter.</p>
+<p>Narrow a form further with <b>Only this message type</b> (e.g. <code>STATREP</code> for MagCommstat StatReps,
+<code>EARTHQUAKE</code> for OSINT quakes) or <b>Only from sender</b> (a call sign, e.g. <code>K6NLX</code>).</p>
+
+<div class="example"><p><b>Example: watching one net.</b> To keep everything a net control station sends:</p>
+<p>Name <code>Region 6 net control</code> · Watch messages from <i>All applications</i> · Keep <i>Every message</i> ·
+Only from sender <code>W5NCS</code>.</p></div>
+
+<h2>Sharing forms</h2>
+<p><b>Export…</b> saves all forms to a file; <b>Import…</b> adds forms from one, so a station can pass its forms to others.</p>
+<p>Words also get added and removed by the app's own tools: <b>Add as report…</b> in Possible Misses can add a
+keyword to a topic, and <b>Reports → Keyword Noise</b> can stop one (<a href="help:reliability">Reliability tools</a>).
+Changing forms re-checks the whole watch period.</p>

@@ -1,0 +1,30 @@
+<h1>Official confirmation and radio lead</h1>
+<p>A radio report is <b>confirmed</b> when an official source describes the same kind of hazard, close to the same place,
+at about the same time. The <b>Official</b> column of the Reports list and the event panel then show it.</p>
+<div class="example"><p><b>Example.</b> <code>✓ NWS Flood Warning · radio 45 min earlier</code> — an active NWS Flood Warning
+covers the report's location, and our network reported the flooding 45 minutes before the warning was issued.</p></div>
+
+<table>
+<tr><th>Source</th><th>Confirms</th><th>Counts as near</th><th>Time window</th></tr>
+<tr><td>NWS watches and warnings</td><td>Weather hazards</td><td>Inside the alert area or its counties</td><td>While active</td></tr>
+<tr><td>NWS local storm reports</td><td>Floods, snow, ice, wildfire, wind damage</td><td>50 km</td><td>12 hours</td></tr>
+<tr><td>NWS river gauges</td><td>Flooding</td><td>60 km</td><td>2 days</td></tr>
+<tr><td>National Hurricane Center</td><td>Tropical storms, their wind and flooding</td><td>400 km</td><td>2 days</td></tr>
+<tr><td>USGS</td><td>Earthquakes</td><td>150 km</td><td>24 hours</td></tr>
+<tr><td>SPC storm reports</td><td>Tornado, hail, damaging wind</td><td>50 km</td><td>12 hours</td></tr>
+<tr><td>NIFC</td><td>Wildfires and smoke</td><td>60 km</td><td>30 days</td></tr>
+<tr><td>Local public alerts (IPAWS)</td><td>The hazard the alert names</td><td>50 km of the place it names</td><td>1 day</td></tr>
+<tr><td>FEMA declarations</td><td>The declared hazard</td><td>Anywhere in that state</td><td>30 days</td></tr>
+<tr><td>FAA flight restrictions</td><td>VIP and security activity</td><td>50 km</td><td>7 days</td></tr>
+<tr><td>NASA FIRMS (optional)</td><td>Wildfires</td><td>30 km</td><td>1 day</td></tr>
+</table>
+
+<ul>
+<li><b>Radio lead</b> is how long before the official source our network reported it. Radio lead compares when the reports
+were heard, not the time a message says something happened.</li>
+<li><b>News websites never confirm</b>; they are open-source coverage. An <a href="help:intelligence-entries">intelligence entry</a>
+confirms only when entered as coming from an official source.</li>
+<li><b>A blank means unconfirmed, not false.</b> Many real reports (outages, supply problems, local incidents) have no official counterpart.</li>
+<li>The report's location must be specific (coordinates, grid square, town or county) for a match, except a FEMA declaration,
+which confirms anything placed in its state.</li>
+</ul>
