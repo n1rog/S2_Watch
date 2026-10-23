@@ -1077,6 +1077,8 @@ class SQLiteStore:
         return int(row[0])
 
     def save_analysis(self, message_id: int, result: AnalysisResult, analyzer: str = "") -> None:
+        """Save a message's analysis. The operator's own ("operator": a possible miss added, with
+        corrections; "ollama-find" in 0.22–0.30) is kept for good: no analyzer overwrites it."""
         self.connection.execute(
             """INSERT INTO analysis_results(
                  message_id, newsworthy, category, urgency, summary, confidence, matched_terms, analyzer
@@ -1088,7 +1090,9 @@ class SQLiteStore:
                  summary = excluded.summary,
                  confidence = excluded.confidence,
                  matched_terms = excluded.matched_terms,
-                 analyzer = excluded.analyzer""",
+                 analyzer = excluded.analyzer
+               WHERE analysis_results.analyzer NOT IN ('operator', 'ollama-find')
+                  OR excluded.analyzer IN ('operator', 'ollama-find')""",
             (
                 message_id,
                 int(result.newsworthy),
@@ -1112,10 +1116,11 @@ class SQLiteStore:
         return None
 
     def saved_analysis(self, message_id: int, analyzer: str) -> AnalysisResult | None:
-        """The analysis this analyzer already made of a message, so it needn't run again."""
+        """The analysis this analyzer already made of a message, so it needn't run again; the
+        operator's own analysis, whichever analyzer asks."""
         row = self.connection.execute(
             """SELECT newsworthy, category, urgency, summary, confidence, matched_terms FROM analysis_results
-               WHERE message_id = ? AND analyzer = ?""", (message_id, analyzer),
+               WHERE message_id = ? AND (analyzer = ? OR analyzer IN ('operator', 'ollama-find'))""", (message_id, analyzer),
         ).fetchone()
         if not row:
             return None

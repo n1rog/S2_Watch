@@ -124,3 +124,31 @@ def test_the_add_form_suggests_the_model_s_word_and_returns_the_correction() -> 
     corrected = dialog.corrected(0.8)
     assert (corrected.urgency, corrected.category, corrected.newsworthy) == ("high", "Climate / Environment", True)
     assert dialog.chosen_keyword() == "isaias"
+
+
+def test_a_corrected_miss_keeps_its_category_when_checked_again(tmp_path) -> None:
+    from dataclasses import replace
+    from datetime import datetime, timezone
+
+    from s2_watch.analysis.rules import RuleBasedNewsAnalyzer
+    from s2_watch.models import WatchForm
+    from s2_watch.monitoring import Monitor, legacy_message_key, message_key
+
+    store = SQLiteStore(tmp_path / "s2.db")
+    message = Message("JS8Call", "W5ABC: TREES ACROSS HWY 9 EAST OF ADA, ONE LANE OPEN",
+                      received_at=datetime(2026, 10, 23, 14, tzinfo=timezone.utc))
+    corrected = AnalysisResult(True, "Infrastructure", "medium", "Trees across Hwy 9 near Ada", 0.6)
+    message_id = store.save_message(replace(message, form_name="Ollama find"), message_key(message),
+                                    legacy_message_key(message))
+    store.save_analysis(message_id, corrected, "operator")          # what Add as report… saves
+    store.assign_report(message_id, message, corrected)
+
+    class Feeder:
+        def read_messages(self):
+            return [message]
+
+    # Later a form keeps the message and the rules (which call it routine) read it again.
+    Monitor([Feeder()], [WatchForm("JS8Call", "All JS8Call messages", "")], store, lambda _m: None,
+            RuleBasedNewsAnalyzer(), on_saved=lambda i, m, r: store.assign_report(i, m, r)).poll()
+    assert store.connection.execute("SELECT newsworthy, category FROM reports").fetchone() == (1, "Infrastructure")
+    assert store.connection.execute("SELECT analyzer FROM analysis_results").fetchone() == ("operator",)

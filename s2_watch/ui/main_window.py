@@ -1996,7 +1996,7 @@ class MainWindow(QMainWindow):
         """Save a possible miss the operator confirmed (and corrected) as a report, and show it."""
         matched = replace(message, form_name="Ollama find")
         message_id = self.store.save_message(matched, message_key(message), legacy_message_key(message))
-        self.store.save_analysis(message_id, result, "ollama-find")
+        self.store.save_analysis(message_id, result, "operator")   # the operator's decision: kept for good
         # A place the operator typed wins over what the message's own words give.
         locations = (self._official_resolver.resolve(Message(message.source_application, place)) if place else []) \
             or self._official_resolver.resolve(matched)
