@@ -1051,7 +1051,8 @@ class MainWindow(QMainWindow):
 
     def refresh_map_events(self) -> None:
         since = datetime.now(timezone.utc) - timedelta(hours=int(self.review_duration.currentData()))
-        self.map_events.set_events(self.store.events_since(since), self.focus_regions, limit=self.news_rows.value())
+        self.map_events.set_events([event for event in self.store.events_since(since) if world.event_covered(event)],
+                                   self.focus_regions, limit=self.news_rows.value())
 
     def selected_event_reports(self) -> list[int]:
         return [report["report_id"] for event_id in self.map_events.selected_events()
@@ -1209,13 +1210,20 @@ class MainWindow(QMainWindow):
     def apply_news_rows_limit(self) -> None:
         visible_rows = self.news_rows.value()
         words = self.news_search.text().lower().split() if hasattr(self, "news_search") else []
+        shown = 0
         for row in range(self.analysis.rowCount()):
+            first = self.analysis.item(row, 0)
+            message = first.data(Qt.ItemDataRole.UserRole + 1) if first is not None else None
+            if isinstance(message, Message) and not world.message_covered(message, first.data(self.LOCATIONS_ROLE)):
+                self.analysis.setRowHidden(row, True)       # outside the coverage
+                continue
             if words:   # searching: every match, however far down
                 self.analysis.setRowHidden(row, not all(word in self.report_row_text(row) for word in words))
                 continue
             status_item = self.analysis.item(row, self.STATUS_COLUMN)
             pinned = status_item is not None and status_item.data(self.STATUS_ROLE) in self.PINNED_STATUSES
-            self.analysis.setRowHidden(row, row >= visible_rows and not pinned)
+            self.analysis.setRowHidden(row, shown >= visible_rows and not pinned)
+            shown += 1
 
     def report_row_text(self, row: int) -> str:
         """A Reports-list row's searchable text: its cells and the full message."""
@@ -1977,6 +1985,11 @@ class MainWindow(QMainWindow):
             self.watch_forms_page.osint_boxes["gdacs"].setChecked(True)
         for name in osint_sources.COVERAGE_DEPENDENT | (osint_sources.US_ONLY if "us" not in chosen else set()):
             osint_sources.forget(name)
+        # What is already on screen follows the coverage too: markers, reports and events outside it hide.
+        self.map_view.coverage_changed()
+        self.apply_news_rows_limit()
+        self.refresh_map_events()
+        self.events_view.refresh()
         self.refresh_official()
         self.rescan_sources()
         self.update_news_label()
@@ -2122,7 +2135,7 @@ class MainWindow(QMainWindow):
             last_briefing = None
         now = datetime.now(timezone.utc)
         if from_map:
-            events = self.store.events_since(now - timedelta(hours=hours))
+            events = [event for event in self.store.events_since(now - timedelta(hours=hours)) if world.event_covered(event)]
         else:
             events = self.events_view.visible_events()
         magcon = self.store.get_setting("magcon.status", DEFAULT_MAGCON)

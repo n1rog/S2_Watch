@@ -167,13 +167,52 @@ class World:
         return None
 
 
+@lru_cache(maxsize=8192)
+def area_at(lat: float, lon: float) -> str | None:
+    """The world area of a point (remembered: the same places come up again and again)."""
+    return load_world().area_of(lat, lon)
+
+
 def location_area(location) -> str | None:
     """The world area of a resolved location: the U.S. for U.S. states and MARS regions."""
     from s2_watch.locating import load_gazetteer
 
     if location.region or (location.state and location.state in load_gazetteer().state_names):
         return "us"
-    return load_world().area_of(location.lat, location.lon)
+    return area_at(location.lat, location.lon)
+
+
+def everything_covered() -> bool:
+    return COVERAGE >= set(AREA_NAMES)
+
+
+def locations_covered(locations) -> bool:
+    """Whether a message is shown under the coverage: it names no place, or a place in a
+    covered area. Messages received before an area was taken out of the coverage hide with it."""
+    if not locations or everything_covered():
+        return True
+    return any(covers(location_area(location)) for location in locations)
+
+
+# U.S. guidance about other countries: shown whatever the coverage.
+ALWAYS_COVERED_TYPES = {"TRAVEL ADVISORY"}
+
+
+def message_covered(message, locations) -> bool:
+    return message.fields.get("type") in ALWAYS_COVERED_TYPES or locations_covered(locations)
+
+
+def event_area(event) -> str | None:
+    """The world area of an event (an EventSummary): from its state, region or first point."""
+    from s2_watch.locating import load_gazetteer
+
+    if event.region or (event.state and event.state in load_gazetteer().state_names):
+        return "us"
+    return area_at(*event.points[0]) if event.points else None
+
+
+def event_covered(event) -> bool:
+    return everything_covered() or covers(event_area(event))
 
 
 @lru_cache(maxsize=1)

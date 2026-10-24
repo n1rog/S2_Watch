@@ -644,7 +644,10 @@ Oceania, Antarctica. Worldwide sources follow it (USGS quakes M4.5+ in covered a
 anywhere; GDELT news about covered areas, or U.S. news alone while only the U.S. is
 covered; GDACS, switched on when an area beyond the U.S. is first added; hurricanes;
 internet outages by state and, elsewhere, by country), and U.S. sources pause while the
-U.S. isn't covered. Radio traffic is never dropped for being about somewhere else.
+U.S. isn't covered. Radio traffic is never dropped for being about somewhere else. What's
+on screen follows the coverage too: unticking an area hides the map markers, rows under the
+map and events located there at once, earlier ones included (nothing is deleted; travel
+advisories and messages naming no place always show).
 Messages naming a country or one of about 1,900 major cities abroad are placed there
 (`s2_watch/world.py`, data from Natural Earth via `tools/build_world.py`); U.S. places
 always come first. The offline map adds coarse land and borders outside North America.

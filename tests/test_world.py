@@ -111,3 +111,43 @@ def test_the_coverage_menu_sets_and_saves_the_coverage(tmp_path, main_window, co
     window.coverage_actions["europe"].setChecked(False)
     window.coverage_changed()                                  # nothing ticked: back to the U.S.
     assert world.COVERAGE == {"us"} and window.coverage_actions["us"].isChecked()
+
+
+def test_what_is_on_screen_hides_with_an_area_taken_out_of_the_coverage(main_window, coverage) -> None:
+    from datetime import datetime, timezone
+
+    from s2_watch.analysis.base import AnalysisResult
+    from s2_watch.events import EventSummary
+
+    resolver = LocationResolver()
+    paris_message = Message("OSINT", "Protests in Paris, France turn violent")
+    tulsa_message = Message("JS8Call", "W5ABC: FLOODING IN TULSA, OK")
+    paris, tulsa = resolver.resolve(paris_message), resolver.resolve(tulsa_message)
+    now = datetime.now(timezone.utc)
+
+    def event(state, region, point):
+        return EventSummary(1, "x", "Civil Unrest", state, region, now, now, 1, ("OSINT",), "high", "", None,
+                            points=[point])
+    coverage({"us", "europe"})
+    assert world.locations_covered(paris) and world.event_covered(event("France", None, (48.86, 2.35)))
+    window = main_window()
+    window.rescan_sources = lambda: None          # what's already on screen, not a fresh re-read
+    window.coverage_actions["europe"].setChecked(True)
+    window.coverage_changed()
+    result = AnalysisResult(True, "Civil Unrest", "high", "Protests", 0.8)
+    window.map_view.add_message(paris_message, paris)
+    window.map_view.add_message(tulsa_message, tulsa)
+    window.insert_analysis_row(paris_message, result, None, paris)
+    window.insert_analysis_row(tulsa_message, result, None, tulsa)
+    window.apply_news_rows_limit()
+    assert not any(window.analysis.isRowHidden(row) for row in range(2))
+    window.coverage_actions["europe"].setChecked(False)
+    window.coverage_changed()                                  # Europe out: Paris hides, Tulsa stays
+    shown = [window.analysis.item(row, 0).data(window.LOCATIONS_ROLE)[0].label
+             for row in range(window.analysis.rowCount()) if not window.analysis.isRowHidden(row)]
+    assert shown == [tulsa[0].label]
+    assert {marker["label"] for marker in window.map_view._visible_locations()} == {tulsa[0].label}
+    assert not world.event_covered(event("France", None, (48.86, 2.35)))
+    assert world.event_covered(event("OK", 6, (36.15, -95.99))) and world.locations_covered([])  # no place: shown
+    advisory = Message("OSINT", "State Dept travel advisory: France - Level 2", fields={"type": "TRAVEL ADVISORY"})
+    assert world.message_covered(advisory, paris) and not world.message_covered(paris_message, paris)

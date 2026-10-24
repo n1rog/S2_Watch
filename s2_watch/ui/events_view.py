@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 from PySide6.QtCore import QByteArray, QPoint, Qt, QTimer, Signal
 from PySide6.QtGui import QBrush, QColor, QFont, QPalette
 from s2_watch.focus import event_in_focus, has_focus
+from s2_watch.world import event_covered
 from s2_watch.ui.event_detail import EventDetail
 from PySide6.QtWidgets import (
     QAbstractItemView, QCheckBox, QComboBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QPushButton, QSplitter,
@@ -357,7 +358,7 @@ class EventsView(QWidget):
 
     def visible_events(self):
         since = datetime.now(timezone.utc) - timedelta(hours=self.period_hours())
-        events = self.store.events_since(since)
+        events = [event for event in self.store.events_since(since) if event_covered(event)]
         if self.focus_only.isChecked() and has_focus(self.focus_regions):
             events = [event for event in events if event_in_focus(event, self.focus_regions)]
         if self.multi_only.isChecked():

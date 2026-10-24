@@ -6,6 +6,7 @@ from html import escape
 from PySide6.QtCore import QObject, Qt, QTimer, QUrl, Signal, Slot
 from PySide6.QtWidgets import QGridLayout, QLabel, QVBoxLayout, QWidget
 
+from s2_watch import world
 from s2_watch.analysis.categories import NEWS_CATEGORIES
 from s2_watch.models import Message
 from s2_watch.geo import maidenhead_to_coordinates
@@ -245,10 +246,12 @@ class MapView(QWidget):
                     "label": f"Station: {message.fields.get('sender', 'unknown')}",
                     "message": message.raw_content,
                     "message_id": str(id(message)),
+                    "area": world.area_at(*station),
                 }
             )
         if locations is None:
             locations = self._resolver.resolve(message)
+        always = message.fields.get("type") in world.ALWAYS_COVERED_TYPES
         for location in locations:
             if station and (location.lat, location.lon) == station:
                 continue  # a StatRep's area is the station marker already shown
@@ -266,6 +269,7 @@ class MapView(QWidget):
                     "message": message.raw_content,
                     "message_id": str(id(message)),
                     "dimmed": dimmed,
+                    "area": None if always else world.location_area(location),
                 }
             )
         for location in message_locations:
@@ -320,10 +324,16 @@ class MapView(QWidget):
             for location in self._visible_locations()
         ) or "No locations detected yet.")
 
+    def coverage_changed(self) -> None:
+        """Show only the markers in the operator's coverage (Configuration → Coverage)."""
+        self._render()
+
     def _visible_locations(self) -> list[dict[str, object]]:
         return [
             location for location in self._locations
             if (
+                world.covers(location.get("area"))
+                and
                 (self._enabled_applications is None
                  or location["application"] in self._enabled_applications)
                 and location["kind"] in self._enabled_kinds
