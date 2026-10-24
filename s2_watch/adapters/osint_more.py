@@ -36,6 +36,13 @@ def _position(lat: float, lon: float) -> str:
     return f"({lat:.3f}, {lon:.3f})"
 
 
+def _covered(lat: float, lon: float) -> bool:
+    """Whether a point is in the operator's coverage (at sea, far from land: yes)."""
+    from s2_watch import world
+
+    return world.covers(world.load_world().area_of(lat, lon))
+
+
 def _iso(value: str) -> datetime:
     when = datetime.fromisoformat(value.replace("Z", "+00:00"))
     return when if when.tzinfo else when.replace(tzinfo=timezone.utc)
@@ -113,6 +120,8 @@ def fetch_hurricanes() -> list[Message]:
     for storm in json.loads(_get(NHC_URL)).get("activeStorms", []):
         kind = NHC_KINDS.get(storm.get("classification", ""), "Tropical cyclone")
         lat, lon = storm.get("latitudeNumeric"), storm.get("longitudeNumeric")
+        if lat is not None and lon is not None and not _covered(lat, lon):
+            continue
         where = f" {_position(lat, lon)}" if lat is not None and lon is not None else ""
         text = (f"National Hurricane Center: {kind} {storm.get('name', '')} — {storm.get('intensity', '?')} kt winds, "
                 f"{storm.get('pressure', '?')} mb, moving {storm.get('movementDir', '?')}° at "
@@ -132,10 +141,22 @@ IODA_URL = "https://api.ioda.inetintel.cc.gatech.edu/v2/outages/alerts"
 
 
 def fetch_internet_outages(hours: int = 24) -> list[Message]:
-    """Critical state-level internet outages (IODA, Georgia Tech): the latest alert per state."""
+    """Critical internet outages (IODA, Georgia Tech), the latest alert for each: by state when
+    the U.S. is covered, by country for the other covered areas."""
+    from s2_watch import world
+
+    messages = _outages(hours, {"entityType": "region", "relatedTo": "country/US"}, "region") if world.covers("us") else []
+    if world.COVERAGE - {"us"}:
+        messages += _outages(hours, {"entityType": "country"}, "country")
+    return messages
+
+
+def _outages(hours: int, scope: dict, kind: str) -> list[Message]:
+    from s2_watch import world
+
     now = datetime.now(timezone.utc)
     query = urllib.parse.urlencode({"from": int((now - timedelta(hours=hours)).timestamp()), "until": int(now.timestamp()),
-                                    "entityType": "region", "relatedTo": "country/US", "limit": 500})
+                                    "limit": 500, **scope})
     latest: dict[str, dict] = {}
     for alert in json.loads(_get(f"{IODA_URL}?{query}")).get("data") or []:
         if alert.get("level") != "critical":
@@ -146,14 +167,19 @@ def fetch_internet_outages(hours: int = 24) -> list[Message]:
     messages = []
     for code, alert in latest.items():
         state = alert["entity"]["name"]
+        if kind == "country":            # keep the covered areas' countries (the U.S. comes by state)
+            found = world.load_world().find(state)
+            area = found[4]["area"] if found and found[4] else None
+            if area is None or area == "us" or not world.covers(area):
+                continue
         share = alert["value"] / alert["historyValue"] if alert.get("historyValue") else 0
         how = {"ping-slash24": "reachable networks", "bgp": "announced networks", "merit-nt": "darknet traffic"}.get(
             alert.get("datasource"), alert.get("datasource", "signal"))
         when = datetime.fromtimestamp(alert["time"], tz=timezone.utc)
         text = f"Internet outage: {state} — {how} at {share:.0%} of normal (IODA, critical)"
         messages.append(Message(APPLICATION, text, received_at=when, fields={
-            "type": "INTERNET OUTAGE", "sender": "IODA", "message_id": f"ioda:{code}|{when:%Y-%m-%dT%H}",
-            "state": state, "entity": code, "url": f"https://ioda.inetintel.cc.gatech.edu/region/{code}",
+            "type": "INTERNET OUTAGE", "sender": "IODA", "message_id": f"ioda-{kind}:{code}|{when:%Y-%m-%dT%H}",
+            "state": state, "entity": f"{kind}:{code}", "url": f"https://ioda.inetintel.cc.gatech.edu/{kind}/{code}",
             "source": "IODA",
         }))
     return messages
@@ -304,6 +330,8 @@ def fetch_world_disasters(days: int = 7) -> list[Message]:
         if to_date < since:
             continue
         lon, lat = feature["geometry"]["coordinates"][:2]
+        if not _covered(lat, lon):
+            continue
         kind = GDACS_KINDS.get(props.get("eventtype", ""), "disaster")
         text = (f"GDACS {props.get('alertlevel', '').upper()} alert ({kind}): {props.get('name', '')} — "
                 f"{props.get('country', '')} {_position(lat, lon)}")
@@ -362,7 +390,10 @@ def fetch_border_crossings() -> list[Message]:
 
 
 # -- NASA FIRMS: satellite fire detections (clusters) ------------------------------------
-FIRMS_URL = "https://firms.modaps.eosdis.nasa.gov/api/country/csv/{key}/VIIRS_SNPP_NRT/USA/1"
+# By area: NASA retired the by-country request ("Invalid API call"). Days are whole UTC days, so
+# two are asked for and the last 24 hours kept.
+FIRMS_URL = "https://firms.modaps.eosdis.nasa.gov/api/area/csv/{key}/VIIRS_SNPP_NRT/{box}/2"
+FIRMS_BOXES = ("-125,24,-66,50", "-170,51,-129,72", "-161,18,-154,23", "-68,17,-65,19")   # lower 48, AK, HI, PR
 FIRMS_CELL = 0.2          # degrees: detections closer than about 20 km are one cluster
 FIRMS_MIN_DETECTIONS = 6  # fewer: a field burn or a flare, not news
 
@@ -371,15 +402,20 @@ def fetch_fire_detections() -> list[Message]:
     """Clusters of VIIRS fire detections in the last day; single hotspots are left out."""
     if not FIRMS_KEY:
         return []
+    since = datetime.now(timezone.utc) - timedelta(hours=24)
     cells: dict[tuple[int, int], list[dict]] = defaultdict(list)
-    for row in csv.DictReader(_get(FIRMS_URL.format(key=urllib.parse.quote(FIRMS_KEY))).decode("utf-8", "replace").splitlines()):
-        try:
-            lat, lon = float(row["latitude"]), float(row["longitude"])
-        except (KeyError, ValueError):
-            continue
-        if row.get("confidence", "n") == "l":
-            continue
-        cells[(int(lat // FIRMS_CELL), int(lon // FIRMS_CELL))].append({**row, "lat": lat, "lon": lon})
+    for box in FIRMS_BOXES:
+        url = FIRMS_URL.format(key=urllib.parse.quote(FIRMS_KEY), box=box)
+        for row in csv.DictReader(_get(url).decode("utf-8", "replace").splitlines()):
+            try:
+                lat, lon = float(row["latitude"]), float(row["longitude"])
+                seen = datetime.strptime(f"{row['acq_date']} {row['acq_time'].zfill(4)}", "%Y-%m-%d %H%M").replace(
+                    tzinfo=timezone.utc)
+            except (KeyError, ValueError):
+                continue
+            if row.get("confidence", "n") == "l" or seen < since:
+                continue
+            cells[(int(lat // FIRMS_CELL), int(lon // FIRMS_CELL))].append({**row, "lat": lat, "lon": lon})
     # Occupied cells that touch (including diagonally) are one fire: a fire across a cell
     # boundary stays whole.
     parent = {cell: cell for cell in cells}
@@ -405,12 +441,19 @@ def fetch_fire_detections() -> list[Message]:
             continue
         lat = sum(hit["lat"] for hit in hits) / len(hits)
         lon = sum(hit["lon"] for hit in hits) / len(hits)
+        from s2_watch import world
+
+        if world.load_world().area_of(lat, lon) != "us":
+            continue                    # the boxes take in parts of Canada and Mexico
         latest = max(f"{hit.get('acq_date', '')} {hit.get('acq_time', '').zfill(4)}" for hit in hits)
         try:
             when = datetime.strptime(latest, "%Y-%m-%d %H%M").replace(tzinfo=timezone.utc)
         except ValueError:
             when = datetime.now(timezone.utc)
-        text = f"Satellite fire detection: {len(hits)} hotspots, possible wildfire {_position(lat, lon)} (NASA FIRMS)"
+        # Heat seen from orbit: a wildfire, but as often a field or sugarcane burn, a steel mill or a
+        # volcano. Said plainly, low urgency; it still confirms radio reports of fire nearby.
+        text = (f"Satellite heat detection: {len(hits)} hotspots {_position(lat, lon)}: a fire, a field burn "
+                f"or industrial heat (NASA FIRMS)")
         messages.append(Message(APPLICATION, text, received_at=when, fields={
             "type": "FIRE DETECTION", "sender": "NASA FIRMS", "message_id": f"firms:{cell_lat}:{cell_lon}|{when:%Y-%m-%d}",
             "url": "https://firms.modaps.eosdis.nasa.gov/map/", "source": "NASA FIRMS", "lat": f"{lat}", "lon": f"{lon}",

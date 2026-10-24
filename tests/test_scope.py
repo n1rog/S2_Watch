@@ -92,4 +92,8 @@ def test_the_map_reloads_itself_when_its_engine_is_killed(monkeypatch) -> None:
     view._engine_ended(killed, 9)                         # again soon after: wait longer
     view._engine_ended(QWebEnginePage.RenderProcessTerminationStatus.NormalTerminationStatus, 0)   # closing: nothing
     assert reloads == [2000, 10000] and not view._page_ready
+    view.deleteLater()                       # its web page must be gone before the run ends
+    from tests.conftest import destroy_pending
+
+    destroy_pending()
     assert messages[0] == "The map was stopped (the computer may have run out of memory); reloading it in 2 s."

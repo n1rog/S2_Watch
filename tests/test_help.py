@@ -40,16 +40,11 @@ def test_the_help_window_shows_topics_and_follows_links() -> None:
     assert "Custom Area" in dialog.page.toPlainText()
 
 
-def test_f1_opens_help(tmp_path) -> None:
-    from s2_watch.ui.main_window import MainWindow
+def test_f1_opens_help(tmp_path, main_window) -> None:
+    window = main_window()
+    from PySide6.QtGui import QAction
 
-    window = MainWindow(str(tmp_path / "s2.db"))
-    try:
-        from PySide6.QtGui import QAction
-
-        action = next(action for action in window.findChildren(QAction) if action.text() == "S2 Watch Help")
-        assert action.shortcut().toString() == "F1"
-        action.trigger()
-        assert window._help_dialog is not None and window._help_dialog.isVisible()
-    finally:
-        window.close()
+    action = next(action for action in window.findChildren(QAction) if action.text() == "S2 Watch Help")
+    assert action.shortcut().toString() == "F1"
+    action.trigger()
+    assert window._help_dialog is not None and window._help_dialog.isVisible()

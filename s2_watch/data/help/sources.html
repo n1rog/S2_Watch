@@ -22,11 +22,34 @@ when it starts. APRS-IS has no history: you see bulletins from the moment S2 Wat
 NOAA SPC storm reports; NIFC wildfires; FEMA declarations and local public alerts (IPAWS); NOAA space weather;
 FAA security restrictions, airport closures and ground stops; State Department advisories; internet outages (IODA);
 news about unrest and violence (GDELT). Off by default: worldwide disasters (GDACS), newly exploited software flaws
-(CISA), closed border crossings (CBP) and satellite fire detections (NASA FIRMS, which needs a free map key entered
-under Sources).</p>
+(CISA), closed border crossings (CBP) and satellite heat detections (NASA FIRMS, which needs a free map key entered
+under Sources). FIRMS reports clusters of 6 or more detections in the last 24 hours at low urgency, worded “a fire, a field burn or
+industrial heat”: in season most are crop or sugarcane burns, steel mills or volcanoes, not wildfires.</p>
 <p>Each source has a switch, how often it is fetched, and its status: <b>Configuration → Watch Forms</b> (the submenu
 or the page). Turning one off stops it at once and takes its items off the map; reports already saved stay until
 they leave the watch period.</p>
+
+<h2>Coverage: which parts of the world</h2>
+<p><b>Configuration → Coverage</b> chooses the areas S2 Watch reports from: <b>United States</b> (the default), <b>North America</b>
+(Canada, Mexico, Greenland), <b>Central America and the Caribbean</b>, <b>South America</b>, <b>Europe</b>, <b>Africa</b>,
+<b>Asia and the Middle East</b>, <b>Oceania</b> and <b>Antarctica</b>. Tick as many as you like; one always stays ticked.</p>
+<ul>
+<li><b>Worldwide sources follow it:</b> USGS earthquakes (M4.5+ in covered areas; M6+ anywhere always), GDELT news (U.S. news alone
+while only the U.S. is covered; English news about the covered areas otherwise), GDACS disasters (switched on when you first add an area
+beyond the U.S.), hurricanes, and internet outages (by state in the U.S., by country elsewhere).</li>
+<li><b>U.S. sources</b> (NWS, SPC, NIFC, FEMA, FAA, IPAWS, river gauges, NASA FIRMS, CBP) pause while the U.S. isn't covered.</li>
+<li><b>Radio traffic is never dropped</b> for being about somewhere else: your network's reports always count. Messages naming a country
+or a major city abroad are placed there on the map.</li>
+<li>APRS bulletins from stations abroad are kept once the coverage reaches beyond the U.S.</li>
+<li>State Department travel advisories always show: they are U.S. guidance about other countries.</li>
+</ul>
+<div class="example"><p><b>Example.</b> Tick <b>Europe</b> and <b>Asia and the Middle East</b>. Within a few minutes you get
+<i>USGS: M4.9 earthquake — 53 km WNW of Leni, Italy</i>, news such as <i>Drone attack on Kyiv overnight</i> placed at Kyiv, Ukraine,
+and <i>Internet outage: North Korea</i>. A message from K9DGY, <code>QST YEMEN … SAUDI-LED COALITION AIRSTRIKES</code>, is placed in
+Yemen. The list's heading shows the coverage, and briefings name it as their geographic focus.</p></div>
+<p>Places abroad are found by country name or by city (about 1,900 cities of 200,000 people or more, and every capital). U.S. places
+always come first: “Paris, TX” stays in Texas, “Lebanon, PA” in Pennsylvania, and a name such as Chad, Jordan or Turkey counts as a
+country only after “in”, “from”, “near” or similar.</p>
 
 <h2>Status lights</h2>
 <p>Configuration → Sources… shows one light per source: <b>green</b> connected, <b>red</b> not connected,

@@ -21,7 +21,7 @@ from s2_watch.backups import back_up_in_background, backup_folder
 from s2_watch.s2_report import DEFAULT_MAGCON, briefing_report as s2_briefing_report, followup_report as s2_followup_report, js8_report
 from s2_watch.followup import FollowUpFacts
 from s2_watch.ui.drafts_dialog import DraftsDialog
-from s2_watch import focus
+from s2_watch import focus, world
 from s2_watch.focus import FocusArea
 from s2_watch.silence import quiet_near
 from s2_watch.ui.focus_area_dialog import FocusAreaDialog
@@ -134,6 +134,8 @@ class MainWindow(QMainWindow):
         }
         # And optionally an area of responsibility: a radius around a place.
         focus.set_area(FocusArea.from_json(self.store.get_setting("focus.area", "")))
+        # Which parts of the world S2 Watch reports from (the U.S. alone by default).
+        world.set_coverage(self.store.get_setting("coverage.areas", "us").split(","))
         self.host = QLineEdit(self.store.get_setting("js8call.host", "127.0.0.1"))
         self.port = QSpinBox()
         self.port.setRange(1, 65535)
@@ -531,6 +533,16 @@ class MainWindow(QMainWindow):
         self.clear_area_action = focus_menu.addAction("Clear Custom Area")
         self.clear_area_action.setEnabled(focus.AREA is not None)
         self.clear_area_action.triggered.connect(lambda: self.set_focus_area(None))
+        coverage_menu = configuration_menu.addMenu("Coverage")
+        coverage_menu.setToolTipsVisible(True)
+        self.coverage_actions: dict[str, QAction] = {}
+        for key, label in world.AREAS:
+            action = coverage_menu.addAction(label)
+            action.setCheckable(True)
+            action.setChecked(key in world.COVERAGE)
+            action.setToolTip("Report from here: official and open sources about it, and messages placed in it")
+            action.triggered.connect(self.coverage_changed)
+            self.coverage_actions[key] = action
         self.exercise_action = configuration_menu.addAction("Exercise in Progress")
         self.exercise_action.setCheckable(True)
         self.exercise_action.setChecked(self.exercise_in_progress())
@@ -1798,7 +1810,8 @@ class MainWindow(QMainWindow):
         kind = "Events" if getattr(self, "news_mode", "events") == "events" else "Reports"
         self.news_label.setText(
             f"<b>Newsworthiness: {kind}</b> — from the last {self.review_duration.currentText()}"
-            + (f", <b>focus {chosen} first</b>, then the rest of the U.S." if chosen else "")
+            + (f", <b>focus {chosen} first</b>, then the rest" if chosen else "")
+            + (f" · coverage: {world.describe()}" if world.COVERAGE != {"us"} else "")
             + " <span style='color:gray'>(focus: Configuration → Focus Regions)</span>"
         )
 
@@ -1945,6 +1958,24 @@ class MainWindow(QMainWindow):
         if focus.AREA is not None:
             self.set_focus_area(None)
         self.focus_regions_changed()
+
+    def coverage_changed(self) -> None:
+        chosen = {key for key, action in self.coverage_actions.items() if action.isChecked()}
+        if not chosen:                       # something must be covered: back to the U.S.
+            chosen = {"us"}
+            self.coverage_actions["us"].setChecked(True)
+        before = set(world.COVERAGE)
+        world.set_coverage(chosen)
+        self.store.set_setting("coverage.areas", ",".join(key for key, _label in world.AREAS if key in chosen))
+        # Worldwide disasters (GDACS) matter once the coverage reaches beyond the U.S.
+        if (chosen - {"us"}) and not (before - {"us"}) and "gdacs" not in self.enabled_osint_sources():
+            self.watch_forms_page.osint_boxes["gdacs"].setChecked(True)
+        for name in osint_sources.COVERAGE_DEPENDENT | (osint_sources.US_ONLY if "us" not in chosen else set()):
+            osint_sources.forget(name)
+        self.refresh_official()
+        self.rescan_sources()
+        self.update_news_label()
+        self.statusBar().showMessage(f"Coverage: {world.describe()}", 10_000)
 
     def choose_focus_area(self) -> None:
         dialog = FocusAreaDialog(focus.AREA, LocationResolver(), self)

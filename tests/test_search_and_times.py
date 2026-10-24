@@ -21,25 +21,20 @@ def test_search_finds_events_by_their_reports_text_and_ignores_the_row_limit(tmp
     assert table.set_search("") == 2 and len(visible()) == 1     # cleared: the usual list again
 
 
-def test_the_list_under_the_map_can_show_400_rows_and_zulu_reaches_the_events(tmp_path) -> None:
-    from s2_watch.ui.main_window import MainWindow
-
+def test_the_list_under_the_map_can_show_400_rows_and_zulu_reaches_the_events(tmp_path, main_window) -> None:
     store = SQLiteStore(tmp_path / "s2.db")
     add(store, "MagCommstat", "TULSA OK - RIVER FLOODING, ROADS CLOSED", T0, TULSA)
     store.close()
-    window = MainWindow(str(tmp_path / "s2.db"))
-    try:
-        assert window.news_rows.maximum() == 400
-        window.review_duration.setCurrentIndex(window.review_duration.count() - 1)   # long enough to include T0
-        window.events_view.period.setCurrentIndex(window.events_view.period.count() - 1)
-        window.time_zone.setCurrentIndex(window.time_zone.findData("utc"))
-        window.events_view.refresh()
-        text = window.events_view.table.item(0, 0).text()
-        window.time_zone.setCurrentIndex(window.time_zone.findData("local"))
-        assert window.events_view.table.item(0, 0).text() != text or text.endswith("L")
-        assert text.endswith("Z") and window.events_view.table.item(0, 0).text().endswith("L")
-    finally:
-        window.close()
+    window = main_window()
+    assert window.news_rows.maximum() == 400
+    window.review_duration.setCurrentIndex(window.review_duration.count() - 1)   # long enough to include T0
+    window.events_view.period.setCurrentIndex(window.events_view.period.count() - 1)
+    window.time_zone.setCurrentIndex(window.time_zone.findData("utc"))
+    window.events_view.refresh()
+    text = window.events_view.table.item(0, 0).text()
+    window.time_zone.setCurrentIndex(window.time_zone.findData("local"))
+    assert window.events_view.table.item(0, 0).text() != text or text.endswith("L")
+    assert text.endswith("Z") and window.events_view.table.item(0, 0).text().endswith("L")
 
 
 def test_history_finds_a_station_by_its_call_sign_and_every_word(tmp_path) -> None:

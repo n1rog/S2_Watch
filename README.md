@@ -619,12 +619,25 @@ Added in 0.29 (each can be switched off under Configuration → Watch Forms):
 - **USGS volcanoes** at WATCH or WARNING.
 - Off by default: **worldwide disasters** (GDACS orange/red), **newly exploited
   vulnerabilities** (CISA), **border crossings not open** (CBP, round-the-clock crossings
-  only), and **satellite fire detections** (NASA FIRMS: clusters of 6+ detections; needs
-  a free map key, entered under Configuration → Sources).
+  only), and **satellite heat detections** (NASA FIRMS: clusters of 6+ detections in the
+  last 24 hours, low urgency, since many are crop burns or industrial heat; needs a free
+  map key, entered under Configuration → Sources).
 
 Official ones among them (NWS, NHC, USGS, FAA, FEMA IPAWS, NOAA SWPC, CBP) confirm events
 like the original official sources; storm reports, river gauges, hurricanes, public alerts
 and satellite fire clusters also confirm radio reports nearby (the Official column).
+
+**Coverage** (Configuration → Coverage) chooses the parts of the world S2 Watch reports
+from: United States (the default), North America (Canada, Mexico, Greenland), Central
+America and the Caribbean, South America, Europe, Africa, Asia and the Middle East,
+Oceania, Antarctica. Worldwide sources follow it (USGS quakes M4.5+ in covered areas and M6+
+anywhere; GDELT news about covered areas, or U.S. news alone while only the U.S. is
+covered; GDACS, switched on when an area beyond the U.S. is first added; hurricanes;
+internet outages by state and, elsewhere, by country), and U.S. sources pause while the
+U.S. isn't covered. Radio traffic is never dropped for being about somewhere else.
+Messages naming a country or one of about 1,900 major cities abroad are placed there
+(`s2_watch/world.py`, data from Natural Earth via `tools/build_world.py`); U.S. places
+always come first. The offline map adds coarse land and borders outside North America.
 
 **APRS** bulletins (BLN0–BLN9 and named groups) can be read from APRS-IS: turn it on
 under Configuration → Sources. Receive-only (passcode -1, nothing is sent to RF); servers

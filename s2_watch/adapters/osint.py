@@ -26,17 +26,39 @@ import xml.etree.ElementTree as ElementTree
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 
-from s2_watch import __version__
+from s2_watch import __version__, world
 from s2_watch.models import Message
 
 APPLICATION = "OSINT"
 USER_AGENT = f"S2-Watch/{__version__} (https://github.com/n1rog/S2_Watch)"
-GDELT_QUERY = ('(protest OR protesters OR riot OR unrest OR "civil unrest" OR looting OR curfew OR shooting '
-               'OR "active shooter" OR bombing OR "bomb threat" OR terrorism OR terrorist OR "mass casualty") '
-               "sourcecountry:US sourcelang:english")
-GDELT_URL = ("https://api.gdeltproject.org/api/v2/doc/doc?" +
-             urllib.parse.urlencode({"query": GDELT_QUERY, "mode": "ArtList", "format": "json",
-                                     "maxrecords": 75, "timespan": "24h", "sort": "DateDesc"}))
+GDELT_TOPICS = ('(protest OR protesters OR riot OR unrest OR "civil unrest" OR looting OR curfew OR shooting '
+                'OR "active shooter" OR bombing OR "bomb threat" OR terrorism OR terrorist OR "mass casualty")')
+
+
+def gdelt_url() -> str:
+    """U.S. news when the coverage is the United States alone; else English news from anywhere,
+    kept when it is about a covered area (Configuration → Coverage)."""
+    us_only = world.COVERAGE == {"us"}
+    query = f"{GDELT_TOPICS} {'sourcecountry:US ' if us_only else ''}sourcelang:english"
+    return "https://api.gdeltproject.org/api/v2/doc/doc?" + urllib.parse.urlencode(
+        {"query": query, "mode": "ArtList", "format": "json", "maxrecords": 75 if us_only else 150,
+         "timespan": "24h", "sort": "DateDesc"})
+
+
+_RESOLVER = None
+
+
+def covered_text(text: str) -> bool:
+    """Whether a headline is about a covered area; one naming no place counts when the U.S. is covered."""
+    global _RESOLVER
+    from s2_watch.locating import LocationResolver
+
+    if _RESOLVER is None:
+        _RESOLVER = LocationResolver()
+    found = _RESOLVER.resolve(Message(APPLICATION, text))
+    if not found:
+        return world.covers("us")
+    return world.covers(world.location_area(found[0]))
 FAA_TFR_URL = "https://tfr.faa.gov/tfrapi/exportTfrList"
 STATE_ADVISORIES_URL = "https://travel.state.gov/_res/rss/TAsTWs.xml"
 FEMA_URL = "https://www.fema.gov/api/open/v2/DisasterDeclarationsSummaries"
@@ -89,11 +111,11 @@ def _utc(value: datetime) -> datetime:
 
 
 def fetch_gdelt() -> list[Message]:
-    data = json.loads(_get(GDELT_URL) or b"{}")
+    data = json.loads(_get(gdelt_url()) or b"{}")
     messages = []
     for article in data.get("articles", []):
         title = (article.get("title") or "").strip()
-        if not title:
+        if not title or (world.COVERAGE != {"us"} and not covered_text(title)):
             continue
         try:
             seen = datetime.strptime(article.get("seendate", ""), "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc)
@@ -199,12 +221,14 @@ def fetch_usgs_earthquakes() -> list[Message]:
         props, (lon, lat, _depth) = quake["properties"], quake["geometry"]["coordinates"]
         magnitude = props.get("mag") or 0
         in_us = any(south <= lat <= north and west <= lon <= east for south, north, west, east in US_BOXES)
-        if not in_us and magnitude < 6:
+        area = "us" if in_us else world.load_world().area_of(lat, lon)
+        covered = area is not None and area in world.COVERAGE
+        if not covered and magnitude < 6:          # M6+ anywhere still counts
             continue
         when = datetime.fromtimestamp(props["time"] / 1000, tz=timezone.utc)
         text = f"USGS: M{magnitude:.1f} earthquake — {props.get('place', '')} {_position(lat, lon)}"
         # Every quake can confirm a radio report; only notable ones become reports themselves.
-        notable = magnitude >= (4.0 if in_us else 6.0)
+        notable = magnitude >= (4.0 if in_us and covered else 4.5 if covered else 6.0)
         messages.append(Message(APPLICATION, text, received_at=when, fields={
             "type": "EARTHQUAKE", "sender": "USGS", "message_id": quake.get("id", text), "magnitude": f"{magnitude:.1f}",
             "notable": "1" if notable else "",
@@ -319,6 +343,10 @@ FETCHERS = {"gdelt": fetch_gdelt, "faa": fetch_faa_security_tfrs, "state": fetch
 SOURCE_LABELS.update(osint_more.SOURCE_LABELS)
 SCHEDULE.update(osint_more.SCHEDULE)
 DEFAULT_OFF = set(osint_more.DEFAULT_OFF)
+# Sources about the U.S. only: paused while the coverage leaves the U.S. out.
+US_ONLY = {"faa", "fema", "spc", "nifc", "ipaws", "lsr", "rivers", "airports", "firms", "cbp"}
+# Sources whose items depend on the coverage: fetched again when it changes.
+COVERAGE_DEPENDENT = {"gdelt", "usgs", "gdacs", "ioda", "nhc"}
 
 
 class OsintAdapter:
@@ -345,6 +373,8 @@ class OsintAdapter:
             for name, fetch in self.fetchers.items():
                 if self._stop.is_set():
                     return
+                if name in US_ONLY and not world.covers("us"):
+                    continue            # a U.S. source while the U.S. isn't covered
                 self._collect(name, fetch)
             self._stop.wait(60)
 

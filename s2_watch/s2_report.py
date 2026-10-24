@@ -310,8 +310,10 @@ def briefing_report(events, now: datetime, hours: int, focus: set[int] | None = 
     start = now - timedelta(hours=hours)
     from s2_watch.focus import describe as describe_focus
 
+    from s2_watch import world
+
     chosen = describe_focus(focus)
-    area = chosen or "the United States"
+    area = chosen or ("the United States" if world.COVERAGE == {"us"} else world.describe())
     confirmed = sum(bool(e.official) for e in events)
     new = [e for e in events if last_briefing and e.first_seen > last_briefing]
     top = priority[0] if priority else None
@@ -320,7 +322,7 @@ def briefing_report(events, now: datetime, hours: int, focus: set[int] | None = 
         "PURPOSE": f"Provide a situational summary of newsworthy reporting for {area} over the last {hours} hours.",
         "DTG": magnet_dtg(now),
         "REPORTING PERIOD": period_label(start, now),
-        "GEOGRAPHIC FOCUS": chosen or "United States",
+        "GEOGRAPHIC FOCUS": chosen or ("United States" if world.COVERAGE == {"us"} else world.describe()),
         "PRECEDENCE": PRECEDENCE["high"] if top and top.urgency == "high" and top.reports > 1 else PRECEDENCE["low"],
         "MAGCON STATUS": magcon,
         "SOURCES": DEFAULT_SOURCES,

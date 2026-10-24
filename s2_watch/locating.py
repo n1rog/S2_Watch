@@ -22,7 +22,7 @@ names are looked up in bundled gazetteers rather than spotted by capitalisation.
 import json
 import re
 import unicodedata
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import lru_cache
 from pathlib import Path
 
@@ -39,7 +39,7 @@ from s2_watch.models import Message
 DATA_DIR = Path(__file__).resolve().parent / "data"
 LEVELS = ("precise", "city", "county", "grid", "state", "region")
 # Levels shown under the map's "General locations" filter rather than "News locations".
-GENERAL_LEVELS = {"state", "region"}
+GENERAL_LEVELS = {"state", "region", "country"}
 
 _WORD = r"[A-Z][A-Z.'-]*"
 _LOCATIVE = re.compile(
@@ -239,8 +239,30 @@ class LocationResolver:
         for level in LEVELS:
             found = getattr(self, f"_{level}")(upper, text, fields, context, message)
             if found:
-                return [self.gazetteer.with_area(location) for location in dict.fromkeys(found)]
-        return []
+                return [self._abroad(self.gazetteer.with_area(location)) for location in dict.fromkeys(found)]
+        return self._world(text)
+
+    def _abroad(self, location: ResolvedLocation) -> ResolvedLocation:
+        """Coordinates or a grid square outside the U.S. carry their country's name (at sea, the
+        nearest coast's)."""
+        if location.state or location.region or location.level not in ("precise", "grid"):
+            return location
+        from s2_watch.world import load_world
+
+        country = load_world().nearest_country(location.lat, location.lon)
+        return replace(location, state=country["name"]) if country else location
+
+    def _world(self, text: str) -> list[ResolvedLocation]:
+        """Last: a country or major city abroad the message names (s2_watch.world)."""
+        from s2_watch.world import load_world
+
+        found = load_world().find(text)
+        if found is None:
+            return []
+        kind, name, lat, lon, country = found
+        country_name = country["name"] if country else ""
+        label = f"{name}, {country_name}" if kind == "city" and country_name else name
+        return [ResolvedLocation("city" if kind == "city" else "country", lat, lon, label, country_name or None)]
 
     def _corrected(self, message: Message) -> ResolvedLocation | None:
         own = f"#msg:{message_hash(message)}"

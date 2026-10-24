@@ -97,6 +97,8 @@ FEED_RULES = (
         r"\bknown\s+exploited\s+vulnerability\b", r"\bborder\s+crossing\s+(?:closed|temporarily\s+closed)\b")),
     # Any other public alert an authority sent through IPAWS (road closures, local emergencies).
     Rule("Infrastructure", (), "low", (r"^public\s+alert\s+\(ipaws\)",)),
+    # NASA FIRMS heat clusters: often field burns or industry, so low urgency.
+    Rule("Climate / Environment", (), "low", (r"^satellite\s+heat\s+detection\b",)),
 )
 
 

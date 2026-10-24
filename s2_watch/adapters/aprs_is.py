@@ -4,7 +4,8 @@ A background thread keeps a connection to an APRS-IS server, logged in receive-o
 unverified login, passcode -1, sends nothing to RF) with a filter for bulletins. Servers
 refuse anonymous logins (N0CALL), so the login is the operator's call sign with an SSID
 (Configuration → Sources; -13 by default, to stay clear of the operator's own APRS
-software). Only U.S. stations' bulletins are kept. APRS-IS
+software). Only U.S. stations' bulletins are kept, unless the coverage
+(Configuration → Coverage) includes areas beyond the U.S. APRS-IS
 carries live traffic only: there is no backlog to read, so S2 Watch shows what arrives
 while it runs (and the saved reports, as for every source). Bulletins repeat every few
 minutes; each is handed over once a day.
@@ -28,12 +29,13 @@ REPEAT_WINDOW = timedelta(hours=24)
 US_CALL = re.compile(r"^(?:A[A-L]|[KNW])[A-Z]?\d")     # U.S. stations (APRS-IS carries the world)
 
 
-def parse_bulletin(line: str, when: datetime) -> Message | None:
+def parse_bulletin(line: str, when: datetime, us_only: bool = True) -> Message | None:
+    """A bulletin as a Message; with ``us_only``, only from U.S. stations."""
     match = _BULLETIN.match(line.strip())
     if not match:
         return None
     station, bulletin, text = match.group(1), match.group(2), " ".join(match.group(3).split())
-    if not text or not US_CALL.match(station):
+    if not text or (us_only and not US_CALL.match(station)):
         return None
     return Message(APPLICATION, f"{station}: {bulletin}: {text}", received_at=when, fields={
         "type": "BULLETIN", "sender": station.split("-")[0], "station": station, "bulletin": bulletin,
@@ -100,7 +102,9 @@ class AprsIsAdapter:
 
     def _received(self, line: str) -> None:
         now = datetime.now(timezone.utc)
-        message = parse_bulletin(line, now)
+        from s2_watch import world
+
+        message = parse_bulletin(line, now, us_only=world.COVERAGE == {"us"})
         if message is None:
             return
         key = message.fields["message_id"]

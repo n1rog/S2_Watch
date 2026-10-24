@@ -214,12 +214,13 @@ def key_terms(text: str) -> set[str]:
 
 
 def clean_title(title: str, place: Place) -> str:
-    """A headline with the coordinates placeholder replaced by the state's name."""
+    """A headline with the coordinates placeholder replaced by the state's (or country's) name."""
     if "Coordinates in report" not in title:
         return title
     from s2_watch.locating import load_gazetteer
 
-    name = load_gazetteer().state_names.get(place.state or "", "") or (
+    state = place.state or ""
+    name = load_gazetteer().state_names.get(state, "") or (state if len(state) > 2 else "") or (
         f"{place.lat:.2f}, {place.lon:.2f}" if place.has_point else "")
     return title.replace(" — Coordinates in report", f" — {name}" if name else "").replace("Coordinates in report", name)
 

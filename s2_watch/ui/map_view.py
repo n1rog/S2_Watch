@@ -414,6 +414,7 @@ html,body,#map{{height:100%;margin:0}}
 </head><body><div id="map"></div>
 <script src="leaflet.js"></script>
 <script src="leaflet.markercluster.js"></script>
+<script src="world_land.js"></script>
 <script src="basemap.js"></script>
 <script src="counties.js"></script>
 <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
@@ -437,6 +438,11 @@ const basemapRenderer = L.canvas({{pane:'basemap'}});
 const basemapStyle = (style) => ({{renderer:basemapRenderer, interactive:false, ...style}});
 const basemap = window.S2_BASEMAP || {{land:null, lakes:null, countries:null, states:null, places:[]}};
 const basemapAttribution = 'Offline map: Natural Earth, US Census';
+// The rest of the world, coarse, outside the detailed North America data.
+if (window.S2_WORLD_LAND) {{
+  L.geoJSON(window.S2_WORLD_LAND.land, basemapStyle({{stroke:false, fillColor:'#f2efe9', fillOpacity:1}})).addTo(map);
+  L.geoJSON(window.S2_WORLD_LAND.borders, basemapStyle({{color:'#6d6d6d', weight:1, fill:false}})).addTo(map);
+}}
 if (basemap.land) L.geoJSON(basemap.land, basemapStyle({{stroke:false, fillColor:'#f2efe9', fillOpacity:1, attribution:basemapAttribution}})).addTo(map);
 if (basemap.lakes) L.geoJSON(basemap.lakes, basemapStyle({{stroke:false, fillColor:'#aad3df', fillOpacity:1}})).addTo(map);
 const countyLayer = window.S2_COUNTIES

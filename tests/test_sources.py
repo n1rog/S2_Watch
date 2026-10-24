@@ -81,7 +81,7 @@ def test_rivers_storms_volcanoes_and_outages_are_one_event_each(monkeypatch) -> 
          "value": 1, "historyValue": 2, "datasource": "bgp"}]})
     [outage] = osint_more.fetch_internet_outages()          # the latest critical alert per state
     assert outage.raw_content == "Internet outage: Virginia — reachable networks at 6% of normal (IODA, critical)"
-    assert incident_key(outage) == "outage:4447" and RULES.analyze(outage).category == "Infrastructure"
+    assert incident_key(outage) == "outage:region:4447" and RULES.analyze(outage).category == "Infrastructure"
 
 
 def test_airports_report_ground_stops_but_not_volume_or_scheduled_closures(monkeypatch) -> None:
@@ -101,16 +101,22 @@ def test_airports_report_ground_stops_but_not_volume_or_scheduled_closures(monke
 
 def test_firms_needs_a_key_and_reports_clusters_not_single_hotspots(monkeypatch) -> None:
     assert osint_more.fetch_fire_detections() == []          # no key: nothing fetched
-    rows = ["latitude,longitude,acq_date,acq_time,confidence"]
-    rows += [f"36.0{i},-96.1{i},2026-10-20,1830,n" for i in range(8)]      # a fire: eight detections
-    rows += ["40.5,-100.5,2026-10-20,1830,n"]                              # a lone hotspot
-    serve(monkeypatch, "\n".join(rows).encode())
+    day, hhmm = (NOW - timedelta(hours=1)).strftime("%Y-%m-%d"), (NOW - timedelta(hours=1)).strftime("%H%M")
+    old_day = (NOW - timedelta(hours=30)).strftime("%Y-%m-%d")
+    header = "latitude,longitude,acq_date,acq_time,confidence"
+    rows = [header] + [f"36.0{i},-96.1{i},{day},{hhmm},n" for i in range(8)]   # a fire: eight detections
+    rows += [f"40.5,-100.5,{day},{hhmm},n"]                                    # a lone hotspot
+    rows += [f"35.0{i},-97.0{i},{old_day},{hhmm},n" for i in range(8)]          # yesterday's: too old
+    responses = iter(["\n".join(rows).encode()])                               # the lower 48; nothing elsewhere
+    monkeypatch.setattr(osint_more, "_get", lambda url: next(responses, header.encode()))
     try:
         osint_more.set_firms_key("KEY")
         [cluster] = osint_more.fetch_fire_detections()
     finally:
         osint_more.set_firms_key("")
-    assert cluster.raw_content.startswith("Satellite fire detection: 8 hotspots, possible wildfire")
+    assert cluster.raw_content.startswith("Satellite heat detection: 8 hotspots")
+    result = RULES.analyze(cluster)
+    assert result.newsworthy and result.urgency == "low"
 
 
 def test_new_sources_are_registered_and_some_start_off() -> None:
