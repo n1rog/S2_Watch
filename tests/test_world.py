@@ -151,3 +151,16 @@ def test_what_is_on_screen_hides_with_an_area_taken_out_of_the_coverage(main_win
     assert world.event_covered(event("OK", 6, (36.15, -95.99))) and world.locations_covered([])  # no place: shown
     advisory = Message("OSINT", "State Dept travel advisory: France - Level 2", fields={"type": "TRAVEL ADVISORY"})
     assert world.message_covered(advisory, paris) and not world.message_covered(paris_message, paris)
+
+
+@pytest.mark.parametrize("text, sender, label", [
+    ("Police fire tear gas as new French protests kick off | The Peninsula Qatar", "thepeninsulaqatar.com", "France"),
+    ("Israel orders lockdown of West Bank – NBC Los Angeles", "nbclosangeles.com", "Israel"),  # not the outlet's city
+    ("Oak Brook police use plate readers – NBC Chicago", "nbcchicago.com", "Chicago, IL"),  # no other place: the outlet's
+    ("Fire in Tulsa - Oklahoma", "example.com", "Tulsa, OK"),                  # a dash that isn't the outlet
+    ("Storm floods French Quarter in New Orleans | WWL", "wwltv.com", "New Orleans, LA"),
+    ("Chinese restaurant fire downtown", "example.com", None),                 # a nationality alone isn't a place
+])
+def test_headline_outlets_are_not_places_and_nationalities_place_national_news(text, sender, label) -> None:
+    found = LocationResolver().resolve(Message("OSINT", text, fields={"type": "NEWS", "sender": sender}))
+    assert (found[0].label if found else None) == label

@@ -195,6 +195,31 @@ def _state_names_pattern(gazetteer: Gazetteer) -> re.Pattern:
     return re.compile(r"\b(" + "|".join(names) + r")\b(?!\s+(?:COUNTY|CO\.|PARISH|CITY)\b)")
 
 
+# A headline's trailing outlet name: "French protests kick off | The Peninsula Qatar".
+_OUTLET = re.compile(r"\s+([|\-–—])\s+([^|\-–—]{2,60})$")
+
+
+def _compact(text: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", text.casefold())
+
+
+def without_outlet(message: Message) -> Message:
+    """A news headline without the outlet's name after it (it names a newspaper, not where the
+    news is): after "|" always; after a dash when it matches the sender's site."""
+    if str(message.fields.get("type", "")).upper() != "NEWS":
+        return message
+    match = _OUTLET.search(message.raw_content)
+    if match is None:
+        return message
+    outlet = _compact(match.group(2))
+    site = _compact(re.sub(r"^(?:https?://)?(?:www\.)?", "", str(message.fields.get("sender", ""))).rsplit(".", 1)[0])
+    same = bool(outlet and site) and (outlet in site or site in outlet
+                                      or outlet.removeprefix("the") in site or site.removeprefix("the") in outlet)
+    if match.group(1) != "|" and not same:
+        return message
+    return replace(message, raw_content=message.raw_content[:match.start()])
+
+
 class LocationResolver:
     def __init__(self, geocoder=None) -> None:
         self.geocoder = geocoder
@@ -227,10 +252,17 @@ class LocationResolver:
         self._corrections = compiled
 
     def resolve(self, message: Message) -> list[ResolvedLocation]:
-        if self._corrections:
+        if self._corrections:     # corrections know the message as received, outlet and all
             corrected = self._corrected(message)
             if corrected is not None:
                 return [corrected]
+        headline = without_outlet(message)
+        if headline is not message:
+            # The headline's own places first; a local outlet's ("– NBC Chicago") only when it names none.
+            return self._resolve(headline) or self._resolve(message)
+        return self._resolve(message)
+
+    def _resolve(self, message: Message) -> list[ResolvedLocation]:
         fields = {key.casefold(): str(value) for key, value in message.fields.items()}
         # Numbers and words inside links are not locations.
         text = _URL.sub(" ", message.raw_content)

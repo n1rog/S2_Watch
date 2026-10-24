@@ -650,7 +650,10 @@ map and events located there at once, earlier ones included (nothing is deleted;
 advisories and messages naming no place always show).
 Messages naming a country or one of about 1,900 major cities abroad are placed there
 (`s2_watch/world.py`, data from Natural Earth via `tools/build_world.py`); U.S. places
-always come first. The offline map adds coarse land and borders outside North America.
+always come first. A headline's outlet name (after "|", or after a dash when it matches the
+sender's site) counts only when the headline names no place itself, and nationality words place national news that names no place
+("French protests" → France; not "French Quarter"). The offline map adds coarse land and
+borders outside North America.
 
 **APRS** bulletins (BLN0–BLN9 and named groups) can be read from APRS-IS: turn it on
 under Configuration → Sources. Receive-only (passcode -1, nothing is sent to RF); servers

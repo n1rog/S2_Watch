@@ -37,6 +37,36 @@ SHORT_NAMES = {"us": "United States", "north_america": "North America", "central
 # "in", "from", "near"... ("strikes in Lebanon", not "Lebanon, PA" or "Chad said").
 AMBIGUOUS = {"CHAD", "JORDAN", "TURKEY", "JERSEY", "GUERNSEY", "GEORGIA", "GUINEA", "NIGER", "LEBANON", "PERU",
              "PANAMA", "CHINA", "MALI", "OMAN", "TOGO", "CUBA", "MONTSERRAT", "DOMINICA", "SAMOA", "ARUBA"}
+# Nationality words, for headlines that name no place ("French protests"): they count only
+# before a word about a country's affairs, never in "French Quarter" or "Chinese restaurant".
+DEMONYMS = {
+    "FRENCH": "France", "GERMAN": "Germany", "BRITISH": "United Kingdom", "ISRAELI": "Israel", "IRANIAN": "Iran",
+    "RUSSIAN": "Russia", "UKRAINIAN": "Ukraine", "CHINESE": "China", "JAPANESE": "Japan", "MEXICAN": "Mexico",
+    "CANADIAN": "Canada", "ITALIAN": "Italy", "SPANISH": "Spain", "TURKISH": "Turkey", "SYRIAN": "Syria",
+    "LEBANESE": "Lebanon", "IRAQI": "Iraq", "AFGHAN": "Afghanistan", "PAKISTANI": "Pakistan", "NIGERIAN": "Nigeria",
+    "VENEZUELAN": "Venezuela", "COLOMBIAN": "Colombia", "BRAZILIAN": "Brazil", "ARGENTINE": "Argentina",
+    "ARGENTINIAN": "Argentina", "CUBAN": "Cuba", "HAITIAN": "Haiti", "NORTH KOREAN": "North Korea",
+    "SOUTH KOREAN": "South Korea", "TAIWANESE": "Taiwan", "PALESTINIAN": "Palestine", "SAUDI": "Saudi Arabia",
+    "YEMENI": "Yemen", "EGYPTIAN": "Egypt", "SUDANESE": "Sudan", "POLISH": "Poland", "GREEK": "Greece",
+    "BELGIAN": "Belgium", "SWEDISH": "Sweden", "NORWEGIAN": "Norway", "FINNISH": "Finland", "DANISH": "Denmark",
+    "IRISH": "Ireland", "PORTUGUESE": "Portugal", "SWISS": "Switzerland", "AUSTRIAN": "Austria", "SERBIAN": "Serbia",
+    "HUNGARIAN": "Hungary", "ROMANIAN": "Romania", "AUSTRALIAN": "Australia", "FILIPINO": "Philippines",
+    "VIETNAMESE": "Vietnam", "THAI": "Thailand", "INDONESIAN": "Indonesia", "ETHIOPIAN": "Ethiopia",
+    "SOMALI": "Somalia", "KENYAN": "Kenya", "LIBYAN": "Libya", "JORDANIAN": "Jordan", "QATARI": "Qatar",
+    "EMIRATI": "United Arab Emirates", "BELARUSIAN": "Belarus", "ARMENIAN": "Armenia", "AZERBAIJANI": "Azerbaijan",
+    "CHILEAN": "Chile", "PERUVIAN": "Peru", "ECUADORIAN": "Ecuador", "BOLIVIAN": "Bolivia", "NICARAGUAN": "Nicaragua",
+    "HONDURAN": "Honduras", "GUATEMALAN": "Guatemala", "BANGLADESHI": "Bangladesh", "BURMESE": "Myanmar",
+    "ALGERIAN": "Algeria", "MOROCCAN": "Morocco", "TUNISIAN": "Tunisia", "MALIAN": "Mali", "RWANDAN": "Rwanda",
+    "UGANDAN": "Uganda", "ZIMBABWEAN": "Zimbabwe", "CZECH": "Czechia", "SLOVAK": "Slovakia", "BULGARIAN": "Bulgaria",
+    "CROATIAN": "Croatia", "ALBANIAN": "Albania", "DUTCH": "Netherlands",
+}
+_AFFAIRS = (r"PROTESTS?|PROTESTERS|DEMONSTRATORS?|DEMONSTRATIONS?|RIOTS?|RIOTERS|UNREST|STRIKES?|STRIKERS|POLICE|"
+            r"GOVERNMENT|PRESIDENT|PRIME MINISTER|PM|MINISTER|MINISTRY|PARLIAMENT|LAWMAKERS|ELECTIONS?|VOTERS|"
+            r"MILITARY|ARMY|TROOPS|SOLDIERS|FORCES|NAVY|AIR FORCE|AUTHORITIES|OFFICIALS|COURT|CAPITAL|BORDER|COAST GUARD|"
+            r"EMBASSY|CITIZENS|NATIONALS|FARMERS|WORKERS|UNIONS?|REBELS|MILITANTS|JUNTA|REGIME|LEADER|CITIES|TOWNS?|"
+            r"VILLAGES?|STATE MEDIA|CAPITAL")
+_DEMONYM = re.compile(r"\b(" + "|".join(sorted(DEMONYMS, key=len, reverse=True)) + r")\s+(?:" + _AFFAIRS + r")\b")
+
 # Spellings people write for cities Natural Earth names differently.
 CITY_ALIASES = {"KYIV": "KIEV", "ODESA": "ODESSA", "KHARKOV": "KHARKIV", "YANGON": "RANGOON", "SAIGON": "HO CHI MINH CITY",
                 "TEL AVIV": "TEL AVIV-YAFO", "BOMBAY": "MUMBAI", "PEKING": "BEIJING", "CALCUTTA": "KOLKATA",
@@ -164,6 +194,10 @@ class World:
         if named:
             country = named[0]
             return "country", country["name"], country["label"][0], country["label"][1], country
+        for match in _DEMONYM.finditer(upper):
+            country = self.country_names.get(normalize(DEMONYMS[match.group(1)]))
+            if country is not None:
+                return "country", country["name"], country["label"][0], country["label"][1], country
         return None
 
 
