@@ -183,7 +183,7 @@ Precedence, MagCon Status, Sources), then Summary (BLUF), Background, Situation 
 timeline, Comments / Assessment with a probability table, Intelligence Gaps, Mitigation
 Recommendations, MAGNET Guidance and the Source List with suggested Admiralty ratings.
 
-S2 Watch fills what its data supports (routing, BLUF, Situation, timeline, gaps, sources,
+S2 Watch fills what its data supports (routing, BLUF, Background, Situation, timeline, gaps, sources,
 up to 15 WordPress tags); the analysis sections start as prompts in parentheses. With
 Ollama, **Suggest assessment & gaps** drafts the assessment and adds gaps for the analyst
 to check. Edit the text, then **Save Word report…** (the MAGNET .docx format) or **Save web
@@ -195,6 +195,14 @@ next report.
 suggestions); saving again updates it, closing with unsaved changes asks first, and marking a
 briefing sent or a report followed up saves it too. **Reports → Saved Reports & Briefings…**
 lists them to reopen (with every save and export option) or delete.
+
+**Background** holds facts, then a prompt for what only the analyst knows. A follow-up
+gives the NWS watches and warnings in effect at the event's location, earlier related
+events in the previous 30 days (same hazard, within 150 km or the same state) and how they
+ended, and the state's FEMA declarations in the last 30 days. A briefing gives standing
+conditions (active NWS alerts by severity and type, marine ones aside), ongoing situations
+that began before the period, recent FEMA declarations, space weather, the MagCon status
+and the coverage (`s2_watch/background.py`).
 
 ## Possible misses (Ollama)
 

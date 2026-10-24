@@ -23,6 +23,7 @@ from s2_watch.followup import FollowUpFacts
 from s2_watch.ui.drafts_dialog import DraftsDialog
 from s2_watch import focus, world
 from s2_watch.focus import FocusArea
+from s2_watch.background import event_background, period_background
 from s2_watch.silence import quiet_near
 from s2_watch.ui.focus_area_dialog import FocusAreaDialog
 from s2_watch.adapters.analyst import AnalystAdapter, entry_message
@@ -91,6 +92,10 @@ from s2_watch.geocoding import NominatimGeocoder
 from s2_watch.locating import LocationResolver, message_hash
 from s2_watch.ui.watch_form_dialog import WatchFormDialog
 from s2_watch.ui.watch_forms_view import WatchFormsPage
+
+
+# Official items the BACKGROUND section draws on (besides NWS alerts).
+BACKGROUND_KINDS = {"FEMA DECLARATION", "SPACE WEATHER"}
 
 
 class MainWindow(QMainWindow):
@@ -2120,10 +2125,13 @@ class MainWindow(QMainWindow):
             events = self.store.events_since(now - timedelta(hours=hours))
         else:
             events = self.events_view.visible_events()
-        text = s2_briefing_report(events, now, hours, self.focus_regions, last_briefing,
-                                  magcon=self.store.get_setting("magcon.status", DEFAULT_MAGCON),
+        magcon = self.store.get_setting("magcon.status", DEFAULT_MAGCON)
+        background = period_background(events, self.nws_alerts, osint_sources.cached_messages(BACKGROUND_KINDS), now,
+                                       now - timedelta(hours=hours), magcon,
+                                       world.describe() if world.COVERAGE != {"us"} else "")
+        text = s2_briefing_report(events, now, hours, self.focus_regions, last_briefing, magcon=magcon,
                                   reports_of=self.store.event_reports, grades=self.sender_grades(),
-                                  quiet_for=self.quiet_near_event)
+                                  quiet_for=self.quiet_near_event, background=background)
         ollama = None
         if self.analysis_mode.checkedAction().data() == "ollama":
             ollama = (self.ollama_endpoint.text().strip() or "http://127.0.0.1:11434",
@@ -2176,6 +2184,14 @@ class MainWindow(QMainWindow):
     def draft_followup(self, row: int, report_id: int) -> None:
         self.draft_followup_for_report(report_id)
 
+    def event_summary(self, event_id: int):
+        """An event's summary: from a list showing it, else from the last 60 days."""
+        found = self.map_events.event_by_id(event_id) or self.events_view.table.event_by_id(event_id)
+        if found is None:
+            since = datetime.now(timezone.utc) - timedelta(days=60)
+            found = next((event for event in self.store.events_since(since) if event.event_id == event_id), None)
+        return found
+
     def draft_followup_for_report(self, report_id: int | None) -> None:
         """Draft a follow-up from a saved report (from the Reports list or an event)."""
         found = self.store.report_first_message(report_id) if report_id is not None else None
@@ -2195,8 +2211,13 @@ class MainWindow(QMainWindow):
         # The MAGNET S2 report covers the report's whole event (its timeline and sources).
         event_id = self.store.event_of_report(report_id)
         members = self.store.event_reports(event_id) if event_id is not None else None
+        background = None
+        event = self.event_summary(event_id) if event_id is not None else None
+        if event is not None:
+            background = event_background(event, self.store.related_events(event_id), self.nws_alerts,
+                                          osint_sources.cached_messages(BACKGROUND_KINDS), datetime.now(timezone.utc))
         text = s2_followup_report(facts, members, magcon=self.store.get_setting("magcon.status", DEFAULT_MAGCON),
-                                  grades=self.sender_grades())
+                                  grades=self.sender_grades(), background=background)
         ollama = None
         if self.analysis_mode.checkedAction().data() == "ollama":
             ollama = (self.ollama_endpoint.text().strip() or "http://127.0.0.1:11434",

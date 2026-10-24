@@ -3,7 +3,7 @@ import re
 import sqlite3
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from s2_watch.analysis.base import AnalysisResult
@@ -856,6 +856,41 @@ class SQLiteStore:
                 closed += 1
         self.connection.commit()
         return closed
+
+    def related_events(self, event_id: int, days: int = 30, km: float = 150) -> list[dict]:
+        """Earlier events like this one: the same category and a shared kind of hazard (any, when
+        either has none), within ``km`` or in the same state, begun in the ``days`` before it."""
+        from s2_watch.silence import _distance_km
+
+        row = self.connection.execute(
+            "SELECT category, hazards, state, lat, lon, first_seen FROM events WHERE id = ?", (event_id,)).fetchone()
+        if row is None:
+            return []
+        category, hazards, state, lat, lon, first_seen = row
+        hazards = {h for h in hazards.split(",") if h}
+        start = datetime.fromisoformat(first_seen)
+        rows = self.connection.execute(
+            """SELECT e.id, e.title, e.hazards, e.state, e.lat, e.lon, e.first_seen, e.last_seen, e.closed_at,
+                      e.close_reason, COUNT(r.id),
+                      MAX(CASE WHEN r.first_source = 'OSINT' AND (r.sender IN ({}) OR r.official = 1)
+                               THEN r.sender END)
+               FROM events e JOIN reports r ON r.event_id = e.id AND r.newsworthy = 1
+               WHERE e.id != ? AND e.category = ? AND e.first_seen < ? AND e.first_seen >= ?
+               GROUP BY e.id ORDER BY e.first_seen DESC""".format(",".join("?" * len(OFFICIAL_SENDERS))),
+            (*sorted(OFFICIAL_SENDERS), event_id, category, first_seen, utc_iso(start - timedelta(days=days)))).fetchall()
+        related = []
+        for (other_id, title, other_hazards, other_state, other_lat, other_lon, other_first, other_last, closed_at,
+             close_reason, reports, official) in rows:
+            other_hazards = {h for h in other_hazards.split(",") if h}
+            if hazards and other_hazards and not hazards & other_hazards:
+                continue
+            near = (lat is not None and other_lat is not None and _distance_km(lat, lon, other_lat, other_lon) <= km) or (
+                bool(state) and state == other_state)
+            if near:
+                related.append({"event_id": other_id, "title": title, "first_seen": datetime.fromisoformat(other_first),
+                                "last_seen": datetime.fromisoformat(other_last), "reports": reports,
+                                "official": official or "", "closed": bool(closed_at), "close_reason": close_reason})
+        return related
 
     def close_event(self, event_id: int, reason: str = "", when: datetime | None = None) -> None:
         """The operator closes an event (a later report reopens it)."""

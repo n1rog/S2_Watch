@@ -185,8 +185,10 @@ def _place(state: str, region, label: str = "") -> str:
 # -- follow-up report (one report or event) ----------------------------------------------
 
 def followup_report(facts, members: list[dict] | None = None, now: datetime | None = None,
-                    magcon: str = DEFAULT_MAGCON, grades: dict[str, str] | None = None) -> str:
-    """A MAGNET S2 report about one report and the event it belongs to."""
+                    magcon: str = DEFAULT_MAGCON, grades: dict[str, str] | None = None,
+                    background: list[str] | None = None) -> str:
+    """A MAGNET S2 report about one report and the event it belongs to. ``background``: the
+    BACKGROUND lines S2 Watch could state (s2_watch.background); else just the prompt."""
     now = now or datetime.now(timezone.utc)
     members = members or [{"first_seen": facts.message.received_at.isoformat(), "source": facts.message.source_application,
                            "sender": facts.message.fields.get("sender", ""), "summary": facts.result.summary,
@@ -250,7 +252,8 @@ def followup_report(facts, members: list[dict] | None = None, now: datetime | No
     gaps.append("What is the current status: ongoing, contained, or resolved?")
     lines = _header(fields) + [
         "", "SUMMARY (BLUF)", " ".join(bluf),
-        "", "BACKGROUND", "(Factual context only, no analysis: what is normal for this area or hazard, and any earlier related incidents.)",
+        "", "BACKGROUND", *(background or ["(Factual context only, no analysis: what is normal for this area or hazard, "
+                                           "and any earlier related incidents.)"]),
         "", "SITUATION", *situation, "", "Timeline of Known Activity:", *timeline,
         "", "COMMENTS / ASSESSMENT",
         "(Analytical layer in measured language: assessed, likely, indicates, suggests. Most significant indicator first.)",
@@ -278,7 +281,8 @@ def _exercise_banner(lines: list[str]) -> str:
 
 def briefing_report(events, now: datetime, hours: int, focus: set[int] | None = None,
                     last_briefing: datetime | None = None, magcon: str = DEFAULT_MAGCON,
-                    reports_of=None, grades: dict[str, str] | None = None, quiet_for=None) -> str:
+                    reports_of=None, grades: dict[str, str] | None = None, quiet_for=None,
+                    background: list[str] | None = None) -> str:
     """A MAGNET S2 report summarising a watch period's events. Closed events are listed as
     resolved, not as current activity; quiet ones say how long they've been quiet."""
     from s2_watch.events import quiet_hours
@@ -371,7 +375,8 @@ def briefing_report(events, now: datetime, hours: int, focus: set[int] | None = 
         ["[1] S2 Watch event log — radio and open-source reporting for the period"]
     lines = _header(fields) + [
         "", "SUMMARY (BLUF)", " ".join(bluf),
-        "", "BACKGROUND", f"(Factual context for the period: standing conditions, MagCon basis, ongoing situations.)",
+        "", "BACKGROUND", *(background or ["(Factual context for the period: standing conditions, MagCon basis, "
+                                           "ongoing situations.)"]),
         "", "SITUATION", *(situation or ["No high- or medium-urgency events in the period.", ""]),
         "Other Activity:", f"Events by category: {other or 'none'}.",
         *(["", "Resolved in the Period:"] if resolved else []),
