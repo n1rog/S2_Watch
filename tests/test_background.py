@@ -30,17 +30,29 @@ def test_a_follow_up_states_alerts_earlier_events_and_declarations(tmp_path) -> 
     fema = Message("OSINT", "FEMA: Major Disaster — Oklahoma; incident type Flood; 12 areas designated",
                    received_at=NOW - timedelta(days=2), fields={"type": "FEMA DECLARATION", "state": "OK"})
     [event] = [e for e in store.events_since(NOW - timedelta(days=1)) if e.event_id == now_event]
-    lines = event_background(event, store.related_events(now_event), [FLOOD_WARNING], [fema], NOW)
-    assert lines[0].startswith("NWS watches and warnings in effect at the location: Flood Warning (until ")
+    wind = {**FLOOD_WARNING, "event": "Wind Advisory", "severity": "Moderate"}          # a different hazard
+    lines = event_background(event, store.related_events(now_event), [FLOOD_WARNING, wind], [fema], NOW,
+                             store.event_hazards(now_event))
+    assert lines[0].startswith("NWS watches and warnings for this hazard in effect at the location: Flood Warning (until ")
+    assert "Wind Advisory" not in lines[0]
     assert "01 Oct: TULSA OK - RIVER FLOODING, ROADS CLOSED (1 report, closed: water receded)" in lines[1]
     assert lines[2].startswith("FEMA declarations for Oklahoma in the last 30 days: Major Disaster — Oklahoma")
     assert lines[-1] == EVENT_PROMPT
 
 
 def test_a_quiet_place_says_so() -> None:
-    lines = event_background(summary("Hail", NOW), [], [], [], NOW)
-    assert lines[:2] == ["No NWS watches or warnings are in effect at the location as of this DTG.",
+    lines = event_background(summary("Hail", NOW), [], [], [], NOW, {"thunderstorm"})
+    assert lines[:2] == ["No NWS watches or warnings for this hazard are in effect at the location as of this DTG.",
                          "S2 Watch recorded no similar events within 150 km or in the same state in the previous 30 days."]
+
+
+def test_a_report_that_isnt_about_a_hazard_mentions_no_weather_or_fema() -> None:
+    fema = Message("OSINT", "FEMA: Major Disaster — Oklahoma; incident type Flood; 12 areas designated",
+                   received_at=NOW - timedelta(days=2), fields={"type": "FEMA DECLARATION", "state": "OK"})
+    crime = event_background(summary("Shooting — Tulsa, OK", NOW), [], [FLOOD_WARNING], [fema], NOW, set())
+    assert not any("NWS" in line or "FEMA" in line for line in crime)
+    fire = event_background(summary("Grass fire — Tulsa, OK", NOW), [], [FLOOD_WARNING], [fema], NOW, {"fire"})
+    assert not any("FEMA" in line for line in fire) and "Flood Warning" not in " ".join(fire)
 
 
 def test_a_briefing_states_conditions_ongoing_situations_and_magcon() -> None:

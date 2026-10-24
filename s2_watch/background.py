@@ -10,12 +10,15 @@ from __future__ import annotations
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 
-from s2_watch.corroboration import _covers, _parse_time
+from s2_watch.corroboration import FEMA_HAZARDS, _covers, _parse_time, hazards as hazards_in
 from s2_watch.locating import load_gazetteer
 
 # Alerts for boaters and beaches: many, and not what a briefing's standing conditions are about.
 MARINE = ("small craft", "gale", "marine", "seas", "rip current", "beach hazard", "high surf", "brisk wind",
           "freezing spray", "storm warning", "hurricane force wind", "low water", "lake wind")
+# Hazards the weather service warns about: only for these does a report's background mention NWS.
+NWS_HAZARDS = {"flood", "heat", "fire", "winter", "wind", "tornado", "thunderstorm", "tropical", "fog", "air", "coastal",
+               "avalanche"}
 EVENT_PROMPT = "(Add what is normal for this area or hazard.)"
 PERIOD_PROMPT = "(Add the basis for the MagCon status and anything else the reader needs as context.)"
 
@@ -41,12 +44,17 @@ def alerts_at(alerts: list[dict], lat: float, lon: float, now: datetime) -> list
     return active
 
 
-def _declarations(messages, state: str, now: datetime) -> list[str]:
-    """FEMA declarations for a state (or all, with "") in the last 30 days, newest first."""
+def _declarations(messages, state: str, now: datetime, hazards: set[str] | None = None) -> list[str]:
+    """FEMA declarations for a state (or all, with "") in the last 30 days, newest first; with
+    ``hazards``, only those declared for one of them."""
     found = []
     for message in sorted(messages, key=lambda m: m.received_at, reverse=True):
         if message.fields.get("type") != "FEMA DECLARATION" or (state and message.fields.get("state") != state):
             continue
+        if hazards is not None:
+            incident = message.raw_content.split("incident type", 1)[-1].split(";", 1)[0].strip().lower()
+            if not FEMA_HAZARDS.get(incident, set()) & hazards:
+                continue
         received = message.received_at if message.received_at.tzinfo else message.received_at.replace(tzinfo=timezone.utc)
         if now - received <= timedelta(days=30):
             words = message.raw_content.split(":", 1)[-1].strip()
@@ -54,8 +62,13 @@ def _declarations(messages, state: str, now: datetime) -> list[str]:
     return found
 
 
-def event_background(event, related: list[dict], alerts: list[dict], official_messages, now: datetime) -> list[str]:
-    """For a follow-up report on one event (an EventSummary)."""
+def event_background(event, related: list[dict], alerts: list[dict], official_messages, now: datetime,
+                     hazards: set[str] | None = None) -> list[str]:
+    """For a follow-up report on one event (an EventSummary) about ``hazards`` (flood, fire...).
+    Only sources related to the report are mentioned: NWS alerts and FEMA declarations for the
+    same kind of hazard, and nothing from them for a report that isn't about one."""
+    hazards = set(hazards or ())
+    weather = hazards & NWS_HAZARDS
     lines = []
     point = event.points[0] if event.points else None
     gazetteer = load_gazetteer()
@@ -66,14 +79,15 @@ def event_background(event, related: list[dict], alerts: list[dict], official_me
 
         us = load_world().area_of(*point) == "us"
         state = (gazetteer.locate_point(*point)[0] or "") if us else ""
-    if point and us:
-        standing = alerts_at(alerts, point[0], point[1], now)
+    if point and us and weather:
+        standing = [alert for alert in alerts_at(alerts, point[0], point[1], now)
+                    if hazards_in(alert.get("event", "")) & weather]
         if standing:
             names = "; ".join(f"{alert['event']}{_until(alert)}" for alert in standing[:4])
             more = f" and {len(standing) - 4} more" if len(standing) > 4 else ""
-            lines.append(f"NWS watches and warnings in effect at the location: {names}{more}.")
+            lines.append(f"NWS watches and warnings for this hazard in effect at the location: {names}{more}.")
         else:
-            lines.append("No NWS watches or warnings are in effect at the location as of this DTG.")
+            lines.append("No NWS watches or warnings for this hazard are in effect at the location as of this DTG.")
     if related:
         # Events with one title (several "Flood — Florida" the same day) read as one line with a count.
         grouped: dict[str, list[dict]] = {}
@@ -96,8 +110,8 @@ def event_background(event, related: list[dict], alerts: list[dict], official_me
         lines.append(f"Earlier related activity in the previous 30 days: {'; '.join(items)}{more}.")
     else:
         lines.append("S2 Watch recorded no similar events within 150 km or in the same state in the previous 30 days.")
-    if state:
-        declarations = _declarations(official_messages, state, now)
+    if state and hazards:
+        declarations = _declarations(official_messages, state, now, hazards)
         if declarations:
             lines.append(f"FEMA declarations for {gazetteer.state_names.get(state, state)} in the last 30 days: "
                          f"{'; '.join(declarations[:3])}.")

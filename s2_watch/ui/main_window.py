@@ -2215,7 +2215,8 @@ class MainWindow(QMainWindow):
         event = self.event_summary(event_id) if event_id is not None else None
         if event is not None:
             background = event_background(event, self.store.related_events(event_id), self.nws_alerts,
-                                          osint_sources.cached_messages(BACKGROUND_KINDS), datetime.now(timezone.utc))
+                                          osint_sources.cached_messages(BACKGROUND_KINDS), datetime.now(timezone.utc),
+                                          self.store.event_hazards(event_id))
         text = s2_followup_report(facts, members, magcon=self.store.get_setting("magcon.status", DEFAULT_MAGCON),
                                   grades=self.sender_grades(), background=background)
         ollama = None

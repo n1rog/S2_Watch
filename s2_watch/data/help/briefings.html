@@ -25,20 +25,26 @@ MAGNET Guidance, the Source List and tags. S2 Watch fills what its data supports
 <p><b>Background</b> is filled with facts S2 Watch has, then a short prompt for what only you know (what is normal for the area or
 hazard, the basis for the MagCon status):</p>
 <ul>
-<li><b>Follow-up report:</b> the NWS watches and warnings in effect at the event's location (or that none are); earlier related events
-in the previous 30 days (same kind of hazard, within 150 km or in the same state) and how they ended; FEMA declarations for the state in
-the last 30 days.</li>
+<li><b>Follow-up report:</b> the NWS watches and warnings for the event's kind of hazard in effect at its location (or that none
+are); earlier related events in the previous 30 days (same kind of hazard, within 150 km or in the same state) and how they ended;
+FEMA declarations for the state in the last 30 days declared for that hazard. Only sources related to the report appear: a report on
+a flood lists flood alerts, not a wind advisory, and a report that isn't about a weather hazard (a shooting, a power outage, a
+protest) has no NWS or FEMA lines at all.</li>
 <li><b>Shift briefing:</b> standing conditions (active NWS watches and warnings by severity and type, marine ones aside); ongoing
 situations that began before the period; FEMA declarations in the last 30 days; space weather; the MagCon status; the coverage, when
 beyond the U.S.</li>
 </ul>
 <div class="example"><p><b>Example: a follow-up on a Florida flood.</b></p>
 <pre>BACKGROUND
-NWS watches and warnings in effect at the location: Coastal Flood Advisory (until 25 Oct 0900Z);
+NWS watches and warnings for this hazard in effect at the location: Coastal Flood Advisory (until 25 Oct 0900Z);
 Coastal Flood Warning (until 25 Oct 0900Z).
 Earlier related activity in the previous 30 days: 21 Oct: Flood — Florida ×8 (20 reports, confirmed by NWS).
 FEMA declarations for Florida in the last 30 days: Hurricane Isaias — Florida; incident type Tropical Storm;
 27 areas designated (09 Oct).
+(Add what is normal for this area or hazard.)</pre></div>
+<div class="example"><p><b>Example: a follow-up on a shooting.</b> No weather or FEMA lines, only S2 Watch's own record.</p>
+<pre>BACKGROUND
+S2 Watch recorded no similar events within 150 km or in the same state in the previous 30 days.
 (Add what is normal for this area or hazard.)</pre></div>
 <div class="example"><p><b>Example lines.</b></p>
 <pre>DTG: 261023-1430Z

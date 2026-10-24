@@ -857,6 +857,11 @@ class SQLiteStore:
         self.connection.commit()
         return closed
 
+    def event_hazards(self, event_id: int) -> set[str]:
+        """The kinds of hazard an event is about (flood, fire, wind...; none for crime, politics...)."""
+        row = self.connection.execute("SELECT hazards FROM events WHERE id = ?", (event_id,)).fetchone()
+        return {hazard for hazard in (row[0] if row else "").split(",") if hazard}
+
     def related_events(self, event_id: int, days: int = 30, km: float = 150) -> list[dict]:
         """Earlier events like this one: the same category and a shared kind of hazard (any, when
         either has none), within ``km`` or in the same state, begun in the ``days`` before it."""

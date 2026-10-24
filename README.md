@@ -197,9 +197,11 @@ briefing sent or a report followed up saves it too. **Reports → Saved Reports 
 lists them to reopen (with every save and export option) or delete.
 
 **Background** holds facts, then a prompt for what only the analyst knows. A follow-up
-gives the NWS watches and warnings in effect at the event's location, earlier related
-events in the previous 30 days (same hazard, within 150 km or the same state) and how they
-ended, and the state's FEMA declarations in the last 30 days. A briefing gives standing
+gives the NWS watches and warnings for the event's kind of hazard in effect at its
+location, earlier related events in the previous 30 days (same hazard, within 150 km or the
+same state) and how they ended, and the state's FEMA declarations in the last 30 days for
+that hazard. Only related sources appear: a report not about a weather hazard has no NWS or
+FEMA lines. A briefing gives standing
 conditions (active NWS alerts by severity and type, marine ones aside), ongoing situations
 that began before the period, recent FEMA declarations, space weather, the MagCon status
 and the coverage (`s2_watch/background.py`).
