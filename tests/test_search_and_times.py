@@ -1,6 +1,7 @@
 """Searching the lists, the 400-row limit, and Local/Zulu reaching the events lists."""
 
 from datetime import timedelta
+from PySide6.QtCore import Qt
 
 from s2_watch.storage import SQLiteStore
 from s2_watch.ui.events_view import EventsTable
@@ -50,3 +51,20 @@ def test_history_finds_a_station_by_its_call_sign_and_every_word(tmp_path) -> No
     assert [row[3] for row in store.search_history(text="K9DGY yemen")] == ["QST YEMEN LL45 SAUDI-LED COALITION AIRSTRIKES"]
     assert len(store.search_history(text="yemen")) == 2
     assert store.search_history(text="K9DGJ") == []
+
+
+def test_the_table_under_the_map_resizes_and_keeps_its_size(tmp_path, main_window) -> None:
+    window = main_window(tmp_path / "split.db")
+    window.resize(1200, 900)
+    window.show()
+    split = window.map_split
+    assert split.orientation() == Qt.Orientation.Vertical and split.count() == 2
+    split.setSizes([300, 500])
+    split.splitterMoved.emit(300, 1)                       # what dragging the handle sends
+    assert window.store.get_setting("map.split")
+    window.close()
+    reopened = main_window(tmp_path / "split.db")
+    reopened.resize(1200, 900)
+    reopened.show()
+    top, bottom = reopened.map_split.sizes()
+    assert bottom > top                                    # the bigger table is remembered

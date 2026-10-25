@@ -681,8 +681,7 @@ class MainWindow(QMainWindow):
         map_toolbar.addWidget(map_briefing)
         map_layout = QVBoxLayout()
         map_layout.addLayout(map_toolbar)
-        self.map_view.setMinimumHeight(500)
-        map_layout.addWidget(self.map_view, 3)
+        self.map_view.setMinimumHeight(150)
         # Under the map: events (the default) or individual reports, switchable.
         self.map_events = EventsTable(self.format_display_time, store=self.store, state_key="events.map.header")
         self.map_events.menu_requested.connect(self.show_event_menu)
@@ -742,9 +741,27 @@ class MainWindow(QMainWindow):
             self.news_mode = "events"
         self.news_mode_buttons[self.news_mode].setChecked(True)
         self.news_stack.setCurrentWidget(self.map_events_page if self.news_mode == "events" else self.analysis)
-        map_layout.addLayout(switch_row)
         self.update_news_label()
-        map_layout.addWidget(self.news_stack, 2)
+        # The map and the table under it share the page; drag the handle between them to resize.
+        table_pane = QWidget()
+        table_layout = QVBoxLayout(table_pane)
+        table_layout.setContentsMargins(0, 0, 0, 0)
+        table_layout.addLayout(switch_row)
+        table_layout.addWidget(self.news_stack, 1)
+        table_pane.setMinimumHeight(120)
+        self.map_split = QSplitter(Qt.Orientation.Vertical)
+        self.map_split.setChildrenCollapsible(False)
+        self.map_split.addWidget(self.map_view)
+        self.map_split.addWidget(table_pane)
+        self.map_split.setStretchFactor(0, 3)
+        self.map_split.setStretchFactor(1, 2)
+        self.map_split.setSizes([600, 400])
+        saved_map_split = self.store.get_setting("map.split", "")
+        if saved_map_split:
+            self.map_split.restoreState(QByteArray.fromBase64(saved_map_split.encode()))
+        self.map_split.splitterMoved.connect(lambda *_: self.store.set_setting(
+            "map.split", bytes(self.map_split.saveState().toBase64()).decode()))
+        map_layout.addWidget(self.map_split, 1)
         # New reports arrive in bursts; the events list refreshes once a burst settles.
         self._map_events_timer = QTimer(self)
         self._map_events_timer.setSingleShot(True)

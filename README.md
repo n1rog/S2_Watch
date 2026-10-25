@@ -166,7 +166,8 @@ reports containing every word typed: for an event, its title, category, area, so
 labels, status and the full text, senders and notes of its reports. While searching,
 every match shows, past the row limit (Display → Newsworthiness rows shown, up to 400).
 
-Under the map, **Show: Events | Reports** switches the Newsworthiness list between events
+The map and the list under it share the page: drag the handle between them to resize
+either (remembered). Under the map, **Show: Events | Reports** switches the Newsworthiness list between events
 (the default) and individual reports. Right-click events to label all their reports,
 edit a note, draft a follow-up (from the newest radio report), show them on the map, or
 list their reports; the I/F/X-style shortcuts work there too. Clicking a map marker
