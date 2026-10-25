@@ -31,6 +31,7 @@ from s2_watch.ui.analyst_entry_dialog import AnalystEntriesDialog, AnalystEntryD
 from s2_watch.ui.fix_location_dialog import FixLocationDialog
 from s2_watch.ui.help_view import HelpDialog
 from s2_watch.ui.keyword_noise_dialog import KeywordNoiseDialog
+from s2_watch.ui.grip_splitter import GripSplitter
 from s2_watch.ui.senders_dialog import SendersDialog
 from s2_watch.ui.event_detail import EventDetail
 from s2_watch.ui.events_view import EventsTable, EventsView, search_box
@@ -749,7 +750,7 @@ class MainWindow(QMainWindow):
         table_layout.addLayout(switch_row)
         table_layout.addWidget(self.news_stack, 1)
         table_pane.setMinimumHeight(120)
-        self.map_split = QSplitter(Qt.Orientation.Vertical)
+        self.map_split = GripSplitter(Qt.Orientation.Vertical)
         self.map_split.setChildrenCollapsible(False)
         self.map_split.addWidget(self.map_view)
         self.map_split.addWidget(table_pane)

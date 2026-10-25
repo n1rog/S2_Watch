@@ -68,3 +68,15 @@ def test_the_table_under_the_map_resizes_and_keeps_its_size(tmp_path, main_windo
     reopened.show()
     top, bottom = reopened.map_split.sizes()
     assert bottom > top                                    # the bigger table is remembered
+
+    from PySide6.QtCore import QPoint
+    from PySide6.QtTest import QTest
+
+    handle = reopened.map_split.handle(1)                  # dragged with the mouse, like the operator does
+    assert handle.height() >= 10
+    before = reopened.map_split.sizes()[1]
+    middle = handle.rect().center()
+    QTest.mousePress(handle, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, middle)
+    QTest.mouseMove(handle, middle + QPoint(0, 150))
+    QTest.mouseRelease(handle, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, middle + QPoint(0, 150))
+    assert reopened.map_split.sizes()[1] < before - 100     # dragged down: a smaller table

@@ -174,6 +174,13 @@ class SQLiteStore:
         # The operator's location corrections: a phrase ("BIXBY") or one message ("#msg:<hash>")
         # and where it really is.
         self.connection.execute(
+            """CREATE TABLE IF NOT EXISTS sender_trust (
+                callsign TEXT PRIMARY KEY,
+                grade TEXT NOT NULL,
+                set_at TEXT NOT NULL
+            )"""
+        )
+        self.connection.execute(
             """CREATE TABLE IF NOT EXISTS place_corrections (
                 phrase TEXT PRIMARY KEY,
                 level TEXT NOT NULL,
@@ -1025,7 +1032,25 @@ class SQLiteStore:
                 continue
             confirmed = bool(corroboration) or (event_id is not None and event_id in confirmed_events)
             records.setdefault(station, TrackRecord(station)).add(datetime.fromisoformat(first_seen), confirmed, status)
+        for station, grade in self.sender_trust().items():     # stations the operator rated, heard or not
+            records.setdefault(station, TrackRecord(station)).trust = grade
         return records
+
+    def sender_trust(self) -> dict[str, str]:
+        """The trust levels the operator set, by call sign."""
+        return dict(self.connection.execute("SELECT callsign, grade FROM sender_trust").fetchall())
+
+    def set_sender_trust(self, station: str, grade: str | None) -> None:
+        """Set a station's trust level (A–F), or back to Automatic (None or "")."""
+        station = station.strip().upper()
+        if not grade:
+            self.connection.execute("DELETE FROM sender_trust WHERE callsign = ?", (station,))
+        else:
+            self.connection.execute(
+                """INSERT INTO sender_trust(callsign, grade, set_at) VALUES (?, ?, ?)
+                   ON CONFLICT(callsign) DO UPDATE SET grade = excluded.grade, set_at = excluded.set_at""",
+                (station, grade, utc_iso(datetime.now(timezone.utc))))
+        self.connection.commit()
 
     def event_of_report(self, report_id: int) -> int | None:
         row = self.connection.execute("SELECT event_id FROM reports WHERE id = ?", (report_id,)).fetchone()

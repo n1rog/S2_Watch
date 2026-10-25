@@ -138,6 +138,37 @@ def test_track_records_suggest_a_grade_once_enough_reports_are_judged(tmp_path: 
     assert "[B1]" in lines[0] and "[F1]" in lines[1]
 
 
+def test_the_operator_sets_a_stations_trust_level(tmp_path: Path) -> None:
+    store = SQLiteStore(tmp_path / "s2.db")
+    add(store, "MagCommstat", "TULSA OK - RIVER FLOODING", T0, TULSA, fields={"sender": "w2xyz"})
+    store.set_sender_trust("w2xyz", "A")                     # known for years: completely reliable
+    store.set_sender_trust("N0NEW", "D")                     # not heard yet, rated ahead
+    records = store.sender_track_records()
+    assert records["W2XYZ"].grade == "A" and records["W2XYZ"].suggested == "F"
+    assert "set by you" in records["W2XYZ"].explanation and records["N0NEW"].grade == "D"
+    reports = [{"source": "MagCommstat", "sender": "W2XYZ", "first_seen": T0.isoformat(), "text": "y"}]
+    assert "[A1]" in source_lines(reports, confirmed=True, grades={"W2XYZ": records["W2XYZ"].grade})[0]
+    store.set_sender_trust("W2XYZ", "")                      # back to Automatic
+    assert store.sender_track_records()["W2XYZ"].grade == "F" and "N0NEW" in store.sender_trust()
+
+
+def test_the_track_records_dialog_sets_trust_levels(tmp_path: Path) -> None:
+    from PySide6.QtWidgets import QApplication
+
+    from s2_watch.ui.senders_dialog import SendersDialog
+
+    QApplication.instance() or QApplication([])
+    store = SQLiteStore(tmp_path / "s2.db")
+    add(store, "MagCommstat", "TULSA OK - RIVER FLOODING", T0, TULSA, fields={"sender": "K1ABC"})
+    dialog = SendersDialog(store, str)
+    column = dialog.COLUMNS.index("Trust level")
+    assert dialog.table.item(0, column).text() == "Automatic"
+    dialog.set_trust(["K1ABC"], "B")
+    dialog.refresh()
+    assert store.sender_trust() == {"K1ABC": "B"} and dialog.table.item(0, column).text() == "B — usually reliable"
+    dialog.deleteLater()
+
+
 def test_the_monitor_keeps_exercise_traffic_off_the_news_until_an_exercise(tmp_path: Path) -> None:
     from s2_watch.analysis.rules import RuleBasedNewsAnalyzer
     from s2_watch.models import WatchForm

@@ -6,6 +6,9 @@ Ignored counts against it; anything else isn't judged yet. With enough judged re
 share that held up suggests an Admiralty reliability grade (B usually reliable down to E
 unreliable; A is left to official sources). Fewer than MIN_JUDGED judged reports: F,
 cannot be judged. The grade is a suggestion for the analyst, shown with its counts.
+
+The operator can set a station's trust level (A completely reliable to F) from what they
+know of it; it then stands in for the suggestion everywhere, until set back to Automatic.
 """
 
 from __future__ import annotations
@@ -17,7 +20,8 @@ from datetime import datetime
 MIN_JUDGED = 5
 GRADES = ((0.85, "B", "usually reliable"), (0.65, "C", "fairly reliable"), (0.4, "D", "not usually reliable"),
           (0.0, "E", "unreliable"))
-GRADE_WORDS = {"F": "cannot be judged", **{grade: words for _share, grade, words in GRADES}}
+GRADE_WORDS = {"A": "completely reliable", **{grade: words for _share, grade, words in GRADES}, "F": "cannot be judged"}
+TRUST_LEVELS = tuple(GRADE_WORDS)        # A–F, what the operator can set
 _JS8_FROM = re.compile(r'"FROM":\s*"([A-Za-z0-9/]+)"')
 
 
@@ -38,6 +42,7 @@ class TrackRecord:
     useful: int = 0        # marked Of interest or Follow-up (and not confirmed)
     ignored: int = 0       # marked Ignored (and not confirmed)
     last_heard: datetime | None = None
+    trust: str = ""        # the trust level the operator set (A–F); "" for Automatic
 
     @property
     def judged(self) -> int:
@@ -49,6 +54,11 @@ class TrackRecord:
 
     @property
     def grade(self) -> str:
+        """The grade reports use: the operator's trust level, or else the suggested one."""
+        return self.trust or self.suggested
+
+    @property
+    def suggested(self) -> str:
         if self.judged < MIN_JUDGED:
             return "F"
         share = self.held_up / self.judged
@@ -56,6 +66,12 @@ class TrackRecord:
 
     @property
     def explanation(self) -> str:
+        if self.trust:
+            return f"trust level set by you; the track record suggests {self.suggested} ({self.basis})"
+        return self.basis
+
+    @property
+    def basis(self) -> str:
         if self.judged < MIN_JUDGED:
             return f"too few judged reports ({self.judged} of {MIN_JUDGED} needed)"
         return f"{self.held_up} of {self.judged} judged reports held up"

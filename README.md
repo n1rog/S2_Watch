@@ -152,10 +152,13 @@ EXERCISE at the top and bottom). Possible Misses skips exercise and test traffic
 held up: confirmed by an official source, or marked Of interest / Follow-up, counts for the
 station; marked Ignored counts against it. With 5 or more judged reports, the share that
 held up suggests a reliability grade: B usually reliable (85%+), C fairly reliable (65%+),
-D not usually reliable (40%+), E unreliable; fewer is F, cannot be judged. A is left to
-official sources. MAGNET reports use the grade in each station's source rating (e.g.
-[B2]), and the event panel shows it beside each report. Exercise and test traffic doesn't
-count.
+D not usually reliable (40%+), E unreliable; fewer is F, cannot be judged. The
+operator can set a station's **trust level** (A completely reliable to F) in the same
+window, by clicking its Trust level cell or right-clicking selected stations; it replaces
+the suggestion until set back to Automatic, and **Add station…** rates a station before it
+is heard (`sender_trust` table). MAGNET reports use the grade in each station's source
+rating (e.g. [B2]), and the event panel shows it beside each report. Exercise and test
+traffic doesn't count.
 
 The **History** tab searches every saved message: each word typed must appear in the
 message, its sender's call sign, its watch form or its headline (e.g. `K9DGY yemen`), with

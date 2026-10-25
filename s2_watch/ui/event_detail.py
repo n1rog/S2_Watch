@@ -185,8 +185,8 @@ class EventDetail(QWidget):
             record = records.get(station) if report["source"] != "OSINT" else None
             track = ""
             if record is not None:
-                track = (f" · track record <b>{record.grade}</b> ({e(GRADE_WORDS[record.grade])}: "
-                         f"{e(record.explanation)})")
+                track = (f" · {'trust level' if record.trust else 'track record'} <b>{record.grade}</b> "
+                         f"({e(GRADE_WORDS[record.grade])}: {e(record.explanation)})")
             stated = report.get("event_time") or ""
             if stated and abs((_when(report["first_seen"]) - _when(stated)).total_seconds()) >= 300:
                 track += f" · time in message <b>{e(self.format_time(stated))}</b>"
