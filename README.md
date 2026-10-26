@@ -70,8 +70,8 @@ Each event shows its sources, official confirmation and how far ahead radio repo
 Select an event to see what it is about. The panel beside the list (on the map page and
 on the Events tab) shows its category, area, urgency and when it was heard, whether an
 official source confirms it and radio's head start, your labels and notes, then every
-report in the order heard, with the full text, the sender, its own confirmation and a link
-for official and news items. The buttons under it show the event on the map, draft a
+report, newest first, with the full text, the sender, its own confirmation, where it was
+placed (state or country and latitude/longitude) and a link for official and news items. The buttons under it show the event on the map, draft a
 follow-up, label it (or edit its note), list its reports, or close it.
 
 **Events that are over.** A radio or official report saying it's over closes its event:

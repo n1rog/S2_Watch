@@ -46,7 +46,10 @@ _FACTS = [
      lambda m: f"{m.group(1).replace(' ', '')}\" snow"),
     (re.compile(r"(?<![!#\w.])(\d{2,3})\s*mph\b", re.I),
      lambda m: f"{m.group(1)} mph"),
-    (re.compile(r"(?<![!#\w.])(-?\d{1,3}(?:\.\d)?)\s*(?:°\s*F?|deg(?:rees?|s)?\b(?:\s*F\b)?|F\b)", re.I),
+    # A temperature, not a heading or bearing ("moving 295° at 7 mph", "winds from 270 degrees").
+    (re.compile(r"(?<!moving )(?<!heading )(?<!bearing )(?<!toward )(?<!towards )(?<!from )(?<!direction )"
+                r"(?<![!#\w.])(-?(?:1[0-4]\d|\d{1,2})(?:\.\d)?)\s*(?:°\s*F?|deg(?:rees?|s)?\b(?:\s*F\b)?|F\b)(?!\s*(?:at|true|magnetic)\b)",
+                re.I),
      lambda m: f"{m.group(1)}°F"),
     (re.compile(r"\b(\d[\d,.]*\s*k?)\s+(?:residents|customers|homes|people)\b[^.]{0,30}\bwithout\s+power", re.I),
      lambda m: f"{m.group(1).strip()} without power"),

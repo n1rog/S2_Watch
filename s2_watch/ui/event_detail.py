@@ -177,8 +177,9 @@ class EventDetail(QWidget):
                 if words not in seen:
                     seen.append(words)
             out.append(f"<p><b>Your labels:</b> {e('; '.join(seen))}</p>")
-        out.append("<hr><p style='margin-bottom:4px'><b>Reports, in the order heard</b></p>")
-        for report in reports:
+        out.append(f"<hr><p style='margin-bottom:4px'><b>Reports, newest first</b></p>" if len(reports) > 1
+                   else "<hr><p style='margin-bottom:4px'><b>Report</b></p>")
+        for report in sorted(reports, key=lambda r: _when(r["first_seen"]), reverse=True):
             body = " ".join(readable_text(Message(report["source"], report["text"] or "")).split())
             sender = f" ({report['sender']})" if report.get("sender") else ""
             station = callsign(report["source"], report.get("sender") or "", report.get("text") or "")
@@ -207,8 +208,12 @@ class EventDetail(QWidget):
             place = ", ".join(str(part) for part in (report.get("state"), f"MARS Region {report['region']}"
                                                      if report.get("region") else "") if part)
             level = PLACE_WORDS.get(report.get("place_level") or "", "")
+            if report.get("lat") is not None and report.get("lon") is not None:
+                # The point itself: at sea there may be no country to name.
+                point = f"{float(report['lat']):.3f}, {float(report['lon']):.3f}"
+                place = f"{place} ({point})" if place else point
             parts.append(f"<br><span style='color:gray'>Placed: {e(place) if place else 'no location'}"
-                         f"{' (' + level + ')' if level and place else ''}</span> "
+                         f"{' — ' + level if level and place else ''}</span> "
                          f"<a href='s2watch:fix-location/{report['report_id']}'>fix location</a>")
             if url:
                 parts.append(f"<br><a href='{e(url)}'>{e(url)}</a>")

@@ -106,6 +106,21 @@ def test_event_detail_shows_what_the_event_is_about(tmp_path: Path) -> None:
     assert received == [radio]
     detail.show_event(None)
     assert not detail.draft_button.isEnabled()
+    listed = text[text.index("Reports, newest first"):]
+    assert listed.index("FEMA: flood declaration") < listed.index("TULSA OK - RIVER FLOODING")   # newest first
+    assert "Reports, newest first" in text and f"({TULSA.lat:.3f}, {TULSA.lon:.3f})" in text      # with its point
+
+
+def test_a_report_at_sea_shows_its_coordinates_not_no_location() -> None:
+    from s2_watch.events import EventSummary
+    from s2_watch.ui.event_detail import EventDetail
+
+    report = {"report_id": 1, "first_seen": T0.isoformat(), "source": "OSINT", "sender": "NHC", "urgency": "high",
+              "status": "", "text": "National Hurricane Center: Tropical Storm Vance (9.500, -99.300)", "state": "",
+              "region": None, "place_level": "precise", "lat": 9.5, "lon": -99.3, "fields": {}}
+    event = EventSummary(1, "Vance", "Climate / Environment", "", None, T0, T0, 1, ("OSINT",), "high", "", None)
+    html = EventDetail(None, str).render(event, [report])
+    assert "Placed: 9.500, -99.300" in html and "no location" not in html
 
 
 def test_event_detail_drops_headlines_the_text_already_says() -> None:

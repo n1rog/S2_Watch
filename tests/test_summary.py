@@ -43,3 +43,11 @@ def test_only_placeholder_summaries_are_replaced() -> None:
     assert is_placeholder_summary(message, "StatRep for My Region: FLASH FLOOD WARNING FOR PIMA COUNTY")
     assert not is_placeholder_summary(message, "Flash flooding expected in Pima County, AZ tonight.")
     assert isinstance(AnalysisResult(True, "Crime", "high", "x", 0.5), AnalysisResult)
+
+
+def test_a_heading_is_not_a_temperature() -> None:
+    from s2_watch.analysis.summary import _facts
+
+    assert "295°F" not in _facts("Tropical Storm Vance — 55 kt winds, moving 295° at 7 mph")[0]
+    assert "270°F" not in _facts("Winds from 270 degrees at 15 kt")[0]
+    assert "105°F" in _facts("Temperatures near 105° this afternoon")[0]
