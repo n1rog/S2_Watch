@@ -152,7 +152,7 @@ class MainWindow(QMainWindow):
         self.port.setValue(saved_port if 1 <= saved_port <= 65535 else 2442)
         self.review_duration = QComboBox()
         review_options = (
-            ("6 hours", 6), ("12 hours", 12), ("24 hours", 24),
+            ("3 hours", 3), ("6 hours", 6), ("12 hours", 12), ("24 hours", 24),
             ("2 days", 48), ("5 days", 120), ("1 week", 168),
             ("2 weeks", 336), ("1 month", 720),
         )
@@ -163,7 +163,7 @@ class MainWindow(QMainWindow):
         except ValueError:
             saved_hours = 24
         index = self.review_duration.findData(saved_hours)
-        self.review_duration.setCurrentIndex(index if index >= 0 else 2)
+        self.review_duration.setCurrentIndex(index if index >= 0 else self.review_duration.findData(24))
         self.review_duration.currentIndexChanged.connect(self.review_duration_changed)
         self.news_rows = QSpinBox()
         self.news_rows.setRange(1, 400)

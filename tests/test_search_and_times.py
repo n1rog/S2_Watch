@@ -80,3 +80,11 @@ def test_the_table_under_the_map_resizes_and_keeps_its_size(tmp_path, main_windo
     QTest.mouseMove(handle, middle + QPoint(0, 150))
     QTest.mouseRelease(handle, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, middle + QPoint(0, 150))
     assert reopened.map_split.sizes()[1] < before - 100     # dragged down: a smaller table
+
+
+def test_a_3_hour_watch_period_is_offered_and_kept(tmp_path, main_window) -> None:
+    window = main_window(tmp_path / "period.db")
+    assert window.review_duration.itemData(0) == 3 and window.map_watch_period.itemText(0) == "3 hours"
+    window.map_watch_period.setCurrentIndex(0)                 # chosen on the Map tab
+    assert window.review_duration.currentData() == 3 and window.store.get_setting("review.hours") == "3"
+    assert main_window(tmp_path / "period.db").review_duration.currentData() == 3      # remembered

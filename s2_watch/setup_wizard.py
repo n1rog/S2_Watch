@@ -20,7 +20,7 @@ from s2_watch.default_forms import DEFAULT_WATCH_FORMS, install_default_forms
 from s2_watch.models import ANY_APPLICATION, WatchForm
 from s2_watch.storage import SQLiteStore
 
-REVIEW_OPTIONS = (("6 hours", 6), ("12 hours", 12), ("24 hours", 24), ("2 days", 48), ("5 days", 120),
+REVIEW_OPTIONS = (("3 hours", 3), ("6 hours", 6), ("12 hours", 12), ("24 hours", 24), ("2 days", 48), ("5 days", 120),
                   ("1 week", 168), ("2 weeks", 336), ("1 month", 720))
 MARS_REGIONS = {
     1: "CT ME MA NH RI VT", 2: "NJ NY", 3: "DE MD PA VA WV", 4: "AL FL GA KY MS NC SC TN",

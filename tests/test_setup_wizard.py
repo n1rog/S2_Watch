@@ -27,7 +27,7 @@ def test_wizard_walks_every_step_and_saves(tmp_path: Path, monkeypatch) -> None:
         "n", "n",                         # CommStat: search? no; used? no
         "", "",                           # FLMSG found -> used (default yes), path accepted
         "n", "n",                         # JS8SuperSpotter: search? no; used? no
-        "6",                              # review window: 1 week
+        "7",                              # review window: 1 week
         "co ok",                          # focus regions by state -> 8 and 6
         "", "y",                          # all categories, OSINT yes
         "1",                              # rules

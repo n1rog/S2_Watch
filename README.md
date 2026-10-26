@@ -445,7 +445,8 @@ active connection or available local data source; red indicates disconnected,
 missing, or unavailable.
 
 The Sources window includes a review window for existing feeder data:
-6 hours, 12 hours, 24 hours, 2 days, 5 days, or 1 week. The setting applies
+3 hours, 6 hours, 12 hours, 24 hours, 2 days, 5 days, 1 week, 2 weeks, or 1 month (also
+on the Map tab as Watch period). The setting applies
 to the initial database/file scan; messages arriving after startup continue
 to be monitored normally.
 
