@@ -665,6 +665,10 @@ under Configuration → Sources. Receive-only (passcode -1, nothing is sent to R
 refuse anonymous logins, so it logs in with your call sign and an SSID (default -13, to
 stay clear of your own APRS software). Only U.S. stations' bulletins are kept, and only
 what arrives while S2 Watch runs (APRS-IS has no backlog). APRS counts as radio traffic.
+Each bulletin carries its station's latitude and longitude (in the text and as lat/lon
+fields): stations heard sending bulletins are added to the server filter (b/CALL) so their
+position beacons arrive too, and a bulletin waits up to 10 minutes for one. A place the
+bulletin names is mapped first; the station's position only when it names none.
 
 The **Official** column in Newsworthiness marks a radio report that an official source
 confirms: same kind of hazard, same place, around the same time. Sources and rules:

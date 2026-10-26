@@ -256,11 +256,29 @@ class LocationResolver:
             corrected = self._corrected(message)
             if corrected is not None:
                 return [corrected]
+        if message.fields.get("type") == "BULLETIN" and message.fields.get("lat"):
+            return self._bulletin(message)
         headline = without_outlet(message)
         if headline is not message:
             # The headline's own places first; a local outlet's ("– NBC Chicago") only when it names none.
             return self._resolve(headline) or self._resolve(message)
         return self._resolve(message)
+
+    def _bulletin(self, message: Message) -> list[ResolvedLocation]:
+        """An APRS bulletin: the places its text names; else where its station is (the position
+        added to it, which says where the sender is, not where the news is)."""
+        from s2_watch.adapters.aprs_is import POSITION_TEXT
+
+        text = POSITION_TEXT.sub("", message.raw_content)
+        found = self._resolve(replace(message, raw_content=text))
+        if found:
+            return found
+        try:
+            lat, lon = float(message.fields["lat"]), float(message.fields["lon"])
+        except (KeyError, ValueError):
+            return []
+        station = message.fields.get("station") or message.fields.get("sender", "")
+        return [self._abroad(self.gazetteer.with_area(ResolvedLocation("precise", lat, lon, f"Station {station}")))]
 
     def _resolve(self, message: Message) -> list[ResolvedLocation]:
         fields = {key.casefold(): str(value) for key, value in message.fields.items()}

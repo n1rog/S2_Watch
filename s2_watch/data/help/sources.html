@@ -18,6 +18,14 @@ anonymous logins; nothing is sent to RF.</td></tr>
 when it starts, and how far back the map, the list under it and a shift briefing reach. Choose 3, 6, 12 or 24 hours, 2 or 5
 days, 1 or 2 weeks, or 1 month; it is also on the Map tab as <b>Watch period</b>. 3 hours keeps the picture to the current
 shift's latest activity. APRS-IS has no history: you see bulletins from the moment S2 Watch connects.</p>
+<p><b>APRS bulletins carry their station's position.</b> A bulletin has no position of its own, so S2 Watch also listens for
+the position beacons of each station that sends one, and adds the station's latitude and longitude to the bulletin. A
+station's first bulletin waits up to 10 minutes for its next beacon, then comes through without a position (stations that
+send only Mic-E beacons, mostly mobiles, aren't read). On the map, a place the bulletin names comes first; the station's
+position is used only when it names none, since it shows where the sender is, not where the news is.</p>
+<div class="example"><p><b>Example.</b></p>
+<pre>W5ABC-10: BLN1: Net tonight 1900 [W5ABC-10 position: lat 36.1540, lon -95.9928]     → map: Station W5ABC-10 (Tulsa)
+W5ABC-10: BLN2: Flooding in Joplin, MO [W5ABC-10 position: lat 36.1540, lon -95.9928] → map: Joplin, MO</pre></div>
 
 <h2>Official and open sources (OSINT)</h2>
 <p>NWS alerts, storm reports and river gauges; the National Hurricane Center; USGS earthquakes and volcanoes;

@@ -164,3 +164,33 @@ def test_what_is_on_screen_hides_with_an_area_taken_out_of_the_coverage(main_win
 def test_headline_outlets_are_not_places_and_nationalities_place_national_news(text, sender, label) -> None:
     found = LocationResolver().resolve(Message("OSINT", text, fields={"type": "NEWS", "sender": sender}))
     assert (found[0].label if found else None) == label
+
+
+def test_aprs_bulletins_carry_their_stations_position(monkeypatch) -> None:
+    from datetime import timedelta
+
+    from s2_watch.adapters import aprs_is
+
+    assert aprs_is.parse_position("W5ABC-10>APRS,TCPIP*:!3609.24N/09559.57W#PHG2360") == ("W5ABC-10", 36.154, -95.9928)
+    assert aprs_is.parse_position("W5ABC-10>APRS,TCPIP*:@092345z3609.24N/09559.57W_wx")[1:] == (36.154, -95.9928)
+    assert aprs_is.parse_position("W5ABC-10>APRS:=/5L!!<*e7>7P[")[1:] == (49.5, -72.75)       # compressed (spec example)
+    assert aprs_is.parse_position("W5ABC-10>APRS,TCPIP*::BLN1     :Net tonight") is None
+    adapter = aprs_is.AprsIsAdapter(login="")                  # no connection: lines are fed by hand
+    sent = []
+    adapter._socket = type("Socket", (), {"sendall": lambda self, data: sent.append(data.decode())})()
+    adapter._received("W5ABC-10>APRS,TCPIP*::BLN1     :Net tonight 1900")
+    assert adapter.read_messages() == []                       # waiting for the station's beacon
+    assert sent == ["#filter g/BLN* b/W5ABC-10\r\n"]           # ...which the filter now asks for
+    adapter._received("W5ABC-10>APRS,TCPIP*:!3609.24N/09559.57W#")
+    [bulletin] = adapter.read_messages()
+    assert bulletin.raw_content.endswith("[W5ABC-10 position: lat 36.1540, lon -95.9928]")
+    assert (bulletin.fields["lat"], bulletin.fields["lon"]) == ("36.1540", "-95.9928")
+    [place] = LocationResolver().resolve(bulletin)
+    assert place.label == "Station W5ABC-10" and place.state == "OK"   # no place named: where the station is
+    adapter._received("W5ABC-10>APRS,TCPIP*::BLN2     :Flooding in Joplin, MO")
+    [named] = adapter.read_messages()                          # position known: straight through
+    assert "position: lat 36.1540" in named.raw_content and LocationResolver().resolve(named)[0].label == "Joplin, MO"
+    adapter._received("K1XYZ>APRS,TCPIP*::BLN3     :Silent station")
+    adapter._waiting = [(when - timedelta(minutes=11), message) for when, message in adapter._waiting]
+    [silent] = adapter.read_messages()                         # no beacon within 10 minutes: without one
+    assert "position" not in silent.raw_content and "lat" not in silent.fields
