@@ -24,6 +24,7 @@ from s2_watch.ui.drafts_dialog import DraftsDialog
 from s2_watch import focus, world
 from s2_watch.focus import FocusArea
 from s2_watch.background import event_background, period_background
+from s2_watch.event_assessment import assess_event, event_brief, fill_report
 from s2_watch.silence import quiet_near
 from s2_watch.ui.focus_area_dialog import FocusAreaDialog
 from s2_watch.adapters.analyst import AnalystAdapter, entry_message
@@ -239,6 +240,15 @@ class MainWindow(QMainWindow):
         )
         self.ollama_model.editingFinished.connect(self.analysis_settings_changed)
         self.ollama_endpoint.editingFinished.connect(self.analysis_settings_changed)
+        # Assessing a whole event needs a larger model than classifying one message.
+        self.ollama_assessment_model = QLineEdit(self.store.get_setting("ollama.assessment_model", "qwen2.5:7b"))
+        self.ollama_assessment_model.setPlaceholderText("the Ollama model above")
+        self.ollama_assessment_model.setToolTip(
+            "Used for Assess (Ollama) on events and for Suggest assessment in MAGNET drafts. A 7–8B model "
+            "(qwen2.5:7b, llama3.1:8b) sticks to the reports; a 3B model invents and misreads trends. "
+            "Install with: ollama pull qwen2.5:7b")
+        self.ollama_assessment_model.editingFinished.connect(lambda: self.store.set_setting(
+            "ollama.assessment_model", self.ollama_assessment_model.text().strip()))
         self.watch_forms_page = WatchFormsPage(
             {key: (label, f"every {osint_sources.SCHEDULE.get(key, 30)} min")
              for key, label in osint_sources.SOURCE_LABELS.items()},
@@ -438,6 +448,7 @@ class MainWindow(QMainWindow):
         ollama_layout = QFormLayout()
         ollama_layout.addRow("Ollama model", self.ollama_model)
         ollama_layout.addRow("Ollama endpoint", self.ollama_endpoint)
+        ollama_layout.addRow("Event assessment model", self.ollama_assessment_model)
         self.ollama_dialog = self.create_settings_dialog("Ollama Settings", ollama_layout)
 
         watch_forms_layout = QVBoxLayout()
@@ -1126,6 +1137,8 @@ class MainWindow(QMainWindow):
 
     def connect_event_detail(self, detail: EventDetail) -> None:
         detail.quiet_for = self.quiet_near_event
+        detail.assessment_brief = self.event_assessment_brief
+        detail.ollama_settings = self.ollama_settings
         detail.show_on_map.connect(self.show_event_id_on_map)
         detail.draft_followup.connect(self.draft_followup_for_event)
         detail.mark.connect(lambda event_id, status: self.mark_reports(self.event_report_ids(event_id), status))
@@ -2223,6 +2236,24 @@ class MainWindow(QMainWindow):
             found = next((event for event in self.store.events_since(since) if event.event_id == event_id), None)
         return found
 
+    def ollama_settings(self) -> tuple[str, str]:
+        """(endpoint, model) for assessing events: the event assessment model, or the Ollama model."""
+        return (self.ollama_endpoint.text().strip() or "http://127.0.0.1:11434",
+                self.ollama_assessment_model.text().strip() or self.ollama_model.text().strip() or "llama3.2")
+
+    def current_event_background(self, event_id: int, event=None) -> list[str] | None:
+        event = event or self.event_summary(event_id)
+        if event is None:
+            return None
+        return event_background(event, self.store.related_events(event_id), self.nws_alerts,
+                                osint_sources.cached_messages(BACKGROUND_KINDS), datetime.now(timezone.utc),
+                                self.store.event_hazards(event_id))
+
+    def event_assessment_brief(self, event) -> tuple[str, int]:
+        """What Ollama reads to assess an event (an EventSummary): its reports, confirmation and background."""
+        reports = self.store.event_reports(event.event_id)
+        return event_brief(event, reports, self.current_event_background(event.event_id, event)), len(reports)
+
     def draft_followup_for_report(self, report_id: int | None) -> None:
         """Draft a follow-up from a saved report (from the Reports list or an event)."""
         found = self.store.report_first_message(report_id) if report_id is not None else None
@@ -2245,18 +2276,25 @@ class MainWindow(QMainWindow):
         background = None
         event = self.event_summary(event_id) if event_id is not None else None
         if event is not None:
-            background = event_background(event, self.store.related_events(event_id), self.nws_alerts,
-                                          osint_sources.cached_messages(BACKGROUND_KINDS), datetime.now(timezone.utc),
-                                          self.store.event_hazards(event_id))
+            background = self.current_event_background(event_id, event)
         text = s2_followup_report(facts, members, magcon=self.store.get_setting("magcon.status", DEFAULT_MAGCON),
                                   grades=self.sender_grades(), background=background)
+        suggest_fn = draft_s2_assessment
+        if event is not None and members:
+            # A current assessment of the event fills the analytical sections; Suggest runs a fresh one.
+            assessment = self.store.event_assessment(event_id)
+            if assessment is not None and assessment.reports == len(members):
+                text = fill_report(text, assessment, members)
+            brief = event_brief(event, members, background)
+
+            def suggest_fn(report: str, endpoint: str, model: str, brief=brief, members=members) -> str:
+                return fill_report(report, assess_event(brief, len(members), endpoint, model), members)
         ollama = None
         if self.analysis_mode.checkedAction().data() == "ollama":
-            ollama = (self.ollama_endpoint.text().strip() or "http://127.0.0.1:11434",
-                      self.ollama_model.text().strip() or "llama3.2")
+            ollama = self.ollama_settings()
         dialog = FollowUpDialog(facts, self.store, self, ollama=ollama, text=text, js8=self._s2_js8,
                                 title="Draft MAGNET S2 report", file_prefix="MAGNET_S2",
-                                suggest_fn=draft_s2_assessment, suggest_label="Suggest assessment && gaps (Ollama)",
+                                suggest_fn=suggest_fn, suggest_label="Suggest assessment (Ollama)",
                                 export=True, draft_kind="report", report_id=report_id)
         dialog.exec()
         if dialog.marked:

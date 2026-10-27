@@ -189,8 +189,20 @@ Recommendations, MAGNET Guidance and the Source List with suggested Admiralty ra
 
 S2 Watch fills what its data supports (routing, BLUF, Background, Situation, timeline, gaps, sources,
 up to 15 WordPress tags); the analysis sections start as prompts in parentheses. With
-Ollama, **Suggest assessment & gaps** drafts the assessment and adds gaps for the analyst
-to check. Edit the text, then **Save Word report…** (the MAGNET .docx format) or **Save web
+Ollama, **Suggest assessment** drafts the analysis for the analyst to check: for a report on
+an event, the COMMENTS / ASSESSMENT paragraphs with the trend and a probability table,
+INTELLIGENCE GAPS, MITIGATION RECOMMENDATIONS and MAGNET GUIDANCE, citing the SOURCE LIST.
+
+**Assess (Ollama)** in an event's details asks a local model what the event's reports add up
+to (`s2_watch/event_assessment.py`): BLUF, trend (escalating / stable / winding down /
+unclear), agreement between reports, assessment, probability table, gaps, mitigation and
+MAGNET guidance, each citing the reports by number. The model reads the first report and the
+latest six, the official confirmation and the Background facts, and is told to use only
+those. The assessment is saved, marked out of date when new reports arrive, and fills a
+draft of that event. It uses the **Event assessment model** (Ollama settings, default
+`qwen2.5:7b`; the 3B classification model misread trends and invented impacts in testing),
+takes about two minutes on a CPU, and runs only after other models are unloaded and enough
+memory is free; the model is unloaded as soon as it answers. Edit the text, then **Save Word report…** (the MAGNET .docx format) or **Save web
 page…** (the MAGNET HTML template), named `MAGNET_S2_TOPIC_YYMMDD-HHMMZ`; the FLMSG and
 JS8Call versions are made from the same text. The MagCon status used is remembered for the
 next report.

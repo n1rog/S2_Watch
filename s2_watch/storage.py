@@ -174,6 +174,12 @@ class SQLiteStore:
         # The operator's location corrections: a phrase ("BIXBY") or one message ("#msg:<hash>")
         # and where it really is.
         self.connection.execute(
+            """CREATE TABLE IF NOT EXISTS event_assessments (
+                event_id INTEGER PRIMARY KEY,
+                body TEXT NOT NULL
+            )"""
+        )
+        self.connection.execute(
             """CREATE TABLE IF NOT EXISTS sender_trust (
                 callsign TEXT PRIMARY KEY,
                 grade TEXT NOT NULL,
@@ -1035,6 +1041,19 @@ class SQLiteStore:
         for station, grade in self.sender_trust().items():     # stations the operator rated, heard or not
             records.setdefault(station, TrackRecord(station)).trust = grade
         return records
+
+    def event_assessment(self, event_id: int):
+        """The latest Ollama assessment of an event (s2_watch.event_assessment), or None."""
+        from s2_watch.event_assessment import EventAssessment
+
+        row = self.connection.execute("SELECT body FROM event_assessments WHERE event_id = ?", (event_id,)).fetchone()
+        return EventAssessment.from_json(row[0]) if row else None
+
+    def save_event_assessment(self, event_id: int, assessment) -> None:
+        self.connection.execute(
+            """INSERT INTO event_assessments(event_id, body) VALUES (?, ?)
+               ON CONFLICT(event_id) DO UPDATE SET body = excluded.body""", (event_id, assessment.to_json()))
+        self.connection.commit()
 
     def sender_trust(self) -> dict[str, str]:
         """The trust levels the operator set, by call sign."""

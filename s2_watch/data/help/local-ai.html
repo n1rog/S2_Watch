@@ -6,6 +6,8 @@ meaning as well. Nothing leaves your computer.</p>
 <li>Install Ollama and run <code>ollama pull llama3.2</code>.</li>
 <li><b>Configuration → Analysis Mode → Local Ollama with rules fallback</b>.</li>
 <li>Optional: <b>Analysis Mode → Ollama settings…</b> to change the model or endpoint (default <code>http://127.0.0.1:11434</code>).</li>
+<li>For assessing events, also run <code>ollama pull qwen2.5:7b</code> (about 4.7 GB). It is the default <b>Event assessment
+model</b> in Ollama settings.</li>
 </ol>
 <h2>What it does</h2>
 <ul>
@@ -13,9 +15,37 @@ meaning as well. Nothing leaves your computer.</p>
 suitable graphics card (about 9 seconds a message). Official feeds stay with the rules.</li>
 <li>The model drops chat the rules mistook for news, e.g. <i>“How often do you feel the earthquakes around your area?”</i>, and writes
 clearer headlines.</li>
-<li>In report drafts, <b>Suggest assessment &amp; gaps (Ollama)</b> drafts the analysis sections. Check every figure: drafts round and embellish.</li>
+<li>In report drafts, <b>Suggest assessment (Ollama)</b> drafts the analysis sections (see <i>Assessing an event</i> below).
+Check every figure: drafts round and embellish.</li>
 <li>If Ollama stops answering, S2 Watch falls back to the rules and says so in the status bar.</li>
 </ul>
+<h2>Assessing an event</h2>
+<p><b>Assess (Ollama)</b> in an event's details asks the model what the event's reports add up to. It reads the first report
+and the latest six (numbered as in the panel), the official confirmation and the Background facts, and writes a suggestion shown
+at the top of the panel, apart from the facts:</p>
+<ul>
+<li><b>BLUF</b>, the current situation first;</li>
+<li><b>Trend</b>: escalating, stable, winding down or unclear, and why;</li>
+<li><b>Agreement</b>: whether the reports agree or contradict each other;</li>
+<li>assessment paragraphs in measured language, a <b>Probability</b> table (HIGH / MODERATE / LOW), <b>Intelligence gaps</b>,
+<b>Mitigation</b> and <b>MAGNET guidance</b>.</li>
+</ul>
+<p>Every statement cites the reports it rests on, e.g. <b>[22]</b>; check them. The model is told to use only facts in the
+reports, but it can still assume things (a landfall, a direction) the reports don't say. It never changes an event or a
+report. The assessment is saved; when new reports arrive it shows <b>⚠ Out of date</b> until you assess again.</p>
+<p>It takes about two minutes on a computer without a suitable graphics card, in the background. It uses the <b>Event assessment
+model</b> (Ollama settings; default <code>qwen2.5:7b</code>): a 7–8B model sticks to the reports, while the 3B model used for
+messages misread trends and invented impacts in testing. To protect the rest of the computer, S2 Watch first unloads other
+models, checks there is enough free memory (about 8 GB for <code>qwen2.5:7b</code>; otherwise it says so and doesn't start), and
+unloads the model as soon as it answers. Close browser tabs if it reports too little memory.</p>
+<p>In a MAGNET S2 draft of that event, a current assessment fills COMMENTS / ASSESSMENT (with the trend and the probability
+table), INTELLIGENCE GAPS, MITIGATION RECOMMENDATIONS and MAGNET GUIDANCE, citing the draft's SOURCE LIST numbers.
+<b>Suggest assessment (Ollama)</b> in the draft runs a fresh one.</p>
+<div class="example"><p><b>Example: Tropical Storm Vance, 22 NHC reports.</b></p>
+<pre>Trend: winding down — intensity has fallen since its peak [18, 19, 20, 21].
+BLUF: Tropical Storm Vance holds 55 kt winds and 997 mb, moving WNW at 7 mph [22].
+Probability: Continued 55 kt winds | MODERATE
+Gaps: No reports mention rainfall amounts or coastal effects.</pre></div>
 <h2>Possible Misses</h2>
 <p>Tick <b>Analysis Mode → Check unmatched radio traffic in the background (Ollama)</b>. The model then reads, slowly, the radio messages no
 watch form kept, skipping heartbeats, CQs, signal reports and exercise or test traffic, and lists anything it thinks is news in the

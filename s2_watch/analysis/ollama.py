@@ -83,13 +83,16 @@ class OllamaError(RuntimeError):
     """Raised when Ollama cannot provide a valid analysis."""
 
 
-def ollama_generate(endpoint: str, model: str, prompt: str, timeout: float, json_format: bool = False) -> str:
-    """One completion from Ollama's /api/generate; raises OllamaError when it can't."""
+def ollama_generate(endpoint: str, model: str, prompt: str, timeout: float, json_format: bool = False,
+                    options: dict | None = None, keep_alive=None) -> str:
+    """One completion from Ollama's /api/generate; raises OllamaError when it can't. ``options``
+    adds model options (num_predict, repeat_penalty, stop...)."""
     parsed = urlparse(endpoint)
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
         raise OllamaError(f"Invalid Ollama endpoint: {endpoint}")
-    payload: dict[str, Any] = {"model": model, "prompt": prompt, "stream": False, "keep_alive": KEEP_ALIVE,
-                               "options": {"temperature": 0}}
+    payload: dict[str, Any] = {"model": model, "prompt": prompt, "stream": False,
+                               "keep_alive": KEEP_ALIVE if keep_alive is None else keep_alive,
+                               "options": {"temperature": 0, **(options or {})}}
     if json_format:
         payload["format"] = "json"
     connection = None
@@ -106,6 +109,8 @@ def ollama_generate(endpoint: str, model: str, prompt: str, timeout: float, json
     finally:
         if connection is not None:
             connection.close()
+    if response.status == 404:
+        raise OllamaError(f"Ollama returned HTTP 404: model {model} isn't installed (ollama pull {model})")
     if response.status != 200:
         raise OllamaError(f"Ollama returned HTTP {response.status}")
     try:

@@ -8,6 +8,7 @@ official and news items. Buttons act on the event.
 
 from __future__ import annotations
 
+import threading
 from datetime import datetime, timezone
 from html import escape
 
@@ -46,6 +47,7 @@ class EventDetail(QWidget):
     close_requested = Signal(int)
     fix_location = Signal(int)     # report id
     reopen_requested = Signal(int)
+    assessment_done = Signal(int, str, str)     # event id, assessment JSON, error (from a thread)
 
     def __init__(self, store, format_time, parent=None) -> None:
         super().__init__(parent)
@@ -53,6 +55,12 @@ class EventDetail(QWidget):
         self.format_time = format_time
         self.current = None
         self.quiet_for = None          # event -> quiet coverage cells near it (s2_watch.silence)
+        # Set by the main window: event -> (prompt, report count); () -> (endpoint, model).
+        self.assessment_brief = None
+        self.ollama_settings = None
+        self._assessing: dict[int, str] = {}       # event id -> model, while Ollama works
+        self._assessment_errors: dict[int, str] = {}
+        self.assessment_done.connect(self._assessed)
         self._shown_id = self._shown_html = None
         self.browser = QTextBrowser()
         self.browser.setOpenLinks(False)          # web links open in the browser; s2watch: links act here
@@ -78,8 +86,14 @@ class EventDetail(QWidget):
         self.close_button.setToolTip("It's over: show it as closed, and list it as resolved in briefings. "
                                      "A new report reopens it.")
         self.close_button.clicked.connect(self._close_or_reopen)
+        self.assess_button = QPushButton("Assess (Ollama)")
+        self.assess_button.setToolTip("Ask Ollama what this event's reports add up to: trend, agreement, likely "
+                                      "developments, gaps and recommendations, citing the reports by number. "
+                                      "Takes a minute or two; the event and its reports are not changed.")
+        self.assess_button.clicked.connect(self.assess)
         buttons = QHBoxLayout()
-        for button in (self.map_button, self.draft_button, self.label_button, self.reports_button, self.close_button):
+        for button in (self.map_button, self.draft_button, self.assess_button, self.label_button, self.reports_button,
+                       self.close_button):
             buttons.addWidget(button)
         buttons.addStretch(1)
         layout = QVBoxLayout(self)
@@ -93,7 +107,8 @@ class EventDetail(QWidget):
         self.current = event
         if event is None:
             self._shown_id = self._shown_html = None
-        for button in (self.map_button, self.draft_button, self.label_button, self.reports_button, self.close_button):
+        for button in (self.map_button, self.draft_button, self.assess_button, self.label_button, self.reports_button,
+                       self.close_button):
             button.setEnabled(event is not None)
         self.close_button.setText("Reopen event" if event is not None and event.closed_at is not None
                                   else "Close event…")
@@ -104,7 +119,13 @@ class EventDetail(QWidget):
         self.map_button.setEnabled(bool(event.points))
         reports = self.store.event_reports(event.event_id)
         self.draft_button.setEnabled(bool(reports))
-        html = self.render(event, reports, self.store.sender_track_records())
+        busy = event.event_id in self._assessing
+        self.assess_button.setEnabled(bool(reports) and not busy and self.assessment_brief is not None)
+        self.assess_button.setText("Assessing…" if busy else "Assess (Ollama)")
+        html = self.render(event, reports, self.store.sender_track_records(),
+                           assessment=self.store.event_assessment(event.event_id),
+                           assessing=self._assessing.get(event.event_id, ""),
+                           assessment_error=self._assessment_errors.get(event.event_id, ""))
         if event.event_id == self._shown_id and html == self._shown_html:
             return                       # a refresh with nothing new: keep the reader's place
         scroll = self.browser.verticalScrollBar()
@@ -114,6 +135,41 @@ class EventDetail(QWidget):
         self.browser.setHtml(html)
         scroll.setValue(position)
         self._shown_id, self._shown_html = event.event_id, html
+
+    def assess(self) -> None:
+        """Ask Ollama to assess the shown event, in the background."""
+        event = self.current
+        if event is None or self.assessment_brief is None or self.ollama_settings is None \
+                or event.event_id in self._assessing:
+            return
+        from s2_watch.event_assessment import assess_event
+
+        brief, count = self.assessment_brief(event)
+        endpoint, model = self.ollama_settings()
+        self._assessing[event.event_id] = model
+        self._assessment_errors.pop(event.event_id, None)
+        event_id = event.event_id
+
+        def work() -> None:
+            try:
+                self.assessment_done.emit(event_id, assess_event(brief, count, endpoint, model).to_json(), "")
+            except Exception as error:      # noqa: BLE001 - shown to the operator
+                self.assessment_done.emit(event_id, "", str(error) or type(error).__name__)
+
+        threading.Thread(target=work, daemon=True, name="s2-watch-event-assessment").start()
+        self.show_event(event)
+
+    def _assessed(self, event_id: int, body: str, error: str) -> None:
+        from s2_watch.event_assessment import EventAssessment
+
+        self._assessing.pop(event_id, None)
+        assessment = EventAssessment.from_json(body) if body else None
+        if assessment is not None:
+            self.store.save_event_assessment(event_id, assessment)
+        else:
+            self._assessment_errors[event_id] = error or "no assessment"
+        if self.current is not None and self.current.event_id == event_id:
+            self.show_event(self.current)
 
     def _link(self, url: QUrl) -> None:
         if url.scheme() == "s2watch":
@@ -132,7 +188,8 @@ class EventDetail(QWidget):
             self.close_requested.emit(self.current.event_id)
 
     def render(self, event, reports: list[dict], records: dict | None = None,
-               now: datetime | None = None) -> str:
+               now: datetime | None = None, assessment=None, assessing: str = "",
+               assessment_error: str = "") -> str:
         e = escape
         records = records or {}
         now = now or datetime.now(timezone.utc)
@@ -177,8 +234,10 @@ class EventDetail(QWidget):
                 if words not in seen:
                     seen.append(words)
             out.append(f"<p><b>Your labels:</b> {e('; '.join(seen))}</p>")
-        out.append(f"<hr><p style='margin-bottom:4px'><b>Reports, newest first</b></p>" if len(reports) > 1
-                   else "<hr><p style='margin-bottom:4px'><b>Report</b></p>")
+        out.append(self.render_assessment(assessment, len(reports), assessing, assessment_error))
+        out.append(f"<hr><p style='margin-bottom:4px'><b>Reports, newest first</b> (numbered in the order heard)</p>"
+                   if len(reports) > 1 else "<hr><p style='margin-bottom:4px'><b>Report</b></p>")
+        numbers = {id(report): number for number, report in enumerate(reports, 1)}
         for report in sorted(reports, key=lambda r: _when(r["first_seen"]), reverse=True):
             body = " ".join(readable_text(Message(report["source"], report["text"] or "")).split())
             sender = f" ({report['sender']})" if report.get("sender") else ""
@@ -197,7 +256,7 @@ class EventDetail(QWidget):
             label = STATUS_LABELS.get(report["status"], "")
             headline = useful_headline(report.get("summary") or "", body)
             url = (report.get("fields") or {}).get("url", "")
-            parts = [f"<p style='margin-top:8px'><b>{e(self.format_time(report['first_seen']))}</b> — "
+            parts = [f"<p style='margin-top:8px'><b>[{numbers[id(report)]}] {e(self.format_time(report['first_seen']))}</b> — "
                      f"{e(report['source'])}{e(sender)} · {e(report['urgency'])}{e(copies)}"
                      + (f" · <i>{e(label)}</i>" if label else "") + track + drill]
             if headline:
@@ -219,3 +278,43 @@ class EventDetail(QWidget):
                 parts.append(f"<br><a href='{e(url)}'>{e(url)}</a>")
             out.append("".join(parts) + "</p>")
         return "\n".join(out)
+
+    def render_assessment(self, assessment, report_count: int, assessing: str = "", error: str = "") -> str:
+        """The Ollama assessment section: a suggestion, kept apart from the facts."""
+        e = escape
+        if assessing:
+            return (f"<p style='color:#1565c0'>⏳ <b>Assessing with Ollama ({e(assessing)})…</b> this can take a "
+                    "minute or two. You can keep working.</p>")
+        out = []
+        if error:
+            out.append(f"<p style='color:#c62828'>Ollama couldn't assess this event: {e(error)}</p>")
+        if assessment is None:
+            return "".join(out)
+        when = self.format_time(_when(assessment.created_at)) if assessment.created_at else ""
+        stale = report_count - assessment.reports
+        out.append("<div style='border-left:3px solid #1565c0;padding-left:6px;margin:6px 0'>"
+                   f"<p style='margin:0'><b>Assessment</b> <span style='color:gray'>— Ollama suggestion"
+                   f" ({e(assessment.model)}), {e(when)}, from {assessment.reports} report"
+                   f"{'s' if assessment.reports != 1 else ''}. Numbers in brackets are the reports below.</span></p>")
+        if stale > 0:
+            out.append(f"<p style='color:#e65100;margin:2px 0'>⚠ <b>Out of date:</b> {stale} new report"
+                       f"{'s' if stale != 1 else ''} since. Click Assess (Ollama) again.</p>")
+        if assessment.bluf:
+            out.append(f"<p style='margin:4px 0'><b>BLUF:</b> {e(assessment.bluf)}</p>")
+        trend_colour = {"escalating": "#c62828", "winding down": "#2e7d32"}.get(assessment.trend, "inherit")
+        out.append(f"<p style='margin:4px 0'><b>Trend:</b> <b style='color:{trend_colour}'>{e(assessment.trend)}</b>"
+                   + (f" — {e(assessment.trend_reason)}" if assessment.trend_reason else "")
+                   + (f"<br><b>Agreement:</b> {e(assessment.agreement)}" if assessment.agreement else "") + "</p>")
+        for paragraph in assessment.assessment:
+            out.append(f"<p style='margin:4px 0'>{e(paragraph)}</p>")
+        if assessment.probabilities:
+            rows = "".join(f"<tr><td>{e(statement)}</td><td><b>{e(level)}</b></td></tr>"
+                           for statement, level in assessment.probabilities)
+            out.append(f"<p style='margin:4px 0 0'><b>Probability</b></p><table cellpadding='2'>{rows}</table>")
+        for title, items in (("Intelligence gaps", assessment.gaps), ("Mitigation", assessment.mitigation),
+                             ("MAGNET guidance", assessment.guidance)):
+            if items:
+                out.append(f"<p style='margin:4px 0 0'><b>{title}</b></p><ul style='margin-top:0'>"
+                           + "".join(f"<li>{e(item)}</li>" for item in items) + "</ul>")
+        out.append("</div>")
+        return "".join(out)
