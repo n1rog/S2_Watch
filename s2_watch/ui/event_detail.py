@@ -17,6 +17,7 @@ from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QHBoxLayout, QMenu, QPushButton, QTextBrowser, QToolButton, QVBoxLayout, QWidget
 
 from s2_watch.analysis.ollama import readable_text
+from s2_watch.event_assessment import TREND_MARKS, changes
 from s2_watch.events import quiet_hours
 from s2_watch.models import Message
 from s2_watch.senders import GRADE_WORDS, callsign
@@ -48,6 +49,7 @@ class EventDetail(QWidget):
     fix_location = Signal(int)     # report id
     reopen_requested = Signal(int)
     assessment_done = Signal(int, str, str)     # event id, assessment JSON, error (from a thread)
+    assessment_changed = Signal(int)            # an assessment was accepted (event id)
 
     def __init__(self, store, format_time, parent=None) -> None:
         super().__init__(parent)
@@ -124,6 +126,8 @@ class EventDetail(QWidget):
         self.assess_button.setText("Assessing…" if busy else "Assess (Ollama)")
         html = self.render(event, reports, self.store.sender_track_records(),
                            assessment=self.store.event_assessment(event.event_id),
+                           accepted=self.store.accepted_assessment(event.event_id),
+                           versions=len(self.store.assessment_history(event.event_id)),
                            assessing=self._assessing.get(event.event_id, ""),
                            assessment_error=self._assessment_errors.get(event.event_id, ""))
         if event.event_id == self._shown_id and html == self._shown_html:
@@ -171,11 +175,59 @@ class EventDetail(QWidget):
         if self.current is not None and self.current.event_id == event_id:
             self.show_event(self.current)
 
+    # -- reviewing assessments ----------------------------------------------------------
+
+    def _review(self, assessment, heading: str = "") -> None:
+        from s2_watch.ui.assessment_dialog import AssessmentDialog
+
+        event = self.current
+        analyst = self.store.get_setting("operator.callsign", "").upper()
+        dialog = AssessmentDialog(event.title, assessment, event.reports, analyst, self, heading)
+        if dialog.exec() and dialog.accepted is not None:
+            self.store.accept_event_assessment(event.event_id, dialog.accepted)
+            self.show_event(self.current)
+            self.assessment_changed.emit(event.event_id)
+
+    def review_proposal(self) -> None:
+        proposed = self.store.event_assessment(self.current.event_id)
+        if proposed is not None:
+            self._review(proposed)
+
+    def dismiss_proposal(self) -> None:
+        self.store.dismiss_event_assessment(self.current.event_id)
+        self.show_event(self.current)
+
+    def edit_accepted(self) -> None:
+        from dataclasses import replace
+
+        accepted = self.store.accepted_assessment(self.current.event_id)
+        if accepted is not None:      # edited now, against every report there is
+            accepted = replace(accepted, reports=len(self.store.event_reports(self.current.event_id)))
+            self._review(accepted, "Edit the event's assessment. Accepting saves a new version; the earlier one "
+                                   "stays in its history.")
+
+    def write_assessment(self) -> None:
+        from s2_watch.event_assessment import EventAssessment
+
+        self._review(EventAssessment(origin="analyst", model="",
+                                     reports=len(self.store.event_reports(self.current.event_id))),
+                     "Write the event's assessment. Cite the numbered reports in brackets, e.g. [2].")
+
+    def show_history(self) -> None:
+        from s2_watch.ui.assessment_dialog import AssessmentHistoryDialog
+
+        AssessmentHistoryDialog(self.current.title, self.store.assessment_history(self.current.event_id),
+                                self.format_time, self).exec()
+
     def _link(self, url: QUrl) -> None:
         if url.scheme() == "s2watch":
             action, _, value = url.path().partition("/")
             if action == "fix-location" and value.isdigit():
                 self.fix_location.emit(int(value))
+            elif value.isdigit() and self.current is not None and self.current.event_id == int(value):
+                {"accept-assessment": self.review_proposal, "dismiss-assessment": self.dismiss_proposal,
+                 "edit-assessment": self.edit_accepted, "write-assessment": self.write_assessment,
+                 "assessment-history": self.show_history}.get(action, lambda: None)()
         else:
             QDesktopServices.openUrl(url)
 
@@ -189,7 +241,7 @@ class EventDetail(QWidget):
 
     def render(self, event, reports: list[dict], records: dict | None = None,
                now: datetime | None = None, assessment=None, assessing: str = "",
-               assessment_error: str = "") -> str:
+               assessment_error: str = "", accepted=None, versions: int = 0) -> str:
         e = escape
         records = records or {}
         now = now or datetime.now(timezone.utc)
@@ -234,7 +286,8 @@ class EventDetail(QWidget):
                 if words not in seen:
                     seen.append(words)
             out.append(f"<p><b>Your labels:</b> {e('; '.join(seen))}</p>")
-        out.append(self.render_assessment(assessment, len(reports), assessing, assessment_error))
+        out.append(self.render_assessment(assessment, len(reports), assessing, assessment_error, accepted,
+                                          event.event_id, versions))
         out.append(f"<hr><p style='margin-bottom:4px'><b>Reports, newest first</b> (numbered in the order heard)</p>"
                    if len(reports) > 1 else "<hr><p style='margin-bottom:4px'><b>Report</b></p>")
         numbers = {id(report): number for number, report in enumerate(reports, 1)}
@@ -279,30 +332,15 @@ class EventDetail(QWidget):
             out.append("".join(parts) + "</p>")
         return "\n".join(out)
 
-    def render_assessment(self, assessment, report_count: int, assessing: str = "", error: str = "") -> str:
-        """The Ollama assessment section: a suggestion, kept apart from the facts."""
+    def _assessment_body(self, assessment) -> list[str]:
+        """An assessment's sections as HTML."""
         e = escape
-        if assessing:
-            return (f"<p style='color:#1565c0'>⏳ <b>Assessing with Ollama ({e(assessing)})…</b> this can take a "
-                    "minute or two. You can keep working.</p>")
         out = []
-        if error:
-            out.append(f"<p style='color:#c62828'>Ollama couldn't assess this event: {e(error)}</p>")
-        if assessment is None:
-            return "".join(out)
-        when = self.format_time(_when(assessment.created_at)) if assessment.created_at else ""
-        stale = report_count - assessment.reports
-        out.append("<div style='border-left:3px solid #1565c0;padding-left:6px;margin:6px 0'>"
-                   f"<p style='margin:0'><b>Assessment</b> <span style='color:gray'>— Ollama suggestion"
-                   f" ({e(assessment.model)}), {e(when)}, from {assessment.reports} report"
-                   f"{'s' if assessment.reports != 1 else ''}. Numbers in brackets are the reports below.</span></p>")
-        if stale > 0:
-            out.append(f"<p style='color:#e65100;margin:2px 0'>⚠ <b>Out of date:</b> {stale} new report"
-                       f"{'s' if stale != 1 else ''} since. Click Assess (Ollama) again.</p>")
         if assessment.bluf:
             out.append(f"<p style='margin:4px 0'><b>BLUF:</b> {e(assessment.bluf)}</p>")
         trend_colour = {"escalating": "#c62828", "winding down": "#2e7d32"}.get(assessment.trend, "inherit")
-        out.append(f"<p style='margin:4px 0'><b>Trend:</b> <b style='color:{trend_colour}'>{e(assessment.trend)}</b>"
+        out.append(f"<p style='margin:4px 0'><b>Trend:</b> <b style='color:{trend_colour}'>"
+                   f"{TREND_MARKS.get(assessment.trend, '')} {e(assessment.trend)}</b>"
                    + (f" — {e(assessment.trend_reason)}" if assessment.trend_reason else "")
                    + (f"<br><b>Agreement:</b> {e(assessment.agreement)}" if assessment.agreement else "") + "</p>")
         for paragraph in assessment.assessment:
@@ -316,5 +354,57 @@ class EventDetail(QWidget):
             if items:
                 out.append(f"<p style='margin:4px 0 0'><b>{title}</b></p><ul style='margin-top:0'>"
                            + "".join(f"<li>{e(item)}</li>" for item in items) + "</ul>")
-        out.append("</div>")
+        return out
+
+    def render_assessment(self, proposed, report_count: int, assessing: str = "", error: str = "",
+                          accepted=None, event_id: int = 0, versions: int = 0) -> str:
+        """The event's accepted assessment (the analyst's), then Ollama's proposal waiting for
+        review, each apart from the facts."""
+        e = escape
+        out = []
+        if accepted is not None:
+            when = self.format_time(_when(accepted.accepted_at)) if accepted.accepted_at else ""
+            out.append("<p style='margin:6px 0 0'><b>Analyst assessment</b> <span style='color:gray'>— "
+                       f"{e(accepted.credit)}, {e(when)}, from {accepted.reports} report"
+                       f"{'s' if accepted.reports != 1 else ''}.</span> "
+                       f"<a href='s2watch:edit-assessment/{event_id}'>edit</a>"
+                       + (f" · <a href='s2watch:assessment-history/{event_id}'>history ({versions})</a>"
+                          if versions > 1 else "") + "</p>")
+            stale = report_count - accepted.reports
+            if stale > 0 and proposed is None and not assessing:
+                out.append(f"<p style='color:#e65100;margin:2px 0'>⚠ <b>Out of date:</b> {stale} new report"
+                           f"{'s' if stale != 1 else ''} since. Assess (Ollama) again for a proposed update, "
+                           "or edit it.</p>")
+            out += self._assessment_body(accepted)
+        if assessing:
+            out.append(f"<p style='color:#1565c0'>⏳ <b>Assessing with Ollama ({e(assessing)})…</b> this can take a "
+                       "minute or two. You can keep working.</p>")
+        if error:
+            out.append(f"<p style='color:#c62828'>Ollama couldn't assess this event: {e(error)}</p>")
+        if proposed is not None and not assessing:
+            when = self.format_time(_when(proposed.created_at)) if proposed.created_at else ""
+            kind = "Proposed update" if accepted is not None else "Proposed assessment"
+            out.append("<div style='margin:6px 0'><p style='margin:0'>"
+                       f"<b style='color:#1565c0'>{kind}</b> <span style='color:gray'>— Ollama suggestion "
+                       f"({e(proposed.model)}), {e(when)}, from {proposed.reports} report"
+                       f"{'s' if proposed.reports != 1 else ''}, <b>not yet accepted</b>. Numbers in brackets are "
+                       f"the reports below.</span><br><a href='s2watch:accept-assessment/{event_id}'>Review &amp; "
+                       f"accept…</a> · <a href='s2watch:dismiss-assessment/{event_id}'>Dismiss</a></p>")
+            stale = report_count - proposed.reports
+            if stale > 0:
+                out.append(f"<p style='color:#e65100;margin:2px 0'>⚠ <b>Out of date:</b> {stale} new report"
+                           f"{'s' if stale != 1 else ''} since. Click Assess (Ollama) again.</p>")
+            if accepted is not None:
+                changed = changes(accepted, proposed)
+                out.append("<p style='margin:4px 0'><b>What changed:</b> "
+                           + (e("; ".join(changed)) if changed else "nothing new in trend, probabilities or gaps")
+                           + "</p>")
+            out += self._assessment_body(proposed)
+            out.append("</div>")
+        if accepted is None and proposed is None and not assessing and report_count:
+            out.append(f"<p style='color:gray;margin:6px 0'>No assessment yet: Assess (Ollama), or "
+                       f"<a href='s2watch:write-assessment/{event_id}'>write one</a>.</p>")
+        if out:
+            out.insert(0, "<div style='margin:6px 0'>")
+            out.append("</div>")
         return "".join(out)

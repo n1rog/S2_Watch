@@ -282,8 +282,9 @@ def _exercise_banner(lines: list[str]) -> str:
 def briefing_report(events, now: datetime, hours: int, focus: set[int] | None = None,
                     last_briefing: datetime | None = None, magcon: str = DEFAULT_MAGCON,
                     reports_of=None, grades: dict[str, str] | None = None, quiet_for=None,
-                    background: list[str] | None = None) -> str:
-    """A MAGNET S2 report summarising a watch period's events. Closed events are listed as
+                    background: list[str] | None = None, assessments: dict | None = None) -> str:
+    """A MAGNET S2 report summarising a watch period's events. ``assessments``: event id -> the
+    analyst's accepted assessment, listed under COMMENTS / ASSESSMENT. Closed events are listed as
     resolved, not as current activity; quiet ones say how long they've been quiet."""
     from s2_watch.events import quiet_hours
     from s2_watch.briefing import PRIORITY_ITEMS, URGENCY_RANK, priority_key
@@ -367,6 +368,20 @@ def briefing_report(events, now: datetime, hours: int, focus: set[int] | None = 
             if hasattr(e, "single_source") and e.single_source(now)
             else f"- Is \"{titles[e.event_id]}\" confirmed by an official source?" for e in priority if not e.official][:6]
     gaps = gaps or ["- (No open questions identified.)"]
+    # The analyst's accepted assessments of the period's events (their report numbers mean nothing here).
+    from s2_watch.event_assessment import without_citations
+
+    assessed, probability = [], []
+    for event in priority:
+        accepted = (assessments or {}).get(event.event_id)
+        if accepted is None:
+            continue
+        when = timeline_time(accepted.accepted_at) if accepted.accepted_at else ""
+        summary = without_citations(accepted.bluf or " ".join(accepted.assessment[:1]))
+        assessed.append(f"{titles[event.event_id]}: assessed {accepted.trend.upper()} ({when}, {accepted.credit}). "
+                        f"{summary}")
+        probability += [f"{titles[event.event_id]}: {without_citations(statement)} | {level}"
+                        for statement, level in accepted.probabilities[:2]]
     sources: list[dict] = []
     if reports_of is not None:
         for event in priority:
@@ -384,7 +399,8 @@ def briefing_report(events, now: datetime, hours: int, focus: set[int] | None = 
         "", "Timeline of Known Activity:", *(timeline or ["— | No priority events"]),
         "", "COMMENTS / ASSESSMENT",
         "(Analytical layer in measured language: assessed, likely, indicates, suggests. Overall situation first.)",
-        "", "Current Assessment:", "(Assessment category) | MODERATE",
+        *assessed,
+        "", "Current Assessment:", *(probability or ["(Assessment category) | MODERATE"]),
         "Note: Probability levels are based on currently available reporting only and may be revised.",
         "", "INTELLIGENCE GAPS", *gaps,
         "", "MITIGATION RECOMMENDATIONS",

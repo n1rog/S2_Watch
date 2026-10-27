@@ -203,7 +203,16 @@ those. The assessment is saved, marked out of date when new reports arrive, and 
 draft of that event. It uses the **Event assessment model** (Ollama settings, default
 `qwen2.5:7b`; the 3B classification model misread trends and invented impacts in testing),
 takes about two minutes on a CPU, and runs only after other models are unloaded and enough
-memory is free; the model is unloaded as soon as it answers. Edit the text, then **Save Word report…** (the MAGNET .docx format) or **Save web
+memory is free; the model is unloaded as soon as it answers.
+
+The model's result is a **proposed** assessment. **Review & accept…** opens it as editable
+fields; once accepted it is the event's **analyst assessment** (who and when, every earlier
+version kept under **history**). **Dismiss** drops a proposal; **write one** starts an
+assessment from scratch. When new reports arrive, a fresh assessment shows as a proposed
+update beside the accepted one, with what changed (trend, probability levels, new gaps). The
+accepted assessment marks the event's trend in the lists (▲ escalating, ▬ stable, ▼ winding
+down, ? unclear), fills MAGNET drafts of the event, and is listed (trend, who, when, BLUF,
+probability lines) under COMMENTS / ASSESSMENT in shift briefings. Edit the text, then **Save Word report…** (the MAGNET .docx format) or **Save web
 page…** (the MAGNET HTML template), named `MAGNET_S2_TOPIC_YYMMDD-HHMMZ`; the FLMSG and
 JS8Call versions are made from the same text. The MagCon status used is remembered for the
 next report.

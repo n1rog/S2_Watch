@@ -40,6 +40,34 @@ at the top of the panel, apart from the facts:</p>
 <p>Every statement cites the reports it rests on, e.g. <b>[22]</b>; check them. The model is told to use only facts in the
 reports, but it can still assume things (a landfall, a direction) the reports don't say. It never changes an event or a
 report. The assessment is saved; when new reports arrive it shows <b>⚠ Out of date</b> until you assess again.</p>
+<h2>Accepting an assessment</h2>
+<p>Ollama's result is a <b>proposed assessment</b>, marked <i>not yet accepted</i>. To make it the event's assessment:</p>
+<ol>
+<li>Click <b>Review &amp; accept…</b> under it. Each section opens as a field: BLUF, trend and why, agreement, assessment
+(a blank line between paragraphs), probability (one per line, <code>what may happen | HIGH</code>), gaps, mitigation and
+MAGNET guidance.</li>
+<li>Check each statement against the numbered reports, correct it, add what you know, and click <b>Accept</b>.</li>
+</ol>
+<p>It becomes the event's <b>Analyst assessment</b>, shown at the top of its details with who accepted it and when
+(<i>Ollama-drafted (qwen2.5:7b), reviewed by N1ROG</i>). <b>Dismiss</b> drops a proposal you don't want. With no assessment yet,
+<b>write one</b> starts an empty one of your own (<i>written by N1ROG</i>); <b>edit</b> changes the accepted one.</p>
+<p>When new reports arrive, the accepted assessment shows <b>⚠ Out of date</b>. Assess again: the new result appears below yours
+as a <b>Proposed update</b>, with <b>What changed</b> (trend, probability levels, new gaps, newer reports read). Accept it (after
+editing), or dismiss it. Every accepted version is kept: <b>history</b> lists them, newest first, so a handover can see when the
+picture changed.</p>
+<p>The accepted assessment is what the rest of S2 Watch uses:</p>
+<ul>
+<li>the events lists mark the event's title with its trend: <b>▲</b> escalating, <b>▬</b> stable, <b>▼</b> winding down,
+<b>?</b> unclear;</li>
+<li>a MAGNET S2 draft of the event fills its analytical sections from it (an unreviewed proposal is used only when nothing is
+accepted, and the draft says so; an assessment older than the latest reports says how many it read);</li>
+<li>a shift briefing lists each assessed event's trend, when and by whom, and its BLUF under COMMENTS / ASSESSMENT, with up to
+two of its probability lines in the table.</li>
+</ul>
+<div class="example"><p><b>Example.</b> You accept Vance as <b>▼ winding down</b> after deleting “moving towards Mexico”. Six hours
+later two new advisories arrive: the assessment shows <i>⚠ Out of date: 2 new reports since</i>. Assess again: the proposed update
+reads <i>What changed: Reads 2 newer reports; New gap: Any coastal effects in Colima?</i>. Accept it; your earlier version stays
+in history.</p></div>
 <p>It takes about two minutes on a computer without a suitable graphics card, in the background. It uses the <b>Event assessment
 model</b> (Ollama settings; default <code>qwen2.5:7b</code>): a 7–8B model sticks to the reports, while the 3B model used for
 messages misread trends and invented impacts in testing. To protect the rest of the computer, S2 Watch first unloads other

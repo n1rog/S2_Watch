@@ -174,6 +174,15 @@ class SQLiteStore:
         # The operator's location corrections: a phrase ("BIXBY") or one message ("#msg:<hash>")
         # and where it really is.
         self.connection.execute(
+            """CREATE TABLE IF NOT EXISTS accepted_assessments (
+                id INTEGER PRIMARY KEY,
+                event_id INTEGER NOT NULL,
+                body TEXT NOT NULL
+            )"""
+        )
+        self.connection.execute(
+            "CREATE INDEX IF NOT EXISTS accepted_assessments_event ON accepted_assessments(event_id)")
+        self.connection.execute(
             """CREATE TABLE IF NOT EXISTS event_assessments (
                 event_id INTEGER PRIMARY KEY,
                 body TEXT NOT NULL
@@ -1043,7 +1052,7 @@ class SQLiteStore:
         return records
 
     def event_assessment(self, event_id: int):
-        """The latest Ollama assessment of an event (s2_watch.event_assessment), or None."""
+        """The Ollama assessment of an event waiting for review (s2_watch.event_assessment), or None."""
         from s2_watch.event_assessment import EventAssessment
 
         row = self.connection.execute("SELECT body FROM event_assessments WHERE event_id = ?", (event_id,)).fetchone()
@@ -1054,6 +1063,40 @@ class SQLiteStore:
             """INSERT INTO event_assessments(event_id, body) VALUES (?, ?)
                ON CONFLICT(event_id) DO UPDATE SET body = excluded.body""", (event_id, assessment.to_json()))
         self.connection.commit()
+
+    def dismiss_event_assessment(self, event_id: int) -> None:
+        """Drop the proposal waiting for review."""
+        self.connection.execute("DELETE FROM event_assessments WHERE event_id = ?", (event_id,))
+        self.connection.commit()
+
+    def accept_event_assessment(self, event_id: int, assessment) -> None:
+        """Make ``assessment`` (accepted_by and accepted_at set) the event's assessment; earlier
+        ones are kept as its history, and the proposal it came from is done with."""
+        self.connection.execute("INSERT INTO accepted_assessments(event_id, body) VALUES (?, ?)",
+                                (event_id, assessment.to_json()))
+        self.connection.execute("DELETE FROM event_assessments WHERE event_id = ?", (event_id,))
+        self.connection.commit()
+
+    def accepted_assessment(self, event_id: int):
+        """The event's current accepted assessment, or None."""
+        history = self.assessment_history(event_id, limit=1)
+        return history[0] if history else None
+
+    def assessment_history(self, event_id: int, limit: int = -1) -> list:
+        """The event's accepted assessments, newest first."""
+        from s2_watch.event_assessment import EventAssessment
+
+        rows = self.connection.execute(
+            "SELECT body FROM accepted_assessments WHERE event_id = ? ORDER BY id DESC LIMIT ?",
+            (event_id, limit)).fetchall()
+        return [found for found in (EventAssessment.from_json(row[0]) for row in rows) if found is not None]
+
+    def accepted_trends(self) -> dict[int, str]:
+        """Each assessed event's accepted trend."""
+        rows = self.connection.execute(
+            """SELECT event_id, json_extract(body, '$.trend') FROM accepted_assessments
+               WHERE id IN (SELECT MAX(id) FROM accepted_assessments GROUP BY event_id)""").fetchall()
+        return {event_id: trend or "unclear" for event_id, trend in rows}
 
     def sender_trust(self) -> dict[str, str]:
         """The trust levels the operator set, by call sign."""

@@ -9,6 +9,10 @@ come from the reports and cite them by number ([3]); citations of reports that d
 are dropped. It is a suggestion for the analyst: shown apart from the facts, saved with the
 number of reports it read, and out of date once a new report arrives. It never changes an
 event or a report.
+
+The model's latest result is a proposal. The analyst reviews it, edits it and accepts it; the
+accepted assessment belongs to the event (with who accepted it and when, every earlier
+version kept) and is what drafts and briefings use. An analyst can also write one from scratch.
 """
 
 from __future__ import annotations
@@ -78,6 +82,15 @@ class EventAssessment:
     reports: int = 0               # how many reports it read (newer ones make it out of date)
     model: str = ""
     created_at: str = ""
+    accepted_by: str = ""          # the analyst who accepted it ("" while it's only a proposal)
+    accepted_at: str = ""
+    origin: str = "ollama"         # "ollama" (a model's draft) or "analyst" (written by the analyst)
+
+    @property
+    def credit(self) -> str:
+        """"Ollama-drafted, reviewed by N1ROG" or "written by N1ROG"."""
+        who = self.accepted_by or "the analyst"
+        return f"written by {who}" if self.origin == "analyst" else f"Ollama-drafted ({self.model}), reviewed by {who}"
 
     def to_json(self) -> str:
         return json.dumps(asdict(self))
@@ -274,6 +287,34 @@ def assess_event(brief: str, count: int, endpoint: str, model: str, timeout: flo
     return parse_assessment(reply, count, model)
 
 
+TREND_MARKS = {"escalating": "▲", "stable": "▬", "winding down": "▼", "unclear": "?"}
+
+
+def without_citations(text: str) -> str:
+    """Text without report numbers (for a briefing, where they mean nothing)."""
+    return re.sub(r"\s+([.,;])", r"\1", _CITATION.sub("", text)).strip()
+
+
+def changes(accepted: EventAssessment, proposed: EventAssessment) -> list[str]:
+    """What a proposed update says that the accepted assessment doesn't."""
+    found = []
+    if proposed.trend != accepted.trend:
+        found.append(f"Trend: {accepted.trend} → {proposed.trend}")
+    levels = {without_citations(s).lower(): level for s, level in accepted.probabilities}
+    for statement, level in proposed.probabilities:
+        before = levels.get(without_citations(statement).lower())
+        if before is None:
+            found.append(f"New probability: {without_citations(statement)} | {level}")
+        elif before != level:
+            found.append(f"Probability: {without_citations(statement)} {before} → {level}")
+    known = {without_citations(gap).lower() for gap in accepted.gaps}
+    found += [f"New gap: {without_citations(gap)}" for gap in proposed.gaps if without_citations(gap).lower() not in known]
+    if proposed.reports > accepted.reports:
+        found.append(f"Reads {proposed.reports - accepted.reports} newer report"
+                     f"{'s' if proposed.reports - accepted.reports != 1 else ''}")
+    return found
+
+
 # -- into a MAGNET S2 draft -------------------------------------------------------------
 
 def source_numbers(reports: list[dict]) -> dict[int, int]:
@@ -305,6 +346,11 @@ def fill_report(text: str, assessment: EventAssessment, reports: list[dict]) -> 
     lead = f"Trend: {assessment.trend}." + (f" {cite(assessment.trend_reason)}" if assessment.trend_reason else "") \
         + (f" {cite(assessment.agreement)}" if assessment.agreement else "")
     paragraphs = [cite(p) for p in assessment.assessment] + [lead]
+    if not assessment.accepted_by:
+        paragraphs.append("(Ollama suggestion, not yet reviewed by the analyst.)")
+    if assessment.reports < len(reports):
+        paragraphs.append(f"(Assessed from {assessment.reports} of {len(reports)} reports; the newer ones are not yet "
+                          "reflected.)")
     table = [f"{cite(statement).replace('|', '/')} | {level}" for statement, level in assessment.probabilities] or \
         ["(Assessment category, e.g. activity continues or escalates) | MODERATE"]
     body = "\n".join(paragraphs + ["", "Current Assessment:", *table,

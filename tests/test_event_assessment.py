@@ -101,7 +101,8 @@ def test_the_event_panel_assesses_in_the_background_and_says_when_it_is_out_of_d
         if store.event_assessment(event.event_id) is not None and not detail._assessing:
             break
     text = detail.browser.toPlainText()
-    assert "Assessment — Ollama suggestion (llama3.2)" in text and "Trend: escalating" in text
+    assert "Proposed assessment — Ollama suggestion (llama3.2)" in text and "not yet accepted" in text
+    assert "Trend: ▲ escalating" in text
     assert "Flooding spreads to adjacent roads" in text and "Out of date" not in text
     add(store, "MagCommstat", "TULSA OK - FLOODING WORSE", T0 + timedelta(hours=3), TULSA, fields={"sender": "K1ABC"})
     [newer] = [e for e in store.events_since(T0 - timedelta(days=1)) if e.event_id == event.event_id]
@@ -166,3 +167,101 @@ def test_the_reports_menu_assesses_the_selected_event(tmp_path, main_window, mon
     window.map_events.set_events([event])
     window.assess_event_id(event_id)                            # as the right-click item does
     assert started == [event_id] and window.map_event_detail.current.event_id == event_id
+
+
+def accepted_version(store, event, reply=REPLY, by="N1ROG"):
+    from dataclasses import replace
+
+    proposed = parse_assessment(reply, 3, "qwen2.5:7b")
+    accepted = replace(proposed, accepted_by=by, accepted_at="2026-10-01T15:00:00+00:00")
+    store.accept_event_assessment(event.event_id, accepted)
+    return accepted
+
+
+def test_accepting_keeps_a_history_and_marks_the_trend(tmp_path) -> None:
+    from dataclasses import replace
+
+    store, event, _reports = event_with_three_reports(tmp_path)
+    store.save_event_assessment(event.event_id, parse_assessment(REPLY, 3, "qwen2.5:7b"))
+    first = accepted_version(store, event)
+    assert store.event_assessment(event.event_id) is None                 # the proposal is done with
+    assert store.accepted_assessment(event.event_id) == first and first.credit.endswith("reviewed by N1ROG")
+    store.accept_event_assessment(event.event_id, replace(first, trend="winding down", accepted_at="2026-10-01T18:00:00"))
+    assert [a.trend for a in store.assessment_history(event.event_id)] == ["winding down", "escalating"]
+    assert store.accepted_trends() == {event.event_id: "winding down"}
+
+
+def test_a_proposed_update_says_what_changed() -> None:
+    from dataclasses import replace
+
+    accepted = parse_assessment(REPLY, 3)
+    proposed = replace(accepted, trend="winding down", reports=5, gaps=accepted.gaps + ["Is the river falling?"],
+                       probabilities=[("Flooding spreads to adjacent roads", "LOW"), ("Roads reopen", "HIGH")])
+    assert event_assessment.changes(accepted, proposed) == [
+        "Trend: escalating → winding down", "Probability: Flooding spreads to adjacent roads MODERATE → LOW",
+        "New probability: Roads reopen | HIGH", "New gap: Is the river falling?", "Reads 2 newer reports"]
+
+
+def test_the_editor_turns_the_fields_into_an_accepted_assessment(tmp_path) -> None:
+    from s2_watch.event_assessment import EventAssessment
+    from s2_watch.ui.assessment_dialog import AssessmentDialog
+
+    QApplication.instance() or QApplication([])
+    dialog = AssessmentDialog("Flood", parse_assessment(REPLY, 3, "qwen2.5:7b"), 3, "N1ROG")
+    dialog.bluf.setPlainText("River flooding continues in Tulsa [1, 2].")
+    dialog.trend.setCurrentIndex(dialog.trend.findData("stable"))
+    dialog.assessment.setPlainText("First paragraph [1].\n\nSecond\nparagraph [2].")
+    dialog.probabilities.setPlainText("Roads reopen today | low\n")
+    dialog.gaps.setPlainText("- Shelters open?\n- Shelters open?\n")
+    result = dialog.result_assessment()
+    assert (result.bluf, result.trend, result.accepted_by) == ("River flooding continues in Tulsa [1, 2].", "stable", "N1ROG")
+    assert result.assessment == ["First paragraph [1].", "Second paragraph [2]."]
+    assert result.probabilities == [("Roads reopen today", "LOW")] and result.gaps == ["Shelters open?"]
+    written = AssessmentDialog("Flood", EventAssessment(origin="analyst"), 3, "N1ROG")
+    written.bluf.setPlainText("Flooding [1].")
+    assert written.result_assessment().credit == "written by N1ROG"
+    dialog.deleteLater(); written.deleteLater()
+
+
+def test_the_panel_shows_the_accepted_assessment_and_a_proposed_update(tmp_path, monkeypatch) -> None:
+    from dataclasses import replace
+
+    from PySide6.QtCore import QUrl
+
+    from s2_watch.ui.event_detail import EventDetail
+
+    QApplication.instance() or QApplication([])
+    store, event, _reports = event_with_three_reports(tmp_path)
+    detail = EventDetail(store, lambda value: str(value)[:16])
+    detail.show_event(event)
+    assert "No assessment yet" in detail.browser.toPlainText()
+    accepted_version(store, event)
+    store.save_event_assessment(event.event_id, replace(parse_assessment(REPLY, 3, "qwen2.5:7b"), trend="stable"))
+    detail.show_event(event)
+    text = detail.browser.toPlainText()
+    assert "Analyst assessment — Ollama-drafted (qwen2.5:7b), reviewed by N1ROG" in text
+    assert "Proposed update" in text and "What changed: Trend: escalating → stable" in text
+    detail._link(QUrl(f"s2watch:dismiss-assessment/{event.event_id}"))
+    assert store.event_assessment(event.event_id) is None and "Proposed update" not in detail.browser.toPlainText()
+    detail.deleteLater()
+
+
+def test_drafts_and_briefings_use_the_accepted_assessment(tmp_path) -> None:
+    from datetime import datetime, timezone
+
+    from s2_watch.analysis.base import AnalysisResult
+    from s2_watch.followup import FollowUpFacts
+    from s2_watch.s2_report import briefing_report, followup_report
+
+    store, event, reports = event_with_three_reports(tmp_path)
+    accepted = accepted_version(store, event)
+    found = store.report_first_message(reports[0]["report_id"])
+    facts = FollowUpFacts(found[0], AnalysisResult(True, "Climate / Environment", "high", "Flooding", 0.9), [])
+    draft = fill_report(followup_report(facts, reports), accepted, reports)
+    assert "not yet reviewed" not in draft and "Assessed from" not in draft
+    newer = reports + [dict(reports[-1], report_id=99, first_seen=(T0 + timedelta(hours=5)).isoformat())]
+    assert "(Assessed from 3 of 4 reports" in fill_report(followup_report(facts, newer), accepted, newer)
+    briefing = briefing_report([event], datetime(2026, 10, 1, 16, tzinfo=timezone.utc), 24,
+                               assessments={event.event_id: accepted})
+    assert "assessed ESCALATING (1500Z" in briefing and "reviewed by N1ROG). Flooding on the river" in briefing
+    assert ": Flooding spreads to adjacent roads | MODERATE" in briefing and "[1" not in briefing.split("SOURCE LIST")[0]

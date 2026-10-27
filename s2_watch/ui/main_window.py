@@ -1169,6 +1169,7 @@ class MainWindow(QMainWindow):
         detail.quiet_for = self.quiet_near_event
         detail.assessment_brief = self.event_assessment_brief
         detail.ollama_settings = self.ollama_settings
+        detail.assessment_changed.connect(lambda _event_id: (self.refresh_map_events(), self.events_view.refresh()))
         detail.show_on_map.connect(self.show_event_id_on_map)
         detail.draft_followup.connect(self.draft_followup_for_event)
         detail.mark.connect(lambda event_id, status: self.mark_reports(self.event_report_ids(event_id), status))
@@ -2205,7 +2206,9 @@ class MainWindow(QMainWindow):
                                        world.describe() if world.COVERAGE != {"us"} else "")
         text = s2_briefing_report(events, now, hours, self.focus_regions, last_briefing, magcon=magcon,
                                   reports_of=self.store.event_reports, grades=self.sender_grades(),
-                                  quiet_for=self.quiet_near_event, background=background)
+                                  quiet_for=self.quiet_near_event, background=background,
+                                  assessments={event.event_id: accepted for event in events
+                                               if (accepted := self.store.accepted_assessment(event.event_id))})
         ollama = None
         if self.analysis_mode.checkedAction().data() == "ollama":
             ollama = (self.ollama_endpoint.text().strip() or "http://127.0.0.1:11434",
@@ -2311,9 +2314,13 @@ class MainWindow(QMainWindow):
                                   grades=self.sender_grades(), background=background)
         suggest_fn = draft_s2_assessment
         if event is not None and members:
-            # A current assessment of the event fills the analytical sections; Suggest runs a fresh one.
-            assessment = self.store.event_assessment(event_id)
-            if assessment is not None and assessment.reports == len(members):
+            # The analyst's accepted assessment fills the analytical sections (or else a current
+            # proposal not yet reviewed); Suggest runs a fresh one.
+            assessment = self.store.accepted_assessment(event_id)
+            proposed = self.store.event_assessment(event_id)
+            if assessment is None and proposed is not None and proposed.reports == len(members):
+                assessment = proposed
+            if assessment is not None:
                 text = fill_report(text, assessment, members)
             brief = event_brief(event, members, background)
 

@@ -13,6 +13,7 @@ from PySide6.QtCore import QByteArray, QPoint, Qt, QTimer, Signal
 from PySide6.QtGui import QBrush, QColor, QFont, QPalette
 from s2_watch.focus import event_in_focus, has_focus
 from s2_watch.world import event_covered
+from s2_watch.event_assessment import TREND_MARKS
 from s2_watch.ui.event_detail import EventDetail
 from PySide6.QtWidgets import (
     QAbstractItemView, QCheckBox, QComboBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QPushButton, QSplitter,
@@ -145,6 +146,8 @@ class EventsTable(QTableWidget):
         self.setRowCount(0)
         muted = self.palette().color(QPalette.ColorRole.PlaceholderText)
         now = datetime.now(timezone.utc)
+        # The trend of the analyst's accepted assessment: ▲ escalating, ▬ stable, ▼ winding down.
+        trends = self.store.accepted_trends() if self.store is not None else {}
         for event in events:
             row = self.rowCount()
             self.insertRow(row)
@@ -153,7 +156,8 @@ class EventsTable(QTableWidget):
             in_focus = event_in_focus(event, focus)
             cells = (
                 SortKeyItem(self.format_time(event.last_seen), (in_focus, event.last_seen.timestamp())),
-                QTableWidgetItem(event.title),
+                QTableWidgetItem(f"{TREND_MARKS[trends[event.event_id]]} {event.title}"
+                                 if event.event_id in trends else event.title),
                 QTableWidgetItem(event.category),
                 QTableWidgetItem(area),
                 SortKeyItem(str(event.reports), event.reports),
@@ -165,7 +169,7 @@ class EventsTable(QTableWidget):
                 SortKeyItem(event.status_text(now), STATUS_RANK[event.status(now)]),
             )
             cells[0].setData(self.EVENT_ROLE, event.event_id)
-            cells[1].setToolTip(event.title)
+            cells[1].setToolTip(event.title + (f"\nAssessed: {trends[event.event_id]}" if event.event_id in trends else ""))
             if event.closed_at is not None:
                 cells[10].setToolTip(f"Closed {self.format_time(event.closed_at)}"
                                      + (" by you" if event.closed_by == "operator" else " by a report")
