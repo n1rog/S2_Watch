@@ -193,7 +193,8 @@ Ollama, **Suggest assessment** drafts the analysis for the analyst to check: for
 an event, the COMMENTS / ASSESSMENT paragraphs with the trend and a probability table,
 INTELLIGENCE GAPS, MITIGATION RECOMMENDATIONS and MAGNET GUIDANCE, citing the SOURCE LIST.
 
-**Assess (Ollama)** in an event's details asks a local model what the event's reports add up
+**Assess (Ollama)** (the button in an event's details, right-click → Assess event, or Reports →
+Assess Selected Event, Ctrl+Shift+A) asks a local model what the event's reports add up
 to (`s2_watch/event_assessment.py`): BLUF, trend (escalating / stable / winding down /
 unclear), agreement between reports, assessment, probability table, gaps, mitigation and
 MAGNET guidance, each citing the reports by number. The model reads the first report and the

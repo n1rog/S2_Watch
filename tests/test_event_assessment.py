@@ -148,3 +148,21 @@ def test_an_assessment_unloads_other_models_and_refuses_when_memory_is_short(mon
         event_assessment.make_room("http://127.0.0.1:11434", "qwen2.5:7b")
     with pytest.raises(OllamaError, match="ollama pull mistral"):
         event_assessment.make_room("http://127.0.0.1:11434", "mistral")
+
+
+def test_the_reports_menu_assesses_the_selected_event(tmp_path, main_window, monkeypatch) -> None:
+    from s2_watch.ui.event_detail import EventDetail
+
+    window = main_window(tmp_path / "menu.db")
+    action = window.assess_action
+    assert action.text() == "Assess Selected Event (Ollama)" and action.shortcut().toString() == "Ctrl+Shift+A"
+    started = []
+    monkeypatch.setattr(EventDetail, "assess", lambda self: started.append(self.current.event_id))
+    action.trigger()                                            # nothing selected: says so
+    assert not started and "Select an event first" in window.statusBar().currentMessage()
+    event_id = add(window.store, "MagCommstat", "TULSA OK - RIVER FLOODING", T0, TULSA, fields={"sender": "K1ABC"})
+    window.review_duration.setCurrentIndex(window.review_duration.count() - 1)
+    [event] = [e for e in window.store.events_since(T0 - timedelta(days=1)) if e.event_id == event_id]
+    window.map_events.set_events([event])
+    window.assess_event_id(event_id)                            # as the right-click item does
+    assert started == [event_id] and window.map_event_detail.current.event_id == event_id

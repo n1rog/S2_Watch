@@ -600,6 +600,10 @@ class MainWindow(QMainWindow):
         self._backup_timer.start(60 * 60 * 1000)
         QTimer.singleShot(60_000, self.back_up_database)
         reports_menu = self.menuBar().addMenu("Reports")
+        self.assess_action = assess_action = reports_menu.addAction("Assess Selected Event (Ollama)")
+        assess_action.setShortcut(QKeySequence("Ctrl+Shift+A"))
+        assess_action.setToolTip("What the selected event's reports add up to (Help → Local AI)")
+        assess_action.triggered.connect(lambda: self.assess_event_id(self.selected_event_id()))
         reports_menu.addAction("Draft Shift Briefing…").triggered.connect(
             lambda: self.draft_briefing(int(self.review_duration.currentData())))
         reports_menu.addAction("Saved Reports && Briefings…").triggered.connect(self.show_saved_drafts)
@@ -1105,6 +1109,9 @@ class MainWindow(QMainWindow):
             draft = menu.addAction("Draft follow-up report…")
             draft.setEnabled(bool(items))
             draft.triggered.connect(lambda: self.draft_followup_for_event(event_ids[0]))
+            assess = menu.addAction("Assess event (Ollama)")
+            assess.setEnabled(bool(items))
+            assess.triggered.connect(lambda: self.assess_event_id(event_ids[0]))
             menu.addAction("Show on map").triggered.connect(lambda: self.show_event_id_on_map(event_ids[0]))
             chosen = self.map_events.event_by_id(event_ids[0]) or self.events_view.table.event_by_id(event_ids[0])
             if chosen is not None and chosen.closed_at is not None:
@@ -1115,6 +1122,29 @@ class MainWindow(QMainWindow):
                 lambda: (self.tabs.setCurrentWidget(self.events_view), self.events_view.table.select_event(event_ids[0])))
         menu.addAction("Show its reports").triggered.connect(lambda: self.show_reports(report_ids))
         menu.exec(position)
+
+    def selected_event_id(self) -> int | None:
+        """The event selected in the Events tab (when shown) or in the list under the map."""
+        table = self.events_view.table if self.tabs.currentWidget() is self.events_view else self.map_events
+        return next(iter(table.selected_events()), None)
+
+    def assess_event_id(self, event_id: int | None) -> None:
+        """Assess (Ollama) an event: shown in the details beside its list, the assessment appears there."""
+        if event_id is None:
+            self.statusBar().showMessage("Select an event first, then Reports → Assess Selected Event (Ollama)", 10_000)
+            return
+        if self.tabs.currentWidget() is self.events_view:
+            table, detail = self.events_view.table, self.events_view.detail
+        else:
+            self.set_news_mode("events")
+            table, detail = self.map_events, self.map_event_detail
+        if detail.current is None or detail.current.event_id != event_id:
+            table.select_event(event_id)
+        if detail.current is not None and detail.current.event_id == event_id:
+            detail.assess()
+        else:
+            self.statusBar().showMessage("That event isn't in the list: widen the watch period or the Events period",
+                                         10_000)
 
     def show_help(self, topic: str = "") -> None:
         """Help → S2 Watch Help (F1): one window, brought forward if already open."""
