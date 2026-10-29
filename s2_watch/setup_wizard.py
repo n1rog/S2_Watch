@@ -47,7 +47,8 @@ def feeder_candidates() -> dict[str, list[Path]]:
                               Path("C:/Commstat/traffic.db3")],
         "flmsg.directory": [home / ".nbems/ICS/messages", home / "NBEMS.files/ICS/messages",
                             home / "Documents/NBEMS.files/ICS/messages"],
-        "js8superspotter.database": [home / "MyApps/JS8SuperSpotter/js8spotter.db", home / "JS8SuperSpotter/js8spotter.db",
+        "js8superspotter.database": [home / "MyApps/SpotterX/js8spotter.db", home / "SpotterX/js8spotter.db",
+                                     home / "MyApps/JS8SuperSpotter/js8spotter.db", home / "JS8SuperSpotter/js8spotter.db",
                                      local / "JS8SuperSpotter/js8spotter.db"],
     }
 

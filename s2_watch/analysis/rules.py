@@ -63,6 +63,17 @@ SEVERE_WEATHER_PATTERNS = (
     r"\bwind\s*chill\s+warnings?\b",
     r"\b(?:blizzards?|ice\s*storms?|derechos?|tropical\s+storms?)\b",
 )
+# Radiological and nuclear incidents. "Radiation" and "nuclear" alone are left out: solar
+# radiation, radiation therapy and nuclear policy are not incidents.
+RADIOLOGICAL_PATTERNS = (
+    r"\bradiolog\w*\s+(?:releases?|leaks?|incidents?|accidents?|emergenc(?:y|ies)|events?|hazards?|"
+    r"contamination|exposures?|materials?|sources?|dispersal|alerts?)\b",
+    r"\bradiation\s+(?:releases?|leaks?|exposures?|emergenc(?:y|ies)|alarms?|sickness|poisoning|spikes?|"
+    r"hazards?|warnings?)\b",
+    r"\bradioactiv\w*", r"\bdirty\s+bombs?\b", r"\b(?:melt\s*downs?|criticality\s+(?:accidents?|events?))\b",
+    r"\bnuclear\s+(?:incidents?|accidents?|releases?|leaks?|emergenc(?:y|ies)|disasters?|power\s+plant\s+warnings?)\b",
+    r"\b(?:radiological|radioactive|nuclear)\s+contamination\b", r"\bcontamination\s+beyond\b",
+)
 WEATHER_PATTERNS = (
     r"\b(?:high|intense|oppressive)\s+heat\b",
     r"\bheat\s*(?:advisor(?:y|ies)|index|indices|waves?|domes?|exhaustion|strokes?|illness(?:es)?)\b",
@@ -109,6 +120,7 @@ class RuleBasedNewsAnalyzer(NewsAnalyzer):
         Rule("Climate / Environment", ("tornado", "hurricane", "flood", "evacuation", "wildfire", "earthquake"), "high",
              SEVERE_WEATHER_PATTERNS),
         Rule("Climate / Environment", (), "medium", WEATHER_PATTERNS),
+        Rule("Climate / Environment", (), "high", RADIOLOGICAL_PATTERNS),
         Rule("Crime", ("missing person", "burglary", "robbery", "arrest", "murder", "shooting", "shots fired",
                        "stabbing", "homicide", "active shooter"), "high"),
         Rule("Infrastructure", ("power outage", "bridge closed", "road closed", "water main", "communications outage"), "medium"),

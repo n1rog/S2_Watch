@@ -346,7 +346,7 @@ Terrorism), disabled until you enable it. Their patterns
 and avoid common false matches such as "who", "Bill", "snap(shot)", or "deploy"
 (an antenna). Climate / Environment combines the Weather pattern with
 environmental hazards (wildfire, smoke and air quality, earthquakes, evacuations,
-chemical spills). The offline analyzer uses the same vocabulary, so a message a
+chemical spills; radiological and nuclear incidents at high urgency). The offline analyzer uses the same vocabulary, so a message a
 category form captures is classified in that category. The forms are added once;
 a category form you delete is not recreated.
 S2 Watch remembers its settings between launches: which watch forms are enabled,
@@ -453,8 +453,9 @@ including its `messages`, `alerts`, and `statrep` tables.
 FLMSG integration reads new `.k2s`, `.b2s`, and `.wrap` files from its
 message directory, defaulting to `~/.nbems/ICS/messages`.
 
-JS8SuperSpotter integration reads its local SQLite database, including
-activity, brevity, StatRep, and store-and-forward message tables.
+JS8SuperSpotter integration reads its local SQLite database (SpotterX, its
+successor, uses the same layout at `~/MyApps/SpotterX/js8spotter.db`), including
+activity, brevity, StatRep, store-and-forward message, and map pin tables.
 
 Settings live in the **Configuration** menu: **Analysis Mode** and **Theme**
 are submenus you can switch directly, and **Watch Forms…**, **Display…**, and

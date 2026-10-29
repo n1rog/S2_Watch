@@ -9,7 +9,11 @@
 server API. In S2 Watch: host <code>127.0.0.1</code>, port <code>2442</code>.</td></tr>
 <tr><td>MagCommstat, Commstat</td><td>Their message databases (<code>traffic.db3</code>)</td><td>The database paths</td></tr>
 <tr><td>FLMSG</td><td>Received forms in its message folder</td><td>The folder, e.g. <code>~/.nbems/ICS/messages</code></td></tr>
-<tr><td>JS8SuperSpotter</td><td>Its database (<code>js8spotter.db</code>)</td><td>The database path</td></tr>
+<tr><td>JS8SuperSpotter or SpotterX</td><td>Its database (<code>js8spotter.db</code>): spots, brevity reports, StatReps,
+stored messages and map pins. A pin sent over the air (<code>@MAGNET PIN RADIATION EM93DN …</code>) arrives as
+<i>PIN RADIATION EM93DN …</i>, placed at its grid square.</td><td>The database path, e.g.
+<code>~/MyApps/SpotterX/js8spotter.db</code>. SpotterX keeps a new database: if you move from JS8SuperSpotter, change the
+path, or the source goes quiet.</td></tr>
 <tr><td>APRS</td><td>Bulletins (BLN0–BLN9 and named groups) from APRS-IS, receive-only, U.S. stations only</td>
 <td>Tick <b>Read APRS bulletins</b> and enter your call sign with an SSID, e.g. <code>N0ABC-13</code>. Servers refuse
 anonymous logins; nothing is sent to RF.</td></tr>

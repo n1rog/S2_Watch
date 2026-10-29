@@ -8,7 +8,8 @@ from s2_watch.time_utils import is_recent, parse_source_time
 
 
 class JS8SuperSpotterSQLiteAdapter(ApplicationAdapter):
-    """Reads new structured spots and reports from JS8SuperSpotter SQLite."""
+    """Reads new structured spots, reports and map pins from JS8SuperSpotter's SQLite database
+    (SpotterX, its successor, keeps the same database)."""
 
     application_name = "JS8SuperSpotter"
 
@@ -21,6 +22,7 @@ class JS8SuperSpotterSQLiteAdapter(ApplicationAdapter):
             "csbrevity": 0,
             "csstatrep": 0,
             "sfm_messages": 0,
+            "map_pins": 0,
         }
         self.lookback = lookback
 
@@ -33,6 +35,7 @@ class JS8SuperSpotterSQLiteAdapter(ApplicationAdapter):
             "csbrevity": "id, csb_from, csb_event, csb_summary, csb_detail, csb_raw, csb_timestamp",
             "csstatrep": "id, cssr_from, cssr_group, cssr_grid, cssr_prio, cssr_status, cssr_notes, cssr_timestamp",
             "sfm_messages": "id, sender, recipient, priority, body, status, created_time",
+            "map_pins": "id, pin_type, grid6, lat, lon, description, added_by, origin, added_time",
         }
         try:
             with sqlite3.connect(f"file:{self.database_path}?mode=ro", uri=True, timeout=0.5) as connection:
@@ -48,6 +51,7 @@ class JS8SuperSpotterSQLiteAdapter(ApplicationAdapter):
                             "csbrevity": "csb_timestamp",
                             "csstatrep": "cssr_timestamp",
                             "sfm_messages": "created_time",
+                            "map_pins": "added_time",
                         }[table]
                         if timestamp_column not in available:
                             columns = columns.replace(f", {timestamp_column}", ", NULL AS " + timestamp_column)
@@ -72,6 +76,7 @@ class JS8SuperSpotterSQLiteAdapter(ApplicationAdapter):
                 "csbrevity": "csb_timestamp",
                 "csstatrep": "cssr_timestamp",
                 "sfm_messages": "created_time",
+                "map_pins": "added_time",
             }[table]
             if self.lookback and not is_recent(row[timestamp_key], self.lookback):
                 continue
@@ -85,6 +90,11 @@ class JS8SuperSpotterSQLiteAdapter(ApplicationAdapter):
             elif table == "csstatrep":
                 content = row["cssr_notes"] or ""
                 fields.update({"sender": row["cssr_from"] or "", "group": row["cssr_group"] or "", "grid": row["cssr_grid"] or "", "priority": str(row["cssr_prio"] or ""), "status": row["cssr_status"] or ""})
+            elif table == "map_pins":
+                # A "PIN <TYPE> <GRID> <description>" sent over the air, or one placed in SpotterX.
+                content = " ".join(part for part in ("PIN", row["pin_type"], row["grid6"], row["description"]) if part)
+                fields.update({"sender": row["added_by"] or "", "pin_type": row["pin_type"] or "",
+                               "grid": row["grid6"] or "", "origin": row["origin"] or ""})
             else:
                 content = row["body"] or ""
                 fields.update({"sender": row["sender"] or "", "recipient": row["recipient"] or "", "priority": str(row["priority"] or ""), "status": row["status"] or ""})

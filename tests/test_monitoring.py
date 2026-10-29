@@ -402,3 +402,50 @@ def test_a_message_read_again_is_not_analysed_again(tmp_path: Path) -> None:
     # A different analyzer (switching modes) does analyse it again.
     Monitor([Source()], [form], store, lambda message: None, RuleBasedNewsAnalyzer()).poll()
     assert store.saved_analysis(store.find_message_id(message_key(Source().read_messages()[0])), "rules") is not None
+
+
+RADIATION_PIN = ("KG5RKW: @MAGNET PIN RADIATION EM93DN SRS REPORTED AN UNFILTERED RADIOLOGICAL RELEASE AFTER A LAB "
+                 "FIRE,THERE WAS NO INDICATION OF CONTAMINATION BEYOND THE SITE, EMERGENCY PRECAUTION REMAIN IN EFFECT ♢ ")
+
+
+def test_a_radiological_release_heard_on_js8call_is_high_urgency_news_at_its_grid() -> None:
+    from s2_watch.analysis.rules import RuleBasedNewsAnalyzer
+    from s2_watch.locating import LocationResolver
+
+    adapter = JS8CallTcpAdapter()
+    params = {"CMD": " PIN", "FROM": "KG5RKW", "OFFSET": 1881, "TEXT": RADIATION_PIN, "TO": "@MAGNET"}
+    adapter._buffer = (json.dumps({"type": "RX.DIRECTED", "value": RADIATION_PIN, "params": params}) + "\n").encode()
+    message = adapter._decode_lines()[0]
+    result = RuleBasedNewsAnalyzer().analyze(message)
+    assert (result.newsworthy, result.category, result.urgency) == (True, "Climate / Environment", "high")
+    assert "radiological release" in result.matched_terms
+    place = LocationResolver().resolve(message)[0]
+    assert place.level == "precise" and round(place.lat, 2) == 33.56 and round(place.lon, 2) == -81.71
+
+
+def test_radiation_in_everyday_talk_is_not_news() -> None:
+    from s2_watch.analysis.rules import RuleBasedNewsAnalyzer
+
+    for text in ("SOLAR RADIATION HIGH TODAY GOOD PROPAGATION", "MY XYL STARTS RADIATION THERAPY MONDAY"):
+        assert not RuleBasedNewsAnalyzer().analyze(Message("JS8Call", text)).newsworthy, text
+    for text in ("RADIATION LEAK REPORTED AT PLANT", "RADIOACTIVE MATERIAL STOLEN FROM TRUCK",
+                 "NUCLEAR POWER PLANT WARNING ISSUED", "DIRTY BOMB THREAT DOWNTOWN"):
+        assert RuleBasedNewsAnalyzer().analyze(Message("JS8Call", text)).urgency == "high", text
+
+
+def test_spotterx_map_pins_are_read_with_their_grid(tmp_path: Path) -> None:
+    database = tmp_path / "js8spotter.db"
+    connection = __import__("sqlite3").connect(database)
+    connection.execute("CREATE TABLE map_pins (id INTEGER PRIMARY KEY, pin_type TEXT, grid6 TEXT, lat REAL, lon REAL, "
+                       "description TEXT, group_tag TEXT, added_by TEXT, added_time TEXT, origin TEXT)")
+    connection.execute("INSERT INTO map_pins VALUES (1, 'RADIATION', 'EM93DN', 33.5625, -81.7083, "
+                       "'SRS REPORTED AN UNFILTERED RADIOLOGICAL RELEASE', '', 'KG5RKW', '2026-10-29 01:56:58', 'rf')")
+    connection.commit()
+    connection.close()
+    adapter = JS8SuperSpotterSQLiteAdapter(database)
+    [message] = adapter.read_messages()
+    assert message.raw_content == "PIN RADIATION EM93DN SRS REPORTED AN UNFILTERED RADIOLOGICAL RELEASE"
+    assert message.fields["type"] == "MAP_PINS"
+    assert (message.fields["sender"], message.fields["grid"], message.fields["origin"]) == ("KG5RKW", "EM93DN", "rf")
+    assert message.received_at.isoformat().startswith("2026-10-29T01:56:58")
+    assert adapter.read_messages() == []

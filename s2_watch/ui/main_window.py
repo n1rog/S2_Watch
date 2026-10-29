@@ -207,7 +207,7 @@ class MainWindow(QMainWindow):
         self.superspotter_path = QLineEdit(
             self.store.get_setting(
                 "js8superspotter.database",
-                str(Path.home() / "MyApps/JS8SuperSpotter/js8spotter.db"),
+                str(Path.home() / "MyApps/SpotterX/js8spotter.db"),
             )
         )
         connect = QPushButton("Connect to monitored applications")
