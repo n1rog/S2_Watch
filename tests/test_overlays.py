@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timedelta, timezone
 
 from s2_watch.models import Message
@@ -183,3 +184,40 @@ def test_country_of_registration_from_the_icao_address() -> None:
     assert registration_country("f00001") == ""                    # not a state block
     plane = compact_aircraft({"hex": "c03a5f", "lat": 49.2, "lon": -123.1})
     assert plane["country"] == "Canada"
+
+
+def test_the_united_states_and_world_buttons_move_the_map(tmp_path, main_window) -> None:
+    import time
+
+    from PySide6.QtWidgets import QApplication
+
+    app = QApplication.instance()
+    window = main_window(tmp_path / "view.db")
+    window.resize(1200, 900)
+    window.show()
+    view = window.map_view
+    deadline = time.monotonic() + 30
+    while not view._page_ready and time.monotonic() < deadline:
+        app.processEvents()
+    if not view._page_ready:
+        pytest.skip("the map page didn't load")
+
+    def bounds():
+        settle = time.monotonic() + 1.5   # the map animates to its new view
+        while time.monotonic() < settle:
+            app.processEvents()
+        result = []
+        view._web_view.page().runJavaScript(
+            "map.invalidateSize(); JSON.stringify([map.getCenter().lat, map.getCenter().lng, map.getZoom()])",
+            0, result.append)
+        deadline = time.monotonic() + 5
+        while not result and time.monotonic() < deadline:
+            app.processEvents()
+        return json.loads(result[0])
+
+    window.map_world_button.click()
+    lat, lon, world_zoom = bounds()
+    assert world_zoom <= 2 and abs(lon) < 40
+    window.map_us_button.click()
+    lat, lon, us_zoom = bounds()
+    assert us_zoom > world_zoom and 30 < lat < 45 and -105 < lon < -90

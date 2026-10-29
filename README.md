@@ -475,6 +475,8 @@ to be monitored normally.
 
 The Map tab shows reporting-station locations from Maidenhead grid fields and
 news locations from explicit latitude/longitude pairs or geocoded place names.
+The **United States** and **World** buttons above it center the map on the lower
+48 states or zoom out to the whole world.
 The map filters can independently show or hide station locations, news
 locations, and each source application. Filter choices are saved locally.
 The map works offline. Leaflet and its plugins ship with the application, and a

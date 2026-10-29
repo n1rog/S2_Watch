@@ -203,6 +203,14 @@ class MapView(QWidget):
         if points:
             self._run(f"showArea({json.dumps([[lat, lon] for lat, lon in points])})")
 
+    def show_united_states(self) -> None:
+        """Fit the map to the lower 48 states."""
+        self._run("showUnitedStates()")
+
+    def show_world(self) -> None:
+        """Zoom out to the whole world."""
+        self._run("showWorld()")
+
     def set_coverage(self, cells: list[dict]) -> None:
         self._coverage = cells
         self._run(f"setCoverage({json.dumps(cells)})")
@@ -537,6 +545,10 @@ function setFocusRegions(regions, fit) {{
     map.setView([39.5, -98.35], 4);
   }}
 }}
+// The Map toolbar's United States and World buttons.
+function showUnitedStates() {{ map.fitBounds([[24.4, -125.0], [49.4, -66.9]]); }}
+// The world as wide as the map: fitting its height too would zoom a short map out until it repeats.
+function showWorld() {{ map.setView([25, 0], Math.max(1, Math.floor(Math.log2(map.getSize().x / 256)))); }}
 // The operator's area of responsibility: one circle, replaced only when it changes.
 let focusArea = null;
 function setFocusArea(area) {{
