@@ -106,7 +106,12 @@ to a database you copied over.
 
 ## Updating
 
-Quit S2 Watch first. Your data and settings are kept either way.
+**From S2 Watch (Linux and macOS, installed with the installer package):** when a new
+version is out, the button beside the clock turns orange (**Update to 0.42.0**). Click it:
+S2 Watch downloads the update, closes, saves a copy of its database, installs the update and
+opens again.
+
+Otherwise, quit S2 Watch first. Your data and settings are kept either way.
 
 **Installed with Git:** in a terminal, in the `S2_Watch` folder:
 

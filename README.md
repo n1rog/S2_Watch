@@ -26,6 +26,12 @@ Installed from a clone, S2 Watch runs the clone's code (an editable install), so
 updates it. When a pull changes `pyproject.toml`'s dependencies, S2 Watch installs them at
 its next start, before Qt loads (`s2_watch/checkout.py`).
 
+S2 Watch checks the repository's version tags 10 seconds after it starts and every 6 hours
+(`s2_watch/updates.py`). A newer one turns the button beside the clock orange; on a copy set
+up by `install.sh`, clicking it downloads that tag's source, then a detached script waits for
+S2 Watch to exit, backs up the database, runs the tag's `installer/install.sh --yes
+--no-wizard` and starts S2 Watch again (log: `update.log` beside the database).
+
 Install scripts for Linux, macOS and Windows live in `installer/`. Each one checks
 for and downloads what S2 Watch needs (Python 3.11+, Qt's system libraries on Linux,
 the Visual C++ runtime on Windows, and PySide6), installs S2 Watch into its own

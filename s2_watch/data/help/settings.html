@@ -22,6 +22,16 @@ it to a <code>backups</code> folder beside it and keeps the last 14 copies. To r
 <code>s2_watch.db</code>.</p>
 
 <h2>Updating</h2>
+<p>The button beside the clock says <b>Up to date</b>, and turns orange, <b>Update to 0.42.0</b>, when a newer S2 Watch is
+released on GitHub. S2 Watch checks 10 seconds after it starts and every 6 hours; click <b>Up to date</b> to check now
+(<b>Updates?</b> means it couldn't reach GitHub; it tries again later).</p>
+<p>Click the orange button to install the update. It lists what's new and asks first; then S2 Watch downloads the update,
+closes, saves a copy of the database in its <code>backups</code> folder (<code>s2_watch-before-0.42.0.db</code>), runs the
+installer and opens again, about a minute later on Linux and macOS. The status bar then says <i>Updated to S2 Watch 0.42.0</i>,
+or, if it didn't install, that you are still on the old version and where the details are (<code>update.log</code> beside
+<code>s2_watch.db</code>). A failed download leaves S2 Watch running as it was.</p>
+<p>The button installs updates only for a copy set up by the Linux or macOS installer. Installed with Git, it tells you to run
+<code>git pull</code>; on Windows it opens the download page.</p>
 <div class="example"><p><b>Installed with Git</b> (recommended): quit S2 Watch, then in the folder you cloned:</p>
 <pre>git pull</pre>
 <p>Start S2 Watch again. If an update needs new packages, it installs them as it starts.</p>

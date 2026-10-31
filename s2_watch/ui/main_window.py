@@ -33,6 +33,7 @@ from s2_watch.ui.fix_location_dialog import FixLocationDialog
 from s2_watch.ui.help_view import HelpDialog
 from s2_watch.ui.keyword_noise_dialog import KeywordNoiseDialog
 from s2_watch.ui.grip_splitter import GripSplitter
+from s2_watch.ui.update_button import UpdateButton
 from s2_watch.ui.senders_dialog import SendersDialog
 from s2_watch.ui.event_detail import EventDetail
 from s2_watch.ui.events_view import EventsTable, EventsView, search_box
@@ -635,6 +636,8 @@ class MainWindow(QMainWindow):
                                        "(Configuration → Exercise in Progress)")
         self.exercise_label.setStyleSheet("color: white; background: #c62828; font-weight: bold; padding: 1px 8px;")
         self.exercise_label.setVisible(self.exercise_in_progress())
+        self.update_button = UpdateButton(self)
+        clock_layout.addWidget(self.update_button)
         clock_layout.addWidget(self.exercise_label)
         clock_layout.addWidget(self.clock_label)
         clock_layout.addWidget(self.clock_button)
