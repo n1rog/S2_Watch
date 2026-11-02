@@ -636,7 +636,9 @@ official sources on a background thread: US news about protests, riots, unrest,
 shootings, bombings and terrorism from the GDELT news search (news-derived, not
 official; every 30 minutes), with a second GDELT search for failing infrastructure
 (power outages, water main breaks, gas leaks, manhole fires, sinkholes, bridge collapses)
-whose urgency follows where it is rather than its size: critical sites (hospitals,
+(also asked of Google News's search feeds, every 30 minutes, so one failing index
+doesn't silence the news; an unplaced Google story is kept only from a U.S. site naming
+no other country) whose urgency follows where it is rather than its size: critical sites (hospitals,
 airports, government and military sites, 911, water and power plants, transit) and
 Washington, DC are high, state capitals and large outages medium, the rest low
 (`s2_watch/infrastructure.py`), FAA security flight restrictions (mostly VIP movements

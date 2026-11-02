@@ -36,8 +36,9 @@ def test_dc_and_washington_state_are_kept_apart(text, expected) -> None:
 
 
 def test_a_headline_naming_no_place_is_placed_by_its_storys_address() -> None:
-    assert place(FOGGY_BOTTOM[0]) is None
-    assert place(*FOGGY_BOTTOM) == "Washington, DC"
+    headline = "Power outages hit neighborhood as crews investigate smoke from manholes"
+    assert place(headline) is None
+    assert place(headline, FOGGY_BOTTOM[1]) == "Washington, DC"     # "...-h-street-northwest-dc"
 
 
 @pytest.mark.parametrize("headline, url, urgency", [
@@ -112,3 +113,51 @@ def test_gdelts_plain_text_refusals_are_reported_in_its_own_words(monkeypatch) -
     monkeypatch.setattr(osint, "_get", lambda url, timeout=25: b"Your query was too short or too long.\n")
     with pytest.raises(RuntimeError, match="GDELT: Your query was too short or too long."):
         osint._gdelt_news(osint.GDELT_INFRASTRUCTURE)
+
+
+GOOGLE_FEED = """<?xml version="1.0" encoding="UTF-8"?><rss version="2.0"><channel>
+<item><title>Power outage reported near George Washington University - WUSA9</title>
+<link>https://news.google.com/rss/articles/CBMiAAA</link><guid>g1</guid><pubDate>Mon, 02 Nov 2026 15:27:00 GMT</pubDate>
+<source url="https://www.wusa9.com">WUSA9</source></item>
+<item><title>Pepco outage map: Over 1,100 customers hit by power outage in Washington DC’s Foggy Bottom - Hindustan Times</title>
+<link>https://news.google.com/rss/articles/CBMiBBB</link><guid>g2</guid><pubDate>Mon, 02 Nov 2026 15:54:08 GMT</pubDate>
+<source url="https://www.hindustantimes.com">Hindustan Times</source></item>
+<item><title>Power outage leaves 2,000 without power in Tulsa - KJRH</title>
+<link>https://news.google.com/rss/articles/CBMiCCC</link><guid>g3</guid><pubDate>Mon, 02 Nov 2026 14:00:00 GMT</pubDate>
+<source url="https://www.kjrh.com">KJRH</source></item>
+<item><title>Tauranga outage: 994 properties affected - NZ Herald</title>
+<link>https://news.google.com/rss/articles/CBMiDDD</link><guid>g4</guid><pubDate>Mon, 02 Nov 2026 14:00:00 GMT</pubDate>
+<source url="https://www.nzherald.co.nz">NZ Herald</source></item>
+<item><title>Russian drone strikes leave thousands of Ukrainians without power - TVP World</title>
+<link>https://news.google.com/rss/articles/CBMiEEE</link><guid>g5</guid><pubDate>Mon, 02 Nov 2026 14:00:00 GMT</pubDate>
+<source url="https://tvpworld.com">TVP World</source></item>
+<item><title>La Palma in Spain's Canary Islands hit by power outage - TradingView</title>
+<link>https://news.google.com/rss/articles/CBMiFFF</link><guid>g6</guid><pubDate>Mon, 02 Nov 2026 14:00:00 GMT</pubDate>
+<source url="https://www.tradingview.com">TradingView</source></item>
+</channel></rss>""".encode()
+
+
+def test_google_news_brings_the_dc_outage_at_high_urgency_and_leaves_out_news_from_abroad(monkeypatch) -> None:
+    monkeypatch.setattr(osint, "_get", lambda url, timeout=25: GOOGLE_FEED)
+    monkeypatch.setattr(osint.world, "COVERAGE", {"us"})
+    news = osint._google_news(osint.GOOGLE_INFRASTRUCTURE, infrastructure=True)
+    assert [m.raw_content for m in news] == [
+        "Power outage reported near George Washington University",          # the outlet's name dropped
+        "Pepco outage map: Over 1,100 customers hit by power outage in Washington DC’s Foggy Bottom",
+        "Power outage leaves 2,000 without power in Tulsa"]                 # New Zealand, Ukraine, Spain left out
+    assert [(m.fields["urgency"], m.fields["sender"]) for m in news] == [
+        ("high", "wusa9.com"), ("high", "hindustantimes.com"), ("low", "kjrh.com")]
+    assert news[0].fields["source"] == "Google News" and news[0].received_at.isoformat() == "2026-11-02T15:27:00+00:00"
+    assert place(news[1].raw_content) == "Washington, DC"
+
+
+def test_google_news_is_a_switchable_source_fetched_every_half_hour() -> None:
+    assert osint.FETCHERS["gnews"] is osint.fetch_google_news
+    assert osint.SCHEDULE["gnews"] == 30 and "gnews" not in osint.DEFAULT_OFF
+    assert "q=%22power+outage%22" in osint.google_news_url(osint.GOOGLE_INFRASTRUCTURE)
+
+
+@pytest.mark.parametrize("text", ["Power outage hits Foggy Bottom", "Water main break in Anacostia",
+                                  "Crash near Dupont Circle"])
+def test_dc_neighbourhoods_found_nowhere_else_place_in_dc(text) -> None:
+    assert place(text) == "Washington, DC"

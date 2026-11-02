@@ -66,6 +66,9 @@ _DC_DOTS = re.compile(r"\bD\.\s?C\.?(?![A-Z])")
 _DC_NAMES = re.compile(
     r"\bWASHINGTON,?\s+DC\b|\bDISTRICT\s+OF\s+COLUMBIA\b"
     r"|\bWASHINGTON\s+(?:MONUMENT|NAVY\s+YARD)\b|\bGEORGE\s+WASHINGTON\s+UNIVERSITY\b"
+    # Neighbourhoods no other U.S. city has.
+    r"|\b(?:FOGGY\s+BOTTOM|DUPONT\s+CIRCLE|ADAMS\s+MORGAN|ANACOSTIA|LOGAN\s+CIRCLE|TENLEYTOWN|"
+    r"CONGRESS\s+HEIGHTS|NATIONAL\s+MALL)\b"
     r"|\b(?:(IN|NEAR|ACROSS|AROUND|OUTSIDE|THROUGHOUT)\s+)?(?:DOWNTOWN|UPTOWN|NORTHWEST|NORTHEAST|SOUTHWEST|SOUTHEAST|"
     r"NW|NE|SW|SE)\s+DC\b"
     r"|\b(IN|NEAR|ACROSS|AROUND|OUTSIDE|THROUGHOUT)\s+DC\b"
@@ -108,7 +111,8 @@ class ResolvedLocation:
 
 
 def normalize(name: str) -> str:
-    text = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode().upper()
+    text = unicodedata.normalize("NFKD", name.replace("’", "'")).encode("ascii", "ignore").decode().upper()
+    text = re.sub(r"(?<=[A-Z])'S\b", "", text)     # "SPAIN'S" -> "SPAIN"
     text = re.sub(r"\bSAINT\b", "ST", text)
     text = re.sub(r"\bSAINTE\b", "STE", text)
     text = re.sub(r"[.'`]", "", text)
@@ -351,7 +355,8 @@ class LocationResolver:
             found = self._resolve(headline) or self._resolve(message)
         else:
             found = self._resolve(message)
-        if not found and message.fields.get("type") == "NEWS" and message.fields.get("url"):
+        if not found and message.fields.get("type") == "NEWS" and message.fields.get("url") \
+                and "news.google.com" not in message.fields["url"]:   # Google's links are coded, not words
             # Last, the story's address: "/power-outages-hit-foggy-bottom-h-street-northwest-dc".
             found = self._resolve(replace(message, raw_content=url_place_words(message.fields["url"])))
         return found
@@ -669,4 +674,6 @@ def message_hash(message: Message) -> str:
 
 
 def normalize_text(text: str) -> str:
+    # Curly quotes would otherwise vanish: "DC’s" must not become "DCS".
+    text = text.replace("’", "'").replace("‘", "'")
     return unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode().upper()

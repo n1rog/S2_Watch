@@ -36,7 +36,8 @@ W5ABC-10: BLN2: Flooding in Joplin, MO [W5ABC-10 position: lat 36.1540, lon -95.
 NOAA SPC storm reports; NIFC wildfires; FEMA declarations and local public alerts (IPAWS, placed at the area the alert
 outlines and named with its county, e.g. <i>Sedona 8-9-10, Coconino County, AZ</i>); NOAA space weather;
 FAA security restrictions, airport closures and ground stops; State Department advisories; internet outages (IODA);
-news about unrest and violence, and about failing infrastructure (GDELT; see below). Off by default: worldwide disasters (GDACS), newly exploited software flaws
+news about unrest and violence, and about failing infrastructure, from two news indexes, GDELT and Google News (see below).
+Off by default: worldwide disasters (GDACS), newly exploited software flaws
 (CISA), closed border crossings (CBP) and satellite heat detections (NASA FIRMS, which needs a free map key entered
 under Sources). FIRMS reports clusters of 6 or more detections in the last 24 hours at low urgency, worded “a fire, a field burn or
 industrial heat”: in season most are crop or sugarcane burns, steel mills or volcanoes, not wildfires.</p>
@@ -45,8 +46,11 @@ or the page). Turning one off stops it at once and takes its items off the map; 
 they leave the watch period.</p>
 
 <h2>Infrastructure news: where matters more than how many</h2>
-<p>A second GDELT news search looks for power outages, people without power, water main breaks, gas leaks, manhole fires,
-sinkholes, bridge collapses and rolling blackouts. Each story becomes an Infrastructure report whose urgency comes from
+<p>A second news search looks for power outages, people without power, water main breaks, gas leaks, manhole fires,
+sinkholes, bridge collapses and rolling blackouts, in both GDELT and Google News (every 30 minutes each; either can be switched
+off under Configuration → Watch Forms). Two indexes because one can fail for days: GDELT refused every request from late October
+into November. Google News covers local TV and newspapers within minutes, but its U.S. edition carries world news too: a story
+whose place S2 Watch can't find is kept only when it comes from a U.S. website and names no other country or nationality. Each story becomes an Infrastructure report whose urgency comes from
 <i>where</i> it is rather than from how many customers lost service:</p>
 <table>
 <tr><th>Urgency</th><th>When</th></tr>
@@ -63,8 +67,9 @@ schools and universities.</td></tr>
 <div class="example"><p><b>Example.</b> <i>Power outages hit Foggy Bottom as crews investigate smoke from manholes</i> (WJLA, about 1,200
 Pepco customers) → Infrastructure, <b>high</b>, Washington, DC, because it is in the national capital. <i>Power outage leaves 2,000
 without power in Tulsa</i> → low. <i>Thousands without power in Columbus, Ohio</i> → medium (a state capital).</p></div>
-<p>Washington, DC is recognised however it is written: Washington, DC or D.C., “in DC”, “Northwest DC”, “DC police”, or the
-Washington Monument, Navy Yard and George Washington University. “Washington” alone is still the state, and “12V DC” isn't a place.</p>
+<p>Washington, DC is recognised however it is written: Washington, DC or D.C., “DC’s”, “in DC”, “Northwest DC”, “DC police”, the
+Washington Monument, Navy Yard and George Washington University, and neighbourhoods no other city has (Foggy Bottom, Dupont
+Circle, Adams Morgan, Anacostia, Logan Circle, Tenleytown, Congress Heights, the National Mall). “Washington” alone is still the state, and “12V DC” isn't a place.</p>
 
 <h2>Coverage: which parts of the world</h2>
 <p><b>Configuration → Coverage</b> chooses the areas S2 Watch reports from: <b>United States</b> (the default), <b>North America</b>

@@ -74,7 +74,8 @@ CITY_ALIASES = {"KYIV": "KIEV", "ODESA": "ODESSA", "KHARKOV": "KHARKIV", "YANGON
 # A world city this many times bigger than every U.S. place of the same name (London, Paris,
 # Moscow) counts without its country named; smaller ones (Athens) need the country.
 DWARFS = 30
-_LOCATIVE = re.compile(r"\b(?:IN|FROM|OF|NEAR|ACROSS|OVER|INTO|TO|INSIDE|THROUGHOUT|OFF)\s+$")
+_LOCATIVE = re.compile(r"\b(?:IN|FROM|OF|NEAR|ACROSS|OVER|INTO|TO|INSIDE|THROUGHOUT|OFF|NORTHERN|SOUTHERN|EASTERN|"
+                       r"WESTERN|CENTRAL)\s+$")
 NEAREST_KM = 800        # a point at sea belongs to the area of the nearest coast this close
 
 COVERAGE: set[str] = {"us"}
@@ -199,6 +200,18 @@ class World:
             if country is not None:
                 return "country", country["name"], country["label"][0], country["label"][1], country
         return None
+
+
+_NATIONALITY = re.compile(r"\b(" + "|".join(sorted(DEMONYMS, key=len, reverse=True)) + r")S?\b")
+
+
+def mentions_abroad(text: str) -> bool:
+    """Whether a text names any country or nationality other than the U.S., however loosely
+    ("Russian drone strikes", "thousands of Ukrainians", "northern Peru")."""
+    upper = normalize(text)
+    world = load_world()
+    return bool(_NATIONALITY.search(upper)) or any(
+        world.country_names[match.group(1)]["code"] != "USA" for match in world._country_pattern.finditer(upper))
 
 
 @lru_cache(maxsize=8192)

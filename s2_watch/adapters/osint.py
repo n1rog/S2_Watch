@@ -88,7 +88,7 @@ NIFC_URL = ("https://services3.arcgis.com/T4QMspbfLg3qTGWY/arcgis/rest/services/
 US_BOXES = ((24, 50, -125, -66), (51, 72, -180, -129), (18, 23, -161, -154), (17, 19, -68, -65), (13, 21, 144, 146))
 # Minutes between fetches of each source.
 # GDELT refuses frequent requests ("429 Too Many Requests"): every 30 minutes.
-SCHEDULE = {"gdelt": 30, "faa": 30, "state": 60, "fema": 60, "usgs": 10, "spc": 15, "nifc": 60}
+SCHEDULE = {"gdelt": 30, "gnews": 30, "faa": 30, "state": 60, "fema": 60, "usgs": 10, "spc": 15, "nifc": 60}
 DECLARATION_TYPES = {"DR": "Major Disaster", "EM": "Emergency", "FM": "Fire Management"}
 STATE_NAMES = {
     "AL": "Alabama", "AK": "Alaska", "AZ": "Arizona", "AR": "Arkansas", "CA": "California", "CO": "Colorado",
@@ -159,6 +159,59 @@ def _gdelt_news(topics: str, infrastructure: bool = False) -> list[Message]:
             urgency, why = infrastructure_urgency(title, _place(title, url))
             fields.update({"topic": "infrastructure", "urgency": urgency, "urgency_reason": why})
         messages.append(Message(APPLICATION, title, received_at=seen, fields=fields))
+    return messages
+
+
+# -- Google News search: the same two subjects, from a second news index -------------------
+GOOGLE_NEWS_URL = "https://news.google.com/rss/search?"
+GOOGLE_INFRASTRUCTURE = ('"power outage" OR "power outages" OR "without power" OR "lost power" OR "water main break" '
+                         'OR "gas leak" OR "manhole fire" OR sinkhole OR "bridge collapse" OR "rolling blackouts"')
+GOOGLE_UNREST = ('protest OR protesters OR riot OR unrest OR looting OR curfew OR shooting OR "active shooter" '
+                 'OR bombing OR "bomb threat" OR terrorism OR "mass casualty"')
+
+
+def _foreign_site(site: str) -> bool:
+    """A website under another country's domain: news.co.uk, dtnext.in, glavnoe.in.ua."""
+    labels = site.lower().split("/")[0].split(".")
+    return len(labels) > 1 and len(labels[-1]) == 2 and labels[-1] != "us"
+
+
+def google_news_url(query: str) -> str:
+    return GOOGLE_NEWS_URL + urllib.parse.urlencode({"q": f"{query} when:1d", "hl": "en-US", "gl": "US",
+                                                     "ceid": "US:en"})
+
+
+def fetch_google_news() -> list[Message]:
+    """Stories from the last day about failing infrastructure, then unrest and violence; kept when
+    about a covered area. Infrastructure stories get their urgency by place, as GDELT's do."""
+    messages = _google_news(GOOGLE_INFRASTRUCTURE, infrastructure=True)
+    seen = {message.fields["message_id"] for message in messages}
+    return messages + [m for m in _google_news(GOOGLE_UNREST) if m.fields["message_id"] not in seen]
+
+
+def _google_news(query: str, infrastructure: bool = False) -> list[Message]:
+    from s2_watch.infrastructure import infrastructure_urgency
+
+    root = ElementTree.fromstring(_get(google_news_url(query)))
+    messages = []
+    for item in root.iterfind("./channel/item"):
+        title = " ".join((item.findtext("title") or "").split())
+        source = item.find("source")
+        outlet = (source.text or "").strip() if source is not None else ""
+        site = re.sub(r"^https?://(?:www\.|m\.)?", "", source.get("url", "") if source is not None else "").strip("/")
+        if outlet and title.endswith(f" - {outlet}"):        # "Power outage near GWU - WUSA9"
+            title = title[:-len(outlet) - 3].strip()
+        if not title or not covered_text(title) or (_place(title) is None and (
+                _foreign_site(site) or (world.COVERAGE == {"us"} and world.mentions_abroad(title)))):
+            continue    # Google's U.S. edition carries world news too: an unplaced story must look American
+        link = item.findtext("link") or ""
+        fields = {"type": "NEWS", "sender": site or outlet, "message_id": item.findtext("guid") or link,
+                  "url": link, "source": "Google News", "outlet": outlet}
+        if infrastructure:
+            urgency, why = infrastructure_urgency(title, _place(title))
+            fields.update({"topic": "infrastructure", "urgency": urgency, "urgency_reason": why})
+        received = _feed_date(item.findtext("pubDate") or "") or datetime.now(timezone.utc)
+        messages.append(Message(APPLICATION, title, received_at=received, fields=fields))
     return messages
 
 
@@ -354,6 +407,7 @@ SOURCE_LABELS = {
     "faa": "FAA security flight restrictions (TFRs)",
     "state": "State Department travel advisories",
     "gdelt": "News reports of unrest, violence and infrastructure failures (GDELT)",
+    "gnews": "News reports of unrest, violence and infrastructure failures (Google News)",
 }
 
 
@@ -371,7 +425,7 @@ def last_updated(name: str) -> datetime | None:
 
 from s2_watch.adapters import osint_more  # noqa: E402  (the newer sources)
 
-FETCHERS = {"gdelt": fetch_gdelt, "faa": fetch_faa_security_tfrs, "state": fetch_state_advisories,
+FETCHERS = {"gdelt": fetch_gdelt, "gnews": fetch_google_news, "faa": fetch_faa_security_tfrs, "state": fetch_state_advisories,
             "fema": fetch_fema_declarations, "usgs": fetch_usgs_earthquakes, "spc": fetch_spc_storm_reports,
             "nifc": fetch_nifc_wildfires, **osint_more.FETCHERS}
 SOURCE_LABELS.update(osint_more.SOURCE_LABELS)
@@ -380,7 +434,7 @@ DEFAULT_OFF = set(osint_more.DEFAULT_OFF)
 # Sources about the U.S. only: paused while the coverage leaves the U.S. out.
 US_ONLY = {"faa", "fema", "spc", "nifc", "ipaws", "lsr", "rivers", "airports", "firms", "cbp"}
 # Sources whose items depend on the coverage: fetched again when it changes.
-COVERAGE_DEPENDENT = {"gdelt", "usgs", "gdacs", "ioda", "nhc"}
+COVERAGE_DEPENDENT = {"gdelt", "gnews", "usgs", "gdacs", "ioda", "nhc"}
 
 
 class OsintAdapter:
