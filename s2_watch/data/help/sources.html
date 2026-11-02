@@ -33,15 +33,38 @@ W5ABC-10: BLN2: Flooding in Joplin, MO [W5ABC-10 position: lat 36.1540, lon -95.
 
 <h2>Official and open sources (OSINT)</h2>
 <p>NWS alerts, storm reports and river gauges; the National Hurricane Center; USGS earthquakes and volcanoes;
-NOAA SPC storm reports; NIFC wildfires; FEMA declarations and local public alerts (IPAWS); NOAA space weather;
+NOAA SPC storm reports; NIFC wildfires; FEMA declarations and local public alerts (IPAWS, placed at the area the alert
+outlines and named with its county, e.g. <i>Sedona 8-9-10, Coconino County, AZ</i>); NOAA space weather;
 FAA security restrictions, airport closures and ground stops; State Department advisories; internet outages (IODA);
-news about unrest and violence (GDELT). Off by default: worldwide disasters (GDACS), newly exploited software flaws
+news about unrest and violence, and about failing infrastructure (GDELT; see below). Off by default: worldwide disasters (GDACS), newly exploited software flaws
 (CISA), closed border crossings (CBP) and satellite heat detections (NASA FIRMS, which needs a free map key entered
 under Sources). FIRMS reports clusters of 6 or more detections in the last 24 hours at low urgency, worded “a fire, a field burn or
 industrial heat”: in season most are crop or sugarcane burns, steel mills or volcanoes, not wildfires.</p>
 <p>Each source has a switch, how often it is fetched, and its status: <b>Configuration → Watch Forms</b> (the submenu
 or the page). Turning one off stops it at once and takes its items off the map; reports already saved stay until
 they leave the watch period.</p>
+
+<h2>Infrastructure news: where matters more than how many</h2>
+<p>A second GDELT news search looks for power outages, people without power, water main breaks, gas leaks, manhole fires,
+sinkholes, bridge collapses and rolling blackouts. Each story becomes an Infrastructure report whose urgency comes from
+<i>where</i> it is rather than from how many customers lost service:</p>
+<table>
+<tr><th>Urgency</th><th>When</th></tr>
+<tr><td>High</td><td>It names a critical site: a hospital, airport, military base, the White House, Capitol or Pentagon, a federal
+building or embassy, police, fire, 911 or emergency operations, a water or power plant, a data center, or Metro, subway or other
+transit. Or it is anywhere in Washington, DC. Or it is very large: 100,000 customers or more, statewide, rolling blackouts, a grid
+emergency or a state of emergency.</td></tr>
+<tr><td>Medium</td><td>It is in a state capital, or affects 10,000 customers or more, thousands of people, a whole city or county, or
+schools and universities.</td></tr>
+<tr><td>Low</td><td>The rest: a neighbourhood losing power for a while.</td></tr>
+</table>
+<p>A headline that names no place is placed by its story's web address, which often ends with it
+(<code>…-h-street-northwest-dc</code>).</p>
+<div class="example"><p><b>Example.</b> <i>Power outages hit Foggy Bottom as crews investigate smoke from manholes</i> (WJLA, about 1,200
+Pepco customers) → Infrastructure, <b>high</b>, Washington, DC, because it is in the national capital. <i>Power outage leaves 2,000
+without power in Tulsa</i> → low. <i>Thousands without power in Columbus, Ohio</i> → medium (a state capital).</p></div>
+<p>Washington, DC is recognised however it is written: Washington, DC or D.C., “in DC”, “Northwest DC”, “DC police”, or the
+Washington Monument, Navy Yard and George Washington University. “Washington” alone is still the state, and “12V DC” isn't a place.</p>
 
 <h2>Coverage: which parts of the world</h2>
 <p><b>Configuration → Coverage</b> chooses the areas S2 Watch reports from: <b>United States</b> (the default), <b>North America</b>

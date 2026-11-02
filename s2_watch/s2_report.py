@@ -182,6 +182,28 @@ def _place(state: str, region, label: str = "") -> str:
     return ", ".join(dict.fromkeys(parts)) or "United States"
 
 
+def where(lat: float | None = None, lon: float | None = None, label: str = "", state: str = "") -> str:
+    """The most specific way to say where something is, for a BLUF: a place name with its
+    coordinates ("Sedona 8-9-10, Coconino County, AZ (34.867, -111.761)"); a grid square or a
+    bare coordinate named by its town or county; else the state; else ""."""
+    from s2_watch.locating import describe_point, load_gazetteer
+
+    if lat is None or lon is None:
+        return label or load_gazetteer().state_names.get(state or "", state or "")
+    generic = not label or label.startswith(("Coordinates", "Grid ", "StatRep area", "Station "))
+    if generic:
+        named = describe_point(lat, lon)
+        grid = label.split()[-1] if label.startswith(("Grid ", "StatRep area")) else ""
+        label = f"{named} (grid {grid})" if named and grid else named or label
+    return f"{label} ({lat:.3f}, {lon:.3f})" if label else f"{lat:.3f}, {lon:.3f}"
+
+
+def event_where(event) -> str:
+    """Where an event is, as precisely as its reports put it."""
+    points = getattr(event, "points", None) or []
+    return where(*points[0], state=event.state) if points else where(state=event.state)
+
+
 # -- follow-up report (one report or event) ----------------------------------------------
 
 def followup_report(facts, members: list[dict] | None = None, now: datetime | None = None,
@@ -223,8 +245,9 @@ def followup_report(facts, members: list[dict] | None = None, now: datetime | No
     when = (f"on {period_label(first, last)}" if first.date() == last.date()
             else f"between {period_label(first, last)}")
     names = " and ".join(sources) if len(sources) <= 2 else ", ".join(sources[:-1]) + f" and {sources[-1]}"
+    place = where(point.lat, point.lon, label, point.state or facts.state) if point is not None else focus
     bluf = [f"{count} report{'s' if count != 1 else ''} from {names} {when} concern {subject.split(' — ')[0]} "
-            f"in {focus}."]
+            f"in {place}."]
     if confirmed:
         names = official or ", ".join(sorted({m['sender'] for m in official_members}))
         bluf.append(f"Official reporting ({names}) corroborates the activity.")
@@ -337,7 +360,7 @@ def briefing_report(events, now: datetime, hours: int, focus: set[int] | None = 
     bluf = [f"{len(events)} events {reported} ({counts['high']} high and {counts['medium']} medium urgency); "
             f"{confirmed} are corroborated by official sources."]
     if top:
-        bluf.insert(0, f"Most significant: {titles[top.event_id]} ({top.state or 'location unknown'}).")
+        bluf.insert(0, f"Most significant: {titles[top.event_id]} — {event_where(top) or 'location unknown'}.")
     if last_briefing:
         bluf.append(f"{len(new)} are new since the last briefing.")
     if resolved:

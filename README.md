@@ -194,7 +194,8 @@ timeline, Comments / Assessment with a probability table, Intelligence Gaps, Mit
 Recommendations, MAGNET Guidance and the Source List with suggested Admiralty ratings.
 
 S2 Watch fills what its data supports (routing, BLUF, Background, Situation, timeline, gaps, sources,
-up to 15 WordPress tags); the analysis sections start as prompts in parentheses. With
+up to 15 WordPress tags); the BLUF names the place as exactly as known (the reported place with
+coordinates; a grid square or coordinate by its nearby town or county; else the state); the analysis sections start as prompts in parentheses. With
 Ollama, **Suggest assessment** drafts the analysis for the analyst to check: for a report on
 an event, the COMMENTS / ASSESSMENT paragraphs with the trend and a probability table,
 INTELLIGENCE GAPS, MITIGATION RECOMMENDATIONS and MAGNET GUIDANCE, citing the SOURCE LIST.
@@ -633,7 +634,12 @@ the area as a dashed circle. Metrics and aircraft still use the regions.
 light and an "All OSINT reports" watch form. It collects free, keyless open and
 official sources on a background thread: US news about protests, riots, unrest,
 shootings, bombings and terrorism from the GDELT news search (news-derived, not
-official; every 30 minutes), FAA security flight restrictions (mostly VIP movements
+official; every 30 minutes), with a second GDELT search for failing infrastructure
+(power outages, water main breaks, gas leaks, manhole fires, sinkholes, bridge collapses)
+whose urgency follows where it is rather than its size: critical sites (hospitals,
+airports, government and military sites, 911, water and power plants, transit) and
+Washington, DC are high, state capitals and large outages medium, the rest low
+(`s2_watch/infrastructure.py`), FAA security flight restrictions (mostly VIP movements
 and security events; every 30 minutes), State Department travel advisories whose
 level or risks changed in the last 30 days, FEMA disaster and emergency declarations
 (hourly), USGS earthquakes (every 10 minutes), SPC tornado, wind and hail reports
@@ -655,7 +661,8 @@ Added in 0.29 (each can be switched off under Configuration → Watch Forms):
 - **National Hurricane Center** active storms with position, winds and movement.
 - **Local public alerts (FEMA IPAWS)**: evacuations, shelter-in-place, law enforcement
   warnings, AMBER and missing-person alerts, road closures, from local authorities (the
-  weather service's own are left out). FEMA's archive runs about a day behind, so these
+  weather service's own are left out). Each is placed at the middle of the area it outlines
+  and labelled with the alert's area name and its county (from the SAME code). FEMA's archive runs about a day behind, so these
   alerts only appear with a watch period of 2 days or more (Configuration → Sources).
 - **Space weather (NOAA SWPC)**: radio blackouts R2+, radiation storms S2+, geomagnetic
   storms G3+, which affect HF propagation.

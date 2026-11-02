@@ -74,6 +74,13 @@ RADIOLOGICAL_PATTERNS = (
     r"\bnuclear\s+(?:incidents?|accidents?|releases?|leaks?|emergenc(?:y|ies)|disasters?|power\s+plant\s+warnings?)\b",
     r"\b(?:radiological|radioactive|nuclear)\s+contamination\b", r"\bcontamination\s+beyond\b",
 )
+# Outage wording the topic vocabulary misses: "1,176 customers lost power", "manhole fire".
+INFRASTRUCTURE_PATTERNS = (
+    r"\b(?:lost|lose|loses|losing)\s+power\b", r"\bknock(?:s|ed|ing)?\s+out\s+(?:the\s+)?power\b",
+    r"\bpower\s+(?:was\s+)?knocked\s+out\b", r"\bmanholes?\s+(?:fires?|explosions?|smok\w*)\b",
+    r"\bsmoke\s+from\s+(?:a\s+)?manholes?\b", r"\bsinkholes?\b", r"\bgas\s+explosions?\b",
+    r"\bbridge\s+collapses?\b",
+)
 WEATHER_PATTERNS = (
     r"\b(?:high|intense|oppressive)\s+heat\b",
     r"\bheat\s*(?:advisor(?:y|ies)|index|indices|waves?|domes?|exhaustion|strokes?|illness(?:es)?)\b",
@@ -124,6 +131,7 @@ class RuleBasedNewsAnalyzer(NewsAnalyzer):
         Rule("Crime", ("missing person", "burglary", "robbery", "arrest", "murder", "shooting", "shots fired",
                        "stabbing", "homicide", "active shooter"), "high"),
         Rule("Infrastructure", ("power outage", "bridge closed", "road closed", "water main", "communications outage"), "medium"),
+        Rule("Infrastructure", (), "medium", INFRASTRUCTURE_PATTERNS),
         Rule("Health / Wellness", ("medical emergency", "ambulance", "injured", "outbreak", "hospital"), "high"),
         Rule("Civil Unrest", (), "high", SEVERE_UNREST_PATTERNS),
         Rule("Civil Unrest", (), "medium", UNREST_PATTERNS),
@@ -199,6 +207,13 @@ class RuleBasedNewsAnalyzer(NewsAnalyzer):
         if contained and rule.urgency == "high":
             percent = int(contained.group(1))
             urgency = "low" if percent >= 90 else "medium" if percent >= 50 else urgency
+        category = rule.category
+        if message.fields.get("topic") == "infrastructure" and message.source_application == "OSINT":
+            # A failing-infrastructure story: its urgency comes from where it is (s2_watch.infrastructure),
+            # and "blackout at a hospital" is Infrastructure news, not Health.
+            if any(matched.category == "Infrastructure" for matched, _ in matches):
+                category = "Infrastructure"
+            urgency = message.fields.get("urgency") if message.fields.get("urgency") in rule_by_priority else urgency
         summary = message.raw_content
         if message.fields.get("type") == "ALERTS" and message.fields.get("severity"):
             summary = f"MagCommstat alert (severity {message.fields['severity']}): {summary}"
@@ -206,7 +221,7 @@ class RuleBasedNewsAnalyzer(NewsAnalyzer):
             summary = f"StatRep for {message.fields['scope']}: {summary}"
         return AnalysisResult(
             True,
-            rule.category,
+            category,
             urgency,
             summary,
             confidence,

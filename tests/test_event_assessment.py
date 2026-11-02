@@ -1,7 +1,7 @@
 """Ollama's assessment of a whole event: the prompt, checking the reply, the panel and the draft."""
 
 import json
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from PySide6.QtWidgets import QApplication
@@ -161,9 +161,10 @@ def test_the_reports_menu_assesses_the_selected_event(tmp_path, main_window, mon
     monkeypatch.setattr(EventDetail, "assess", lambda self: started.append(self.current.event_id))
     action.trigger()                                            # nothing selected: says so
     assert not started and "Select an event first" in window.statusBar().currentMessage()
-    event_id = add(window.store, "MagCommstat", "TULSA OK - RIVER FLOODING", T0, TULSA, fields={"sender": "K1ABC"})
+    heard = datetime.now(timezone.utc) - timedelta(hours=1)    # inside the watch period whatever today is
+    event_id = add(window.store, "MagCommstat", "TULSA OK - RIVER FLOODING", heard, TULSA, fields={"sender": "K1ABC"})
     window.review_duration.setCurrentIndex(window.review_duration.count() - 1)
-    [event] = [e for e in window.store.events_since(T0 - timedelta(days=1)) if e.event_id == event_id]
+    [event] = [e for e in window.store.events_since(heard - timedelta(days=1)) if e.event_id == event_id]
     window.map_events.set_events([event])
     window.assess_event_id(event_id)                            # as the right-click item does
     assert started == [event_id] and window.map_event_detail.current.event_id == event_id

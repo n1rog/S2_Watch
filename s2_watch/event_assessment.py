@@ -54,7 +54,7 @@ Background (facts):
 {reports}
 
 Write exactly these sections, each heading on its own line, then the end marker:
-BLUF: 2-3 sentences, the current situation first.
+BLUF: 2-3 sentences, the current situation first, saying where it is (the place above, or a more exact one the reports give).
 TREND: one of escalating, stable, winding down, unclear; then why, with citations.
 AGREEMENT: one sentence: do the reports agree or contradict each other? Cite them.
 ASSESSMENT: one or two short paragraphs.
@@ -135,7 +135,9 @@ def event_brief(event, reports: list[dict], background: list[str] | None = None)
     else:
         lines = ["REPORTS, oldest to newest (the last one is the current situation):"]
         lines += [_line(*item) for item in chosen]
-    place = ", ".join(part for part in (event.state, f"MARS Region {event.region}" if event.region else "") if part)
+    from s2_watch.s2_report import event_where
+
+    place = ", ".join(part for part in (event_where(event), f"MARS Region {event.region}" if event.region else "") if part)
     facts = [line for line in (background or []) if not line.startswith("(")]
     return PROMPT.format(title=event.title, category=event.category, place=place or "unknown",
                          urgency=event.urgency, official=event.official or "none yet", count=len(reports),

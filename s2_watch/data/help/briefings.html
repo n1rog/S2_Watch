@@ -25,6 +25,14 @@ and <b>Mark report “Follow-up created”</b> / <b>Mark briefing sent</b>.</p>
 <p>The routing table (Subject, Purpose, DTG, Reporting Period, Geographic Focus, Precedence, MagCon Status, Sources), then Summary (BLUF),
 Background, Situation with a timeline, Comments / Assessment with a probability table, Intelligence Gaps, Mitigation Recommendations,
 MAGNET Guidance, the Source List and tags. S2 Watch fills what its data supports; the analysis sections start as prompts.</p>
+<p><b>The BLUF says where</b>, as exactly as the reports allow: the place a report names with its coordinates; for a grid square or
+bare coordinates, the town within 15 km or else the county; failing that, the state. A follow-up's first BLUF sentence ends with
+it, and a briefing's “Most significant” line names it; Ollama assessments are asked to name it too.</p>
+<div class="example"><pre>1 report from OSINT on 01 Nov 2026 1502Z concern Public alert (IPAWS): Evacuation Immediate in Sedona 8-9-10,
+Coconino County, AZ (34.867, -111.761).
+Most significant: Evacuation Immediate — Coconino County, AZ (34.867, -111.761).
+K6NLX's report sent from DM43FJ → Pinal County, AZ (grid DM43FJ) (33.396, -111.542)</pre>
+<p>A grid square is often where the <i>sending station</i> is, not where the news is: check the report's text before relying on it.</p></div>
 <p><b>Background</b> is filled with facts S2 Watch has, then a short prompt for what only you know (what is normal for the area or
 hazard, the basis for the MagCon status):</p>
 <ul>

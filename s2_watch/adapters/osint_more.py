@@ -75,11 +75,42 @@ def fetch_ipaws(hours: int = 72) -> list[Message]:
             sender = re.sub(r"^[\d,\s]+", "", sender).strip(" ,") or sender
             words = " ".join((info.get("headline") or info.get("description") or "").split())[:300]
             text = " — ".join(part for part in (f"Public alert (IPAWS): {event}", words, areas) if part)
-            messages.append(Message(APPLICATION, text, received_at=_iso(alert["sent"]), fields={
-                "type": "IPAWS ALERT", "sender": sender, "message_id": alert.get("identifier", text),
-                "source": "FEMA IPAWS", "official": "1",
-            }))
+            fields = {"type": "IPAWS ALERT", "sender": sender, "message_id": alert.get("identifier", text),
+                      "source": "FEMA IPAWS", "official": "1", **ipaws_area(info.get("area") or [])}
+            messages.append(Message(APPLICATION, text, received_at=_iso(alert["sent"]), fields=fields))
     return messages
+
+
+def ipaws_area(areas: list[dict]) -> dict[str, str]:
+    """Where an alert applies: the middle of its first outline ("lat", "lon"), its county from the
+    SAME code ("county", "state") and its own name for the area ("area", e.g. "Sedona 8-9-10")."""
+    from s2_watch.locating import county_by_fips
+
+    found: dict[str, str] = {}
+    for area in areas:
+        points = _outline(area.get("polygon"))
+        if points and "lat" not in found:
+            found["lat"] = f"{sum(lat for lat, _ in points) / len(points):.4f}"
+            found["lon"] = f"{sum(lon for _, lon in points) / len(points):.4f}"
+        for code in area.get("geocode") or []:
+            county = county_by_fips(str(code.get("value", ""))[-5:]) if code.get("name") == "SAME" else None
+            if county and "county" not in found:
+                found.update({"county": f"{county['name']} {county['kind']}", "state": county["state"]})
+        description = (area.get("areaDesc") or "").strip()
+        if description and "area" not in found and not _IPAWS_NO_AREA.fullmatch(description):
+            found["area"] = description
+    return found
+
+
+def _outline(polygon) -> list[tuple[float, float]]:
+    """(lat, lon) points of a GeoJSON polygon, or of CAP's "lat,lon lat,lon ..." text."""
+    if isinstance(polygon, dict):
+        rings = polygon.get("coordinates") or []
+        return [(float(lat), float(lon)) for lon, lat, *_ in (rings[0] if rings else [])]
+    if isinstance(polygon, str):
+        pairs = [pair.split(",") for pair in polygon.split()]
+        return [(float(pair[0]), float(pair[1])) for pair in pairs if len(pair) == 2]
+    return []
 
 
 # -- NOAA SWPC: space weather that affects HF radio --------------------------------------

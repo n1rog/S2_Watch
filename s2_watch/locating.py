@@ -20,6 +20,7 @@ names are looked up in bundled gazetteers rather than spotted by capitalisation.
 """
 
 import json
+import math
 import re
 import unicodedata
 from dataclasses import dataclass, field, replace
@@ -43,7 +44,7 @@ GENERAL_LEVELS = {"state", "region", "country"}
 
 _WORD = r"[A-Z][A-Z.'-]*"
 _LOCATIVE = re.compile(
-    r"\b(?:IN|NEAR|AT|AROUND|OUTSIDE(?:\s+OF)?|FROM|OF|TO|ACROSS|THROUGH)\s+"
+    r"\b(?:IN|NEAR|AT|AROUND|OUTSIDE(?:\s+OF)?|FROM|OF|TO|ACROSS|THROUGH|DOWNTOWN)\s+"
     rf"({_WORD}(?:\s+{_WORD}){{0,2}})"
 )
 _COUNTY = re.compile(rf"\b({_WORD}(?:\s+{_WORD}){{0,2}})\s+(?:COUNTY|CNTY|CO\.|PARISH|BOROUGH)(?![A-Z])")
@@ -58,6 +59,38 @@ _STATUS_LINE = re.compile(r",[A-R]{2}[0-9]{2}(?:[A-X]{2})?,\d+,[A-Z0-9]{3},", re
 _NAME_CONTINUATIONS = {"DEL", "DE", "LA", "LAS", "LOS", "EL", "DA", "DO", "DI"}
 _URL = re.compile(r"(?:https?://|www\.)\S+", re.IGNORECASE)
 _PREPOSITIONS = re.compile(r"\b(?:IN|NEAR|AT|AROUND|OUTSIDE|OF|FROM|TO|ACROSS|THROUGH|AND)\b")
+# Washington, DC, however it is written, becomes "WASHINGTON, DC". A bare "DC" counts only
+# where it is plainly a place ("IN DC", "NORTHWEST DC", "DC POLICE"), not "12V DC".
+DC_ANCHOR = (38.9072, -77.0369)
+_DC_DOTS = re.compile(r"\bD\.\s?C\.?(?![A-Z])")
+_DC_NAMES = re.compile(
+    r"\bWASHINGTON,?\s+DC\b|\bDISTRICT\s+OF\s+COLUMBIA\b"
+    r"|\bWASHINGTON\s+(?:MONUMENT|NAVY\s+YARD)\b|\bGEORGE\s+WASHINGTON\s+UNIVERSITY\b"
+    r"|\b(?:(IN|NEAR|ACROSS|AROUND|OUTSIDE|THROUGHOUT)\s+)?(?:DOWNTOWN|UPTOWN|NORTHWEST|NORTHEAST|SOUTHWEST|SOUTHEAST|"
+    r"NW|NE|SW|SE)\s+DC\b"
+    r"|\b(IN|NEAR|ACROSS|AROUND|OUTSIDE|THROUGHOUT)\s+DC\b"
+    r"|\bDC(?=\s+(?:AREA|REGION|METRO|POLICE|FIRE|MAYOR|COUNCIL|RESIDENTS|NEIGHBORHOODS?|STREETS?|HOMES|CUSTOMERS)\b)"
+)
+# "WASHINGTON" alone is the state, but not in these names.
+_NOT_THE_STATE = {"WASHINGTON": r"(?<!GEORGE\s)WASHINGTON(?!\s+(?:MONUMENT|NATIONALS|COMMANDERS|WIZARDS|CAPITALS|"
+                                r"MYSTICS|POST|DULLES|UNIVERSITY|HOSPITAL|MEMORIAL|NAVY\s+YARD|BOULEVARD|BLVD|"
+                                r"AVENUE|AVE|STREET|SQUARE|HEIGHTS|BRIDGE|CIRCLE)\b)"}
+# A news story's web address often names its place: ".../power-outages-hit-h-street-northwest-dc".
+_SLUG_JUNK = re.compile(r"\.(?:s?html?|php|aspx?)$|\b\d+\b|_")
+
+
+def dc_named(upper: str) -> str:
+    """The text with each way of naming Washington, DC written "WASHINGTON, DC"."""
+    upper = _DC_DOTS.sub("DC", upper)
+    # Each becomes a phrase of its own, "IN WASHINGTON, DC", so the words before it ("H STREET
+    # NORTHWEST DC") aren't read as part of the city's name.
+    return _DC_NAMES.sub(lambda match: f" {match.group(1) or match.group(2) or 'IN'} WASHINGTON, DC", upper)
+
+
+def url_place_words(url: str) -> str:
+    """The words of a story's address after the site name, for finding its place."""
+    path = re.sub(r"^(?:https?://)?[^/]+", "", url or "").split("?")[0]
+    return " ".join(_SLUG_JUNK.sub(" ", path.replace("-", " ").replace("/", " ")).split())
 
 
 @dataclass(frozen=True)
@@ -161,6 +194,33 @@ def _county_shapes() -> list[tuple[str, tuple[float, float, float, float], list]
 
 
 @lru_cache(maxsize=1)
+def _counties_by_fips() -> dict[str, dict]:
+    return {county["fips"]: county for county in json.loads((DATA_DIR / "us_counties.json").read_text(encoding="utf-8"))}
+
+
+def county_by_fips(fips: str) -> dict | None:
+    """A county's entry (name, kind, state, lat, lon) from its five-digit FIPS code."""
+    return _counties_by_fips().get(fips)
+
+
+NEAR_TOWN_KM = 15
+
+
+def describe_point(lat: float, lon: float) -> str:
+    """A point as a reader would name it: the bundled town within NEAR_TOWN_KM ("Tulsa, OK"),
+    else its county ("Coconino County, AZ"), else ""."""
+    gazetteer = load_gazetteer()
+    scale = math.cos(math.radians(lat))
+    towns = [entry for entries in gazetteer.places.values() for entry in entries]
+    if towns:
+        town = min(towns, key=lambda e: (e["lat"] - lat) ** 2 + ((e["lon"] - lon) * scale) ** 2)
+        if math.hypot(town["lat"] - lat, (town["lon"] - lon) * scale) * 111.2 <= NEAR_TOWN_KM:
+            return f"{town['name']}, {town['state']}"
+    county = county_by_fips(gazetteer.county_at(lat, lon) or "")
+    return f"{county['name']} {county['kind']}, {county['state']}" if county else ""
+
+
+@lru_cache(maxsize=1)
 def load_gazetteer() -> Gazetteer:
     regions = json.loads((DATA_DIR / "mars_regions.geojson").read_text(encoding="utf-8"))
     state_names, state_region, state_anchor, region_anchor, region_shapes = {}, {}, {}, {}, {}
@@ -175,6 +235,11 @@ def load_gazetteer() -> Gazetteer:
         geometry = feature["geometry"]
         polygons = geometry["coordinates"] if geometry["type"] == "MultiPolygon" else [geometry["coordinates"]]
         region_shapes[region] = [[[tuple(point) for point in ring] for ring in polygon] for polygon in polygons]
+    if "DC" not in state_names:    # the MARS region data lists states only
+        state_names["DC"] = "District of Columbia"
+        state_region["DC"] = next((region for region, shapes in region_shapes.items()
+                                   if any(_point_in_polygon(*DC_ANCHOR, polygon) for polygon in shapes)), 3)
+        state_anchor["DC"] = DC_ANCHOR
     state_by_name = {name.upper(): abbreviation for abbreviation, name in state_names.items()}
 
     counties: dict[str, list[dict]] = {}
@@ -184,15 +249,18 @@ def load_gazetteer() -> Gazetteer:
     for place in json.loads((DATA_DIR / "places.json").read_text(encoding="utf-8")):
         state = state_by_name.get(place["admin1"].upper())
         if place["country"] == "USA" and state:
+            if state == "DC":    # listed as "Washington, D.C."; found as "WASHINGTON, DC"
+                place = {**place, "name": "Washington"}
             places.setdefault(normalize(place["name"]), []).append({**place, "state": state})
     return Gazetteer(state_names, state_by_name, state_region, state_anchor, region_anchor,
                      region_shapes, counties, places)
 
 
 def _state_names_pattern(gazetteer: Gazetteer) -> re.Pattern:
-    names = sorted((re.escape(name) for name in gazetteer.state_by_name), key=len, reverse=True)
+    names = sorted((_NOT_THE_STATE.get(name, re.escape(name)) for name in gazetteer.state_by_name),
+                   key=len, reverse=True)
     # "Washington County" and "New York City" are not the states.
-    return re.compile(r"\b(" + "|".join(names) + r")\b(?!\s+(?:COUNTY|CO\.|PARISH|CITY)\b)")
+    return re.compile(r"\b(" + "|".join(names) + r")\b(?!\s+(?:COUNTY|CO\.|PARISH|CITY)\b)(?!,?\s*DC\b)")
 
 
 # A headline's trailing outlet name: "French protests kick off | The Peninsula Qatar".
@@ -258,11 +326,18 @@ class LocationResolver:
                 return [corrected]
         if message.fields.get("type") == "BULLETIN" and message.fields.get("lat"):
             return self._bulletin(message)
+        if message.fields.get("type") == "IPAWS ALERT" and message.fields.get("lat"):
+            return self._alert_area(message)
         headline = without_outlet(message)
         if headline is not message:
             # The headline's own places first; a local outlet's ("– NBC Chicago") only when it names none.
-            return self._resolve(headline) or self._resolve(message)
-        return self._resolve(message)
+            found = self._resolve(headline) or self._resolve(message)
+        else:
+            found = self._resolve(message)
+        if not found and message.fields.get("type") == "NEWS" and message.fields.get("url"):
+            # Last, the story's address: "/power-outages-hit-foggy-bottom-h-street-northwest-dc".
+            found = self._resolve(replace(message, raw_content=url_place_words(message.fields["url"])))
+        return found
 
     def _bulletin(self, message: Message) -> list[ResolvedLocation]:
         """An APRS bulletin: the places its text names; else where its station is (the position
@@ -280,11 +355,25 @@ class LocationResolver:
         station = message.fields.get("station") or message.fields.get("sender", "")
         return [self._abroad(self.gazetteer.with_area(ResolvedLocation("precise", lat, lon, f"Station {station}")))]
 
+    def _alert_area(self, message: Message) -> list[ResolvedLocation]:
+        """A public alert names the area it covers: placed at the middle of its outline, labelled
+        with its own name for the area and its county ("Sedona 8-9-10, Coconino County, AZ")."""
+        try:
+            lat, lon = float(message.fields["lat"]), float(message.fields["lon"])
+        except (KeyError, ValueError):
+            return self._resolve(message)
+        fields = message.fields
+        county = f"{fields['county']}, {fields.get('state', '')}".strip(", ") if fields.get("county") else ""
+        label = ", ".join(part for part in (fields.get("area", ""), county or describe_point(lat, lon)) if part)
+        return [self._abroad(self.gazetteer.with_area(
+            ResolvedLocation("precise", lat, lon, label or f"Coordinates {lat:.3f}, {lon:.3f}",
+                             fields.get("state") or None)))]
+
     def _resolve(self, message: Message) -> list[ResolvedLocation]:
         fields = {key.casefold(): str(value) for key, value in message.fields.items()}
         # Numbers and words inside links are not locations.
         text = _URL.sub(" ", message.raw_content)
-        upper = normalize_text(text)
+        upper = dc_named(normalize_text(text))
         context = self._context(upper, text, fields)
         for level in LEVELS:
             found = getattr(self, f"_{level}")(upper, text, fields, context, message)

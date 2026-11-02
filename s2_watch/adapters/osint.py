@@ -2,7 +2,9 @@
 
 Sources (all free, no key; each fetched on its own schedule on a background thread):
 - GDELT news search: US news about protests, riots, unrest, shootings, bombings and
-  terrorism in the last day (news-derived, not official).
+  terrorism in the last day (news-derived, not official); and, in a second search, failing
+  infrastructure (power outages, water main breaks, gas leaks, collapses), each given an
+  urgency by where it is (s2_watch.infrastructure).
 - FAA temporary flight restrictions of type SECURITY (VIP movements, security events).
 - U.S. State Department travel advisories updated recently (threats to Americans abroad).
 - FEMA disaster and emergency declarations.
@@ -33,13 +35,18 @@ APPLICATION = "OSINT"
 USER_AGENT = f"S2-Watch/{__version__} (https://github.com/n1rog/S2_Watch)"
 GDELT_TOPICS = ('(protest OR protesters OR riot OR unrest OR "civil unrest" OR looting OR curfew OR shooting '
                 'OR "active shooter" OR bombing OR "bomb threat" OR terrorism OR terrorist OR "mass casualty")')
+# GDELT refuses a query much longer than this ("Your query was too short or too long").
+GDELT_INFRASTRUCTURE = ('("power outage" OR "power outages" OR "without power" OR "lost power" OR "water main break" '
+                        'OR "gas leak" OR "manhole fire" OR sinkhole OR "bridge collapse" OR "rolling blackouts")')
+# GDELT allows one request every 5 seconds; the infrastructure search waits this long after the other.
+GDELT_PAUSE_S = 6
 
 
-def gdelt_url() -> str:
+def gdelt_url(topics: str = GDELT_TOPICS) -> str:
     """U.S. news when the coverage is the United States alone; else English news from anywhere,
     kept when it is about a covered area (Configuration → Coverage)."""
     us_only = world.COVERAGE == {"us"}
-    query = f"{GDELT_TOPICS} {'sourcecountry:US ' if us_only else ''}sourcelang:english"
+    query = f"{topics} {'sourcecountry:US ' if us_only else ''}sourcelang:english"
     return "https://api.gdeltproject.org/api/v2/doc/doc?" + urllib.parse.urlencode(
         {"query": query, "mode": "ArtList", "format": "json", "maxrecords": 75 if us_only else 150,
          "timespan": "24h", "sort": "DateDesc"})
@@ -48,17 +55,21 @@ def gdelt_url() -> str:
 _RESOLVER = None
 
 
-def covered_text(text: str) -> bool:
-    """Whether a headline is about a covered area; one naming no place counts when the U.S. is covered."""
+def _place(text: str, url: str = ""):
+    """Where a headline (or failing that its story's address) puts it, or None."""
     global _RESOLVER
     from s2_watch.locating import LocationResolver
 
     if _RESOLVER is None:
         _RESOLVER = LocationResolver()
-    found = _RESOLVER.resolve(Message(APPLICATION, text))
-    if not found:
-        return world.covers("us")
-    return world.covers(world.location_area(found[0]))
+    found = _RESOLVER.resolve(Message(APPLICATION, text, fields={"type": "NEWS", "url": url} if url else {}))
+    return found[0] if found else None
+
+
+def covered_text(text: str, url: str = "") -> bool:
+    """Whether a headline is about a covered area; one naming no place counts when the U.S. is covered."""
+    place = _place(text, url)
+    return world.covers("us") if place is None else world.covers(world.location_area(place))
 FAA_TFR_URL = "https://tfr.faa.gov/tfrapi/exportTfrList"
 STATE_ADVISORIES_URL = "https://travel.state.gov/_res/rss/TAsTWs.xml"
 FEMA_URL = "https://www.fema.gov/api/open/v2/DisasterDeclarationsSummaries"
@@ -111,20 +122,43 @@ def _utc(value: datetime) -> datetime:
 
 
 def fetch_gdelt() -> list[Message]:
-    data = json.loads(_get(gdelt_url()) or b"{}")
+    """Unrest and violence, then failing infrastructure (a failed second search keeps the first)."""
+    messages = _gdelt_news(GDELT_TOPICS)
+    time.sleep(GDELT_PAUSE_S)
+    try:
+        infrastructure = _gdelt_news(GDELT_INFRASTRUCTURE, infrastructure=True)
+    except Exception:  # GDELT busy ("429"): the unrest news still counts; the next fetch tries again
+        if not messages:
+            raise
+        infrastructure = []
+    seen = {message.fields["message_id"] for message in messages}
+    return messages + [message for message in infrastructure if message.fields["message_id"] not in seen]
+
+
+def _gdelt_news(topics: str, infrastructure: bool = False) -> list[Message]:
+    from s2_watch.infrastructure import infrastructure_urgency
+
+    raw = _get(gdelt_url(topics)) or b"{}"
+    try:
+        data = json.loads(raw)
+    except ValueError:   # GDELT explains a refusal in plain text ("Please limit requests to one every 5 seconds")
+        raise RuntimeError("GDELT: " + raw.decode("utf-8", "replace").strip()[:120]) from None
     messages = []
     for article in data.get("articles", []):
         title = (article.get("title") or "").strip()
-        if not title or (world.COVERAGE != {"us"} and not covered_text(title)):
+        url = article.get("url", "")
+        if not title or (world.COVERAGE != {"us"} and not covered_text(title, url)):
             continue
         try:
             seen = datetime.strptime(article.get("seendate", ""), "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc)
         except ValueError:
             seen = datetime.now(timezone.utc)
-        messages.append(Message(APPLICATION, title, received_at=seen, fields={
-            "type": "NEWS", "sender": article.get("domain", ""), "message_id": article.get("url", title),
-            "url": article.get("url", ""), "source": "GDELT news",
-        }))
+        fields = {"type": "NEWS", "sender": article.get("domain", ""), "message_id": url or title,
+                  "url": url, "source": "GDELT news"}
+        if infrastructure:
+            urgency, why = infrastructure_urgency(title, _place(title, url))
+            fields.update({"topic": "infrastructure", "urgency": urgency, "urgency_reason": why})
+        messages.append(Message(APPLICATION, title, received_at=seen, fields=fields))
     return messages
 
 
@@ -319,7 +353,7 @@ SOURCE_LABELS = {
     "fema": "FEMA disaster declarations",
     "faa": "FAA security flight restrictions (TFRs)",
     "state": "State Department travel advisories",
-    "gdelt": "News reports of unrest and violence (GDELT)",
+    "gdelt": "News reports of unrest, violence and infrastructure failures (GDELT)",
 }
 
 

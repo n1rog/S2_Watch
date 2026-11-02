@@ -1,6 +1,6 @@
 """Searching the lists, the 400-row limit, and Local/Zulu reaching the events lists."""
 
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from PySide6.QtCore import Qt
 
 from s2_watch.storage import SQLiteStore
@@ -24,11 +24,12 @@ def test_search_finds_events_by_their_reports_text_and_ignores_the_row_limit(tmp
 
 def test_the_list_under_the_map_can_show_400_rows_and_zulu_reaches_the_events(tmp_path, main_window) -> None:
     store = SQLiteStore(tmp_path / "s2.db")
-    add(store, "MagCommstat", "TULSA OK - RIVER FLOODING, ROADS CLOSED", T0, TULSA)
+    heard = datetime.now(timezone.utc) - timedelta(hours=1)    # inside the watch period whatever today is
+    add(store, "MagCommstat", "TULSA OK - RIVER FLOODING, ROADS CLOSED", heard, TULSA)
     store.close()
     window = main_window()
     assert window.news_rows.maximum() == 400
-    window.review_duration.setCurrentIndex(window.review_duration.count() - 1)   # long enough to include T0
+    window.review_duration.setCurrentIndex(window.review_duration.count() - 1)
     window.events_view.period.setCurrentIndex(window.events_view.period.count() - 1)
     window.time_zone.setCurrentIndex(window.time_zone.findData("utc"))
     window.events_view.refresh()
