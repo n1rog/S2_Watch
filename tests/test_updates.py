@@ -3,6 +3,7 @@
 import io
 import sqlite3
 import subprocess
+import sys
 import tarfile
 import time
 from pathlib import Path
@@ -72,6 +73,7 @@ def test_a_download_is_unpacked_only_if_it_is_the_version_asked_for(tmp_path: Pa
     assert not (tmp_path / "escape.txt").exists()
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="the updater script is for Linux and macOS; Windows updates by hand")
 def test_the_updater_waits_for_s2_watch_to_close_then_backs_up_installs_and_reopens(tmp_path: Path) -> None:
     installer = 'echo "$@" > "$(dirname "$0")/../../../installed.txt"'
     source = updates.unpack(release(tmp_path, "0.99.0", installer), "0.99.0", tmp_path / "update")
