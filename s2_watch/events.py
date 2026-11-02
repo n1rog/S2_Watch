@@ -99,6 +99,7 @@ class EventSummary:
     closed_by: str = ""                 # "report" or "operator"
     exercise: bool = False              # its reports are exercise traffic
     independent_sources: int = 0        # distinct stations and outlets (copies and relays count once)
+    placed: list[tuple[float, float, str]] = field(default_factory=list)   # each point with its level ("city", "state")
 
     def single_source(self, now: datetime) -> bool:
         """Radio reported it, but only one station (or outlet) has, no official source has

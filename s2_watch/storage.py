@@ -963,7 +963,7 @@ class SQLiteStore:
         rows = self.connection.execute(
             """SELECT e.id, e.title, e.category, e.state, e.region, e.first_seen, e.last_seen,
                       r.first_seen, r.sources, r.first_source, r.urgency, r.corroboration, r.status, r.lat, r.lon,
-                      r.sender, e.closed_at, e.close_reason, e.closed_by, r.exercise, r.official
+                      r.sender, e.closed_at, e.close_reason, e.closed_by, r.exercise, r.official, r.place_level
                FROM events e JOIN reports r ON r.event_id = e.id
                WHERE e.last_seen >= ? AND r.newsworthy = 1
                ORDER BY e.last_seen DESC, r.first_seen""",
@@ -972,12 +972,13 @@ class SQLiteStore:
         rank = {"low": 1, "medium": 2, "high": 3}
         events: dict[int, dict] = {}
         for (event_id, title, category, state, region, first, last, seen, sources, first_source, urgency,
-             corroboration, status, lat, lon, sender, closed_at, close_reason, closed_by, exercise, entered) in rows:
+             corroboration, status, lat, lon, sender, closed_at, close_reason, closed_by, exercise, entered,
+             level) in rows:
             event = events.setdefault(event_id, {
                 "title": title, "category": category, "state": state, "region": region,
                 "first": datetime.fromisoformat(first), "last": datetime.fromisoformat(last),
                 "reports": 0, "sources": [], "urgency": "low", "official": "", "radio": None,
-                "official_time": None, "lead": None, "statuses": [], "points": [],
+                "official_time": None, "lead": None, "statuses": [], "points": [], "placed": [],
                 "closed_at": datetime.fromisoformat(closed_at) if closed_at else None,
                 "close_reason": close_reason, "closed_by": closed_by, "exercise": False, "voices": set()})
             event["reports"] += 1
@@ -1012,6 +1013,7 @@ class SQLiteStore:
                 event["statuses"].append(status)
             if lat is not None and lon is not None:
                 event["points"].append((lat, lon))
+                event["placed"].append((lat, lon, level or ""))
         summaries = []
         for event_id, event in events.items():
             if regions and event["region"] not in regions:
@@ -1023,7 +1025,7 @@ class SQLiteStore:
                 event_id, event["title"], event["category"], event["state"], event["region"], event["first"],
                 event["last"], event["reports"], tuple(event["sources"]), event["urgency"], event["official"], lead,
                 tuple(event["statuses"]), event["points"], event["closed_at"], event["close_reason"],
-                event["closed_by"], event["exercise"], len(event["voices"])))
+                event["closed_by"], event["exercise"], len(event["voices"]), event["placed"]))
         return summaries
 
     def sender_track_records(self) -> dict:

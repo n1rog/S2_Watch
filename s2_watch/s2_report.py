@@ -198,10 +198,20 @@ def where(lat: float | None = None, lon: float | None = None, label: str = "", s
     return f"{label} ({lat:.3f}, {lon:.3f})" if label else f"{lat:.3f}, {lon:.3f}"
 
 
+POINT_LEVELS = ("precise", "city", "grid")    # a point worth giving coordinates for
+
+
 def event_where(event) -> str:
-    """Where an event is, as precisely as its reports put it."""
-    points = getattr(event, "points", None) or []
-    return where(*points[0], state=event.state) if points else where(state=event.state)
+    """Where an event is, as precisely as its reports put it: the most precise report's point
+    (a county by name only: its centre can be far from the news), else the state."""
+    from s2_watch.locating import describe_point
+
+    placed = getattr(event, "placed", None) or []
+    for levels in (POINT_LEVELS, ("county",)):
+        point = next(((lat, lon) for lat, lon, level in placed if level in levels), None)
+        if point is not None:
+            return where(*point, state=event.state) if levels is POINT_LEVELS else describe_point(*point)
+    return where(state=event.state)
 
 
 # -- follow-up report (one report or event) ----------------------------------------------
@@ -245,7 +255,10 @@ def followup_report(facts, members: list[dict] | None = None, now: datetime | No
     when = (f"on {period_label(first, last)}" if first.date() == last.date()
             else f"between {period_label(first, last)}")
     names = " and ".join(sources) if len(sources) <= 2 else ", ".join(sources[:-1]) + f" and {sources[-1]}"
-    place = where(point.lat, point.lon, label, point.state or facts.state) if point is not None else focus
+    if point is not None and point.level in POINT_LEVELS:
+        place = where(point.lat, point.lon, label, point.state or facts.state)
+    else:   # a county's or state's centre isn't where the news is: name it, no coordinates
+        place = focus
     bluf = [f"{count} report{'s' if count != 1 else ''} from {names} {when} concern {subject.split(' — ')[0]} "
             f"in {place}."]
     if confirmed:

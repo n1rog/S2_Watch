@@ -203,6 +203,23 @@ def county_by_fips(fips: str) -> dict | None:
     return _counties_by_fips().get(fips)
 
 
+_SENDER_COUNTY = re.compile(r"^(?:([A-Z]{2})(?=[A-Z][a-z]))?\s*(?:City\s*and\s*)?([A-Z][A-Za-z.' ]*?)\s*(County|Parish|Borough)")
+
+
+def sender_county(sender: str, state: str | None = None) -> dict | None:
+    """The county an alerting authority is named after: "AZCoconinoCountyDepartmentofEmergency
+    Management" and "Tulsa County Sheriff's Office" -> their county's entry; None if unsure."""
+    match = _SENDER_COUNTY.search(sender.strip())
+    if not match:
+        return None
+    name = re.sub(r"(?<=[a-z])(?=[A-Z])", " ", match.group(2))     # "SantaCruz" -> "Santa Cruz"
+    state = match.group(1) or state
+    entries = [county for county in _counties_by_fips().values()
+               if normalize(county["name"]) == normalize(name) and county["kind"].casefold() == match.group(3).casefold()
+               and (not state or county["state"] == state)]
+    return entries[0] if len(entries) == 1 else None
+
+
 NEAR_TOWN_KM = 15
 
 
@@ -326,7 +343,7 @@ class LocationResolver:
                 return [corrected]
         if message.fields.get("type") == "BULLETIN" and message.fields.get("lat"):
             return self._bulletin(message)
-        if message.fields.get("type") == "IPAWS ALERT" and message.fields.get("lat"):
+        if message.fields.get("type") == "IPAWS ALERT":
             return self._alert_area(message)
         headline = without_outlet(message)
         if headline is not message:
@@ -358,16 +375,31 @@ class LocationResolver:
     def _alert_area(self, message: Message) -> list[ResolvedLocation]:
         """A public alert names the area it covers: placed at the middle of its outline, labelled
         with its own name for the area and its county ("Sedona 8-9-10, Coconino County, AZ")."""
-        try:
-            lat, lon = float(message.fields["lat"]), float(message.fields["lon"])
-        except (KeyError, ValueError):
-            return self._resolve(message)
         fields = message.fields
+        try:
+            lat, lon = float(fields["lat"]), float(fields["lon"])
+        except (KeyError, ValueError):
+            return self._alert_by_sender(message)
         county = f"{fields['county']}, {fields.get('state', '')}".strip(", ") if fields.get("county") else ""
         label = ", ".join(part for part in (fields.get("area", ""), county or describe_point(lat, lon)) if part)
         return [self._abroad(self.gazetteer.with_area(
             ResolvedLocation("precise", lat, lon, label or f"Coordinates {lat:.3f}, {lon:.3f}",
                              fields.get("state") or None)))]
+
+    def _alert_by_sender(self, message: Message) -> list[ResolvedLocation]:
+        """An alert saved without its outline: the place its text names, else the county that sent it
+        ("AZCoconinoCountyDepartmentofEmergencyManagement"), labelled with the alert's area name (the
+        text after its last dash, "Sedona 8-9-10")."""
+        parts = [part.strip() for part in message.raw_content.split(" — ")]
+        area = message.fields.get("area") or (parts[-1] if len(parts) > 1 and len(parts[-1]) <= 80 else "")
+        found = self._resolve(message)
+        if found and found[0].level not in GENERAL_LEVELS:
+            return found
+        county = sender_county(message.fields.get("sender", ""), found[0].state if found else None)
+        if county is None:
+            return found
+        label = ", ".join(part for part in (area, f"{county['name']} {county['kind']}, {county['state']}") if part)
+        return [self.gazetteer.with_area(ResolvedLocation("county", county["lat"], county["lon"], label, county["state"]))]
 
     def _resolve(self, message: Message) -> list[ResolvedLocation]:
         fields = {key.casefold(): str(value) for key, value in message.fields.items()}
