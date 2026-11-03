@@ -192,6 +192,8 @@ Reports**: the routing table (Subject, Purpose, DTG, Reporting Period, Geographi
 Precedence, MagCon Status, Sources), then Summary (BLUF), Background, Situation with a
 timeline, Comments / Assessment with a probability table, Intelligence Gaps, Mitigation
 Recommendations, MAGNET Guidance and the Source List with suggested Admiralty ratings.
+The precedence starts from the urgency; the **Precedence** picker in the draft window
+(IM – IMMEDIATE, PR – PRIORITY, RR – ROUTINE) changes it.
 
 S2 Watch fills what its data supports (routing, BLUF, Background, Situation, timeline, gaps, sources,
 up to 15 WordPress tags); the BLUF names the place as exactly as known (the reported place with

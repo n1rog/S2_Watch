@@ -45,3 +45,22 @@ def test_a_briefing_is_saved_after_the_suggestion_and_reopens(tmp_path, monkeypa
     listing._delete()                                         # a second click confirms
     assert store.list_drafts() == []
     app.processEvents()
+
+
+def test_the_precedence_is_chosen_in_the_draft_window_and_follows_the_text(tmp_path) -> None:
+    QApplication.instance() or QApplication([])
+    store = SQLiteStore(tmp_path / "s2.db")
+    from s2_watch.s2_report import js8_report
+
+    dialog = FollowUpDialog(None, store, text=briefing_report([], NOW, 24), draft_kind="briefing", js8=js8_report)
+    assert dialog.precedence.currentText() == "RR – ROUTINE"            # from the drafted report
+    dialog.precedence.setCurrentIndex(dialog.precedence.findText("IM – IMMEDIATE"))
+    dialog.precedence.activated.emit(dialog.precedence.currentIndex())  # what choosing it sends
+    assert "PRECEDENCE: IM – IMMEDIATE" in dialog.full.toPlainText()
+    assert dialog.js8call.toPlainText().startswith("MAGNET S2 261011-1400Z IM ") and dialog.unsaved()
+    dialog.full.setPlainText(dialog.full.toPlainText().replace("PRECEDENCE: IM – IMMEDIATE", "PRECEDENCE: PR"))
+    assert dialog.precedence.currentText() == "PR – PRIORITY"           # edited by hand: the picker follows
+    plain = FollowUpDialog(None, store, text="Just some notes")
+    assert not plain.top.isRowVisible(plain.precedence)                 # no PRECEDENCE line: no picker
+    dialog._saved_text = dialog.full.toPlainText()
+    dialog.deleteLater(); plain.deleteLater()

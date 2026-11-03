@@ -10,13 +10,13 @@ from pathlib import Path
 from PySide6.QtCore import Signal
 from PySide6.QtGui import QFontDatabase, QGuiApplication
 from PySide6.QtWidgets import (
-    QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPlainTextEdit,
+    QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPlainTextEdit,
     QPushButton, QTabWidget, QVBoxLayout, QWidget,
 )
 
 from s2_watch.analysis.ollama import draft_assessment
 from s2_watch.followup import JS8CALL_TARGET, FollowUpFacts, dtg, flmsg_text, full_report, js8call_text
-from s2_watch.s2_report import file_stem, parse_report
+from s2_watch.s2_report import PRECEDENCE, file_stem, parse_report
 
 
 def replace_section(report: str, subject: str, assessment: str) -> str:
@@ -28,6 +28,16 @@ def replace_section(report: str, subject: str, assessment: str) -> str:
         lines = lines[:lines.index("ASSESSMENT:") + 1] + [assessment]
     else:
         lines += ["", "ASSESSMENT:", assessment]
+    return "\n".join(lines)
+
+
+def replace_field(report: str, key: str, value: str) -> str:
+    """The report with its first "KEY: ..." routing line set to ``value``."""
+    lines = report.splitlines()
+    for index, line in enumerate(lines):
+        if line.partition(":")[0].strip().upper() == key:
+            lines[index] = f"{key}: {value}"
+            break
     return "\n".join(lines)
 
 
@@ -65,6 +75,13 @@ class FollowUpDialog(QDialog):
         self.callsign.editingFinished.connect(self._callsign_changed)
         top = QFormLayout()
         top.addRow("Your callsign", self.callsign)
+        self.precedence = QComboBox()
+        self.precedence.addItems(list(PRECEDENCE.values()))      # immediate, priority, routine
+        self.precedence.setToolTip("How urgently the report should be handled. S2 Watch starts from the event's "
+                                   "urgency; choose another level here (or edit the PRECEDENCE line).")
+        self.precedence.activated.connect(self._precedence_chosen)
+        top.addRow("Precedence", self.precedence)
+        self.top = top
 
         self.full = QPlainTextEdit(text if text is not None else full_report(facts))
         self.full.setFont(fixed)
@@ -153,8 +170,24 @@ class FollowUpDialog(QDialog):
         if "\n".join(lines) != text:
             self.full.setPlainText("\n".join(lines))
 
+    def _precedence_chosen(self) -> None:
+        text = self.full.toPlainText()
+        changed = replace_field(text, "PRECEDENCE", self.precedence.currentText())
+        if changed != text:
+            self.full.setPlainText(changed)
+
+    def _show_precedence(self, report: str) -> None:
+        """The picker follows the report's PRECEDENCE line (edited by hand too); hidden without one."""
+        fields = parse_report(report).fields
+        self.top.setRowVisible(self.precedence, "PRECEDENCE" in fields)
+        value = fields.get("PRECEDENCE", "")
+        index = next((i for i in range(self.precedence.count())
+                      if self.precedence.itemText(i).split(" ")[0] == value.split(" ")[0].upper()), -1) if value else -1
+        self.precedence.setCurrentIndex(index)
+
     def _derive(self) -> None:
         report = self.full.toPlainText()
+        self._show_precedence(report)
         self.flmsg.setPlainText(flmsg_text(report))
         message = self.js8(report)
         self.js8call.setPlainText(message)
