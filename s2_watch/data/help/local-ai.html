@@ -46,7 +46,7 @@ report. The assessment is saved; when new reports arrive it shows <b>⚠ Out of 
 <li>Click <b>Review &amp; accept…</b> under it. Each section opens as a field: BLUF, trend and why, agreement, assessment
 (a blank line between paragraphs), probability (one per line, <code>what may happen | HIGH</code>), gaps, mitigation and
 MAGNET guidance.</li>
-<li>Check each statement against the numbered reports, correct it, add what you know, and click <b>Accept</b>.</li>
+<li>Check each statement against the numbered reports, correct it, add what you know, and click <b>Accept assessment</b>.</li>
 </ol>
 <p>It becomes the event's <b>Analyst assessment</b>, shown at the top of its details with who accepted it and when
 (<i>Ollama-drafted (qwen2.5:7b), reviewed by N1ROG</i>). <b>Dismiss</b> drops a proposal you don't want. With no assessment yet,
@@ -62,8 +62,16 @@ panel beside the fields. Type a question and press <kbd>Enter</kbd> or <b>Ask</b
 <p>Ollama answers from the event's reports (the same ones the assessment read) and the assessment <i>as it stands in the
 fields</i>, so you can ask about a change you've just made. It cites reports by number, and says when the reports don't
 support a statement or don't answer the question. Follow-up questions see the earlier questions and answers.</p>
-<p>The answers are for discussion only: they don't change the assessment. If one shows the assessment is wrong, correct
-the field yourself, or close the window and assess again. The conversation isn't saved; it ends when the window closes.</p>
+<p>Under each answer:</p>
+<ul>
+<li><b>Use this answer ▾</b> puts it into a field: <i>Replace the BLUF</i>, <i>Replace the trend's Why</i>,
+<i>Replace Agreement</i>, <i>Add to Assessment</i> (a new paragraph), or <i>Add to</i> Intelligence gaps, Mitigation or MAGNET
+guidance (a new line). Edit it there like any other text. The answer is marked with where it went.</li>
+<li><b>Reject</b> greys it out and leaves it, and its question, out of the conversation, so later answers don't build on it.</li>
+</ul>
+<p>An answer changes nothing until you use it, and nothing is saved until you click <b>Accept assessment</b>. Enter
+asks the question you've typed; it never accepts the assessment. The conversation isn't saved; it ends when the window
+closes (<b>Accept assessment</b> or <b>Cancel</b>).</p>
 <p>An answer takes about as long as an assessment (a minute or two without a suitable graphics card). It uses the
 <b>Event assessment model</b>, which stays loaded while you ask and is unloaded when the window closes; like an
 assessment, it unloads other models first and won't start when memory is short.</p>

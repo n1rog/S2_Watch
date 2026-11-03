@@ -220,7 +220,9 @@ version kept under **history**). **Dismiss** drops a proposal; **write one** sta
 assessment from scratch. Beside the fields, **Ask about this assessment** puts questions to
 the same model ("Why is the trend escalating?"): it answers from the event's reports and the
 assessment as edited, citing reports by number, and remembers the conversation until the
-window closes; its answers never change the assessment. When new reports arrive, a fresh assessment shows as a proposed
+window closes. Each answer can be used in a field (replace the BLUF, add to the assessment,
+gaps, mitigation or guidance) or rejected, which leaves it out of the conversation; nothing
+changes until **Accept assessment**. When new reports arrive, a fresh assessment shows as a proposed
 update beside the accepted one, with what changed (trend, probability levels, new gaps). The
 accepted assessment marks the event's trend in the lists (▲ escalating, ▬ stable, ▼ winding
 down, ? unclear), fills MAGNET drafts of the event, and is listed (trend, who, when, BLUF,

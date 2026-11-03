@@ -104,8 +104,8 @@ def official_items(messages, resolver=None) -> list[OfficialItem]:
                                       radius_km=150, rank=3))
         elif kind == "SPC STORM REPORT" and lat is not None:
             event = message.raw_content.split(":", 1)[1].split("—", 1)[0].strip().split(" ")[0].lower()
-            hazards = {"tornado": {"tornado", "thunderstorm"}, "hail": {"thunderstorm"}}.get(event, {"wind", "thunderstorm"})
-            items.append(OfficialItem("SPC", f"{event} report", hazards, when, lat, lon, radius_km=50,
+            kinds = {"tornado": {"tornado", "thunderstorm"}, "hail": {"thunderstorm"}}.get(event, {"wind", "thunderstorm"})
+            items.append(OfficialItem("SPC", f"{event} report", kinds, when, lat, lon, radius_km=50,
                                       window=timedelta(hours=12), rank=3))
         elif kind == "WILDFIRE" and lat is not None:
             name = message.raw_content.split(":", 1)[1].split("—", 1)[0].strip()
@@ -113,9 +113,9 @@ def official_items(messages, resolver=None) -> list[OfficialItem]:
                                       window=timedelta(days=30), rank=2))
         elif kind == "FEMA DECLARATION" and fields.get("state"):
             incident = message.raw_content.split("incident type", 1)[-1].split(";", 1)[0].strip().lower()
-            hazards = FEMA_HAZARDS.get(incident, set())
-            if hazards:
-                items.append(OfficialItem("FEMA", f"{incident} declaration", hazards, when, state=fields["state"],
+            kinds = FEMA_HAZARDS.get(incident, set())
+            if kinds:
+                items.append(OfficialItem("FEMA", f"{incident} declaration", kinds, when, state=fields["state"],
                                           window=timedelta(days=30), rank=1))
         elif kind in ("STORM REPORT", "RIVER FLOOD") and lat is not None:
             found = hazards(message.raw_content) or ({"flood"} if kind == "RIVER FLOOD" else set())

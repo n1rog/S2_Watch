@@ -334,11 +334,37 @@ def test_the_review_window_asks_ollama_about_the_assessment_in_its_fields(tmp_pa
     assert "BLUF: Edited BLUF [1]." in assessment and "- Roads reopen | LOW\n- no level here" in assessment
     text = dialog.transcript.toPlainText()
     assert "You: Which report says the road is closed?" in text and "Ollama: Report [2] says" in text
+    assert dialog.focusWidget() is dialog.question
+
+    # Clicking Ask, then Enter: the window stays open (focus once moved to Accept, and Enter accepted).
+    dialog.question.setText("And the warning?")
+    QTest.mouseClick(dialog.ask_button, Qt.MouseButton.LeftButton)
+    for _ in range(200):
+        app.processEvents()
+        if not dialog.asking:
+            break
+    assert dialog.focusWidget() is dialog.question
+    QTest.keyClick(dialog.focusWidget(), Qt.Key.Key_Return)
+    QTest.keyClick(dialog.trend_reason, Qt.Key.Key_Return)     # Enter in a field doesn't accept either
+    assert dialog.isVisible() and dialog.accepted is None and len(seen) == 2
+
+    # An answer can be used in a field, or rejected (and the model no longer sees it).
+    assert "Use this answer" in dialog.transcript.toPlainText()
+    dialog.use_answer(1, "assessment")
+    dialog.use_answer(1, "gaps")
+    dialog.use_answer(3, "bluf")
+    assert dialog.assessment.toPlainText().endswith("[2].\n\nReport [2] says Riverside Dr is closed.")
+    assert dialog.gaps.toPlainText().endswith("\n- Report [2] says Riverside Dr is closed.")
+    assert dialog.bluf.toPlainText() == "Report [2] says Riverside Dr is closed."
+    assert "✓ Added to Intelligence gaps." in dialog.transcript.toPlainText()
+    dialog.reject_answer(3)
+    assert "Rejected" in dialog.transcript.toPlainText() and dialog.discussion.turns == []
     dialog.reject()
     for _ in range(50):
         app.processEvents()
         if "released" in seen:
             break
+    assert dialog.accepted is None                         # cancelled, not accepted
     assert "released" in seen                              # the model is unloaded when the window closes
     plain = AssessmentDialog("Flood", parse_assessment(REPLY, 3, "m"), 3, "N1ROG")
     assert not hasattr(plain, "question")                  # no Ollama set up: no question panel

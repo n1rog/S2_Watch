@@ -324,6 +324,7 @@ class Discussion:
     def __init__(self, context: str, count: int, endpoint: str, model: str, timeout: float = 600.0) -> None:
         self.context, self.count, self.endpoint, self.model, self.timeout = context, count, endpoint, model, timeout
         self.turns: list[tuple[str, str]] = []      # (question, answer)
+        self.asked = False                          # the model was loaded (released when it's over)
 
     def prompt(self, question: str, assessment: str) -> str:
         lines = [self.context, "ASSESSMENT UNDER REVIEW:", assessment.strip() or "(none written yet)", ""]
@@ -337,6 +338,7 @@ class Discussion:
     def ask(self, question: str, assessment: str) -> str:
         """Ollama's answer (citations of reports that don't exist dropped); raises OllamaError."""
         make_room(self.endpoint, self.model)
+        self.asked = True
         reply = ollama_generate(self.endpoint, self.model, self.prompt(question, assessment), self.timeout,
                                 options=DISCUSS_OPTIONS, keep_alive=DISCUSS_KEEP_ALIVE)
         answer = _cited(" ".join(reply.replace(STOP, "").split()), self.count)
@@ -345,9 +347,13 @@ class Discussion:
         self.turns.append((" ".join(question.split()), answer))
         return answer
 
+    def forget(self, answer: str) -> None:
+        """Leave a rejected answer (and its question) out of the conversation from now on."""
+        self.turns = [turn for turn in self.turns if turn[1] != answer]
+
     def release(self) -> None:
         """Unload the model once the conversation is over (when it was asked anything)."""
-        if self.turns:
+        if self.asked:
             try:
                 _ollama_json(self.endpoint, "/api/generate", {"model": self.model, "keep_alive": 0})
             except (OSError, ValueError):

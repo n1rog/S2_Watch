@@ -104,3 +104,19 @@ def test_small_quakes_confirm_reports_but_do_not_become_reports(monkeypatch) -> 
         assert {m.fields["message_id"] for m in osint.cached_messages({"EARTHQUAKE"})} == {"q1", "q2"}
     finally:
         adapter.close()
+
+
+def test_an_spc_report_or_fema_declaration_doesnt_stop_the_items_after_it() -> None:
+    from datetime import timedelta
+
+    from s2_watch.corroboration import official_items
+
+    hail = Message("OSINT", "SPC storm report: Hail 1.75 in — 3 N Norman, Cleveland County, OK (35.260, -97.440). Report.",
+                   received_at=RECEIVED - timedelta(hours=2),
+                   fields={"type": "SPC STORM REPORT", "lat": "35.26", "lon": "-97.44", "state": "OK"})
+    fema = Message("OSINT", "FEMA Emergency declaration EM-3654: Flooding — Iowa; incident type Flood; 4 areas designated",
+                   received_at=RECEIVED - timedelta(days=3), fields={"type": "FEMA DECLARATION", "state": "IA"})
+    river = Message("OSINT", "NWS river gauge: Arkansas River at Tulsa in minor flood", received_at=RECEIVED,
+                    fields={"type": "RIVER FLOOD", "lat": "36.14", "lon": "-95.99"})
+    # Once failed with "'set' object is not callable": a variable named like the hazards() function.
+    assert [item.source for item in official_items([hail, fema, river])] == ["SPC", "FEMA", "NWS"]

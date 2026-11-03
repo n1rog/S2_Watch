@@ -9,10 +9,11 @@ from dataclasses import replace
 from datetime import datetime, timezone
 from html import escape
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QUrl, Signal
+from PySide6.QtGui import QCursor
 from PySide6.QtWidgets import (
-    QComboBox, QDialog, QDialogButtonBox, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPlainTextEdit,
-    QPushButton, QScrollArea, QSplitter, QTextBrowser, QVBoxLayout, QWidget,
+    QComboBox, QDialog, QDialogButtonBox, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QMenu, QMessageBox,
+    QPlainTextEdit, QPushButton, QScrollArea, QSplitter, QTextBrowser, QVBoxLayout, QWidget,
 )
 
 from s2_watch.event_assessment import LEVELS, TREND_MARKS, TRENDS, Discussion, EventAssessment, assessment_text
@@ -32,9 +33,17 @@ def _paragraphs(text: str) -> list[str]:
     return [" ".join(block.split()) for block in re.split(r"\n\s*\n", text) if block.strip()]
 
 
+# Where an answer can be used: field, label, and whether it replaces the field or is added to it.
+ANSWER_USES = (("bluf", "Replace the BLUF", "replace"), ("trend_reason", "Replace the trend's Why", "replace"),
+               ("agreement", "Replace Agreement", "replace"), ("assessment", "Add to Assessment", "paragraph"),
+               ("gaps", "Add to Intelligence gaps", "line"), ("mitigation", "Add to Mitigation", "line"),
+               ("guidance", "Add to MAGNET guidance", "line"))
+
+
 class AssessmentDialog(QDialog):
-    """The assessment's sections as editable fields; Accept makes it the event's assessment. With a
-    Discussion, a panel beside them asks Ollama about the assessment as it stands in the fields."""
+    """The assessment's sections as editable fields; Accept assessment makes it the event's assessment.
+    With a Discussion, a panel beside them asks Ollama about the assessment as it stands in the fields;
+    each answer can be used in a field or rejected (and then forgotten by the model)."""
 
     answered = Signal(str, str)         # answer, error (from a thread)
 
@@ -50,7 +59,7 @@ class AssessmentDialog(QDialog):
         self.discussion = discussion
         self.asking = False
         intro = QLabel(heading or "Check each statement against the numbered reports in the event's details, "
-                                  "correct it, then Accept. Numbers in brackets cite those reports.")
+                                  "correct it, then Accept assessment. Numbers in brackets cite those reports.")
         intro.setWordWrap(True)
         self.bluf = self._text(assessment.bluf, 70)
         self.trend = QComboBox()
@@ -81,8 +90,10 @@ class AssessmentDialog(QDialog):
         form.addRow("Mitigation", self.mitigation)
         form.addRow("MAGNET guidance", self.guidance)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel)
-        accept = buttons.addButton("Accept", QDialogButtonBox.ButtonRole.AcceptRole)
-        accept.setToolTip(f"Make this the event's assessment, accepted by {analyst or 'you'}")
+        accept = buttons.addButton("Accept assessment", QDialogButtonBox.ButtonRole.AcceptRole)
+        accept.setToolTip(f"Make the fields the event's assessment, accepted by {analyst or 'you'}, and close")
+        for button in buttons.buttons():     # Enter never accepts or cancels: only a click does
+            button.setAutoDefault(False)
         buttons.accepted.connect(self._accept)
         buttons.rejected.connect(self.reject)
         layout = QVBoxLayout(self)
@@ -104,10 +115,14 @@ class AssessmentDialog(QDialog):
 
     def _discussion_panel(self) -> QWidget:
         self.transcript = QTextBrowser()
+        self.transcript.setOpenLinks(False)
+        self.transcript.anchorClicked.connect(self._answer_link)
+        self.turns: list[dict] = []      # {"who", "text", "state"}: state "", "rejected" or what it was used for
         self.transcript.setHtml("<p style='color:gray'>Ask Ollama about this assessment: why it says something, "
                                 "which report a statement rests on, what the reports leave out. It answers from "
                                 "the event's reports and the assessment as it stands in the fields, citing "
-                                "reports by number. Its answers don't change the assessment.</p>")
+                                "reports by number. Its answers don't change the assessment unless you use "
+                                "one in a field.</p>")
         self.question = QLineEdit()
         self.question.setPlaceholderText("e.g. Why is the trend escalating?")
         self.ask_button = QPushButton("Ask")
@@ -116,7 +131,6 @@ class AssessmentDialog(QDialog):
         self.ask_status = QLabel("")
         self.ask_status.setWordWrap(True)
         self.answered.connect(self._answered)
-        self._asked = False
         row = QHBoxLayout()
         row.addWidget(self.question, 1)
         row.addWidget(self.ask_button)
@@ -130,10 +144,10 @@ class AssessmentDialog(QDialog):
         return panel
 
     def keyPressEvent(self, event) -> None:
-        # Enter in the question asks it, rather than accepting the assessment.
-        if self.discussion is not None and self.focusWidget() is self.question \
-                and event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
-            self.ask()
+        # Enter in the question asks it; elsewhere it does nothing (it once accepted the assessment).
+        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            if self.discussion is not None and self.focusWidget() is self.question:
+                self.ask()
             return
         super().keyPressEvent(event)
 
@@ -152,6 +166,7 @@ class AssessmentDialog(QDialog):
         if self.discussion is None or self.asking or not question:
             return
         self.asking = True
+        self.question.setFocus()         # not passed on to Accept when the Ask button is disabled
         self.ask_button.setEnabled(False)
         self.ask_status.setText("Ollama is thinking… a minute or two on a computer without a suitable graphics card.")
         self._add_turn("You", question)
@@ -172,12 +187,61 @@ class AssessmentDialog(QDialog):
         self.ask_status.setText(f"<span style='color:#c62828'>No answer: {escape(error)}</span>" if error else "")
         if answer:
             self._add_turn("Ollama", answer)
+        self.question.setFocus()
 
     def _add_turn(self, who: str, text: str) -> None:
-        if not self._asked:              # the first question replaces the hint
-            self.transcript.clear()
-            self._asked = True
-        self.transcript.append(f"<p><b>{who}:</b> {escape(text)}</p>")
+        self.turns.append({"who": who, "text": text, "state": ""})
+        self._show_turns()
+
+    def _show_turns(self) -> None:
+        out = []
+        for number, turn in enumerate(self.turns):
+            text = escape(turn["text"])
+            if turn["who"] == "You":
+                out.append(f"<p><b>You:</b> {text}</p>")
+            elif turn["state"] == "rejected":
+                out.append(f"<p style='color:gray'><b>Ollama:</b> <s>{text}</s><br><i>Rejected: left out of the "
+                           f"conversation from now on.</i></p>")
+            else:
+                actions = (f"<i>✓ {escape(turn['state'])}.</i> " if turn["state"] else "") + \
+                    f"<a href='use:{number}'>Use this answer ▾</a> · <a href='reject:{number}'>Reject</a>"
+                out.append(f"<p><b>Ollama:</b> {text}<br><small>{actions}</small></p>")
+        self.transcript.setHtml("".join(out))
+        bar = self.transcript.verticalScrollBar()
+        bar.setValue(bar.maximum())
+
+    def _answer_link(self, url: QUrl) -> None:
+        action, _, number = url.toString().partition(":")
+        if not number.isdigit() or int(number) >= len(self.turns):
+            return
+        if action == "reject":
+            self.reject_answer(int(number))
+        elif action == "use":
+            menu = QMenu(self)
+            for name, label, _how in ANSWER_USES:
+                menu.addAction(label).triggered.connect(
+                    lambda _checked=False, name=name: self.use_answer(int(number), name))
+            menu.exec(QCursor.pos())
+
+    def use_answer(self, number: int, name: str) -> None:
+        """Put answer ``number`` into a field (see ANSWER_USES); the analyst edits it from there."""
+        label, how = next((label, how) for field, label, how in ANSWER_USES if field == name)
+        text, editor = self.turns[number]["text"], getattr(self, name)
+        if how == "replace":
+            editor.setText(text) if isinstance(editor, QLineEdit) else editor.setPlainText(text)
+        else:
+            current = editor.toPlainText().rstrip()
+            joiner = "\n\n" if how == "paragraph" else "\n"
+            addition = text if how == "paragraph" else f"- {text}"
+            editor.setPlainText(f"{current}{joiner}{addition}" if current else addition)
+        self.turns[number]["state"] = label.replace("Replace", "Replaced").replace("Add to", "Added to")
+        self._show_turns()
+
+    def reject_answer(self, number: int) -> None:
+        """Mark an answer rejected; the model isn't shown it again."""
+        self.turns[number]["state"] = "rejected"
+        self.discussion.forget(self.turns[number]["text"])
+        self._show_turns()
 
     def done(self, result: int) -> None:
         # The model stays loaded during the conversation; unloaded once the window closes.
