@@ -54,6 +54,7 @@ def test_the_precedence_is_chosen_in_the_draft_window_and_follows_the_text(tmp_p
 
     dialog = FollowUpDialog(None, store, text=briefing_report([], NOW, 24), draft_kind="briefing", js8=js8_report)
     assert dialog.precedence.currentText() == "RR – ROUTINE"            # from the drafted report
+    assert [dialog.precedence.itemText(i)[:2] for i in range(4)] == ["FL", "IM", "PR", "RR"]   # Flash: by hand only
     dialog.precedence.setCurrentIndex(dialog.precedence.findText("IM – IMMEDIATE"))
     dialog.precedence.activated.emit(dialog.precedence.currentIndex())  # what choosing it sends
     assert "PRECEDENCE: IM – IMMEDIATE" in dialog.full.toPlainText()

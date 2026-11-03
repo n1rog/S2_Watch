@@ -35,7 +35,19 @@ DEFAULT_MAGCON = "3 – ELEVATED (NO CHANGE)"
 CLOSING = ("Submit reports through established MAGNET situational awareness channels.  "
            "To Learn More About MAGNET, Visit www.MAGNETHF.COM")
 TOP_BANNER = "UNCLASSIFIED  //  OSINT  –  MAGNET S2 OSINT TEAM"     # "FOR OFFICIAL USE" removed by instruction
-PRECEDENCE = {"high": "IM – IMMEDIATE", "medium": "PR – PRIORITY", "low": "RR – ROUTINE"}
+PRECEDENCE = {"high": "IM – IMMEDIATE", "medium": "PR – PRIORITY", "low": "RR – ROUTINE"}   # from urgency
+# MAGNET's precedence levels, highest first: (line, meaning, handling time). FLASH is only ever the analyst's choice.
+PRECEDENCE_LEVELS = (
+    ("FL – FLASH", "Interrupt all traffic. Life or mission critical.", "immediately"),
+    ("IM – IMMEDIATE", "Process without delay. Time-sensitive intelligence.", "within 1 hour"),
+    ("PR – PRIORITY", "Ahead of routine traffic. Elevated handling required.", "same day"),
+    ("RR – ROUTINE", "Normal processing. No urgency. Follows standard queue.", "next day"),
+)
+
+
+def precedence_definitions() -> str:
+    """The levels as Ollama is told them, one per line."""
+    return "\n".join(f"- {line}: {meaning} Handled {when}." for line, meaning, when in PRECEDENCE_LEVELS)
 LEVELS = ("HIGH", "MODERATE", "LOW")
 MAX_TAGS = 15
 MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")

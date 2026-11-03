@@ -193,7 +193,9 @@ Precedence, MagCon Status, Sources), then Summary (BLUF), Background, Situation 
 timeline, Comments / Assessment with a probability table, Intelligence Gaps, Mitigation
 Recommendations, MAGNET Guidance and the Source List with suggested Admiralty ratings.
 The precedence starts from the urgency; the **Precedence** picker in the draft window
-(IM – IMMEDIATE, PR – PRIORITY, RR – ROUTINE) changes it.
+changes it: FL – FLASH (interrupt all traffic; life or mission critical; never chosen
+automatically), IM – IMMEDIATE (within 1 hour), PR – PRIORITY (same day) or RR – ROUTINE
+(next day). Ollama is given these definitions when you ask it about an assessment.
 
 S2 Watch fills what its data supports (routing, BLUF, Background, Situation, timeline, gaps, sources,
 up to 15 WordPress tags); the BLUF names the place as exactly as known (the reported place with

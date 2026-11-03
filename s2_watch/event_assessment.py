@@ -78,6 +78,11 @@ Rules:
 - Cite the reports your answer rests on by number in brackets, e.g. [3] or [1, 4].
 - Where the reports don't support a statement in the assessment, say so and name the reports.
 - Answer in a few plain sentences, no headings.
+- For message precedence, use only MAGNET's levels below, not military or other definitions.
+
+MAGNET message precedence, highest first:
+{precedences}
+A follow-up report on this event would start at {precedence} (from its urgency); the analyst may choose another level.
 
 Event: {title}
 Category: {category} · Place: {place} · Urgency: {urgency} · Official confirmation: {official}
@@ -163,14 +168,15 @@ def event_brief(event, reports: list[dict], background: list[str] | None = None,
     else:
         lines = ["REPORTS, oldest to newest (the last one is the current situation):"]
         lines += [_line(*item) for item in chosen]
-    from s2_watch.s2_report import event_where
+    from s2_watch.s2_report import PRECEDENCE, event_where, precedence_definitions
 
     place = ", ".join(part for part in (event_where(event), f"MARS Region {event.region}" if event.region else "") if part)
     facts = [line for line in (background or []) if not line.startswith("(")]
     return template.format(title=event.title, category=event.category, place=place or "unknown",
-                         urgency=event.urgency, official=event.official or "none yet", count=len(reports),
-                         latest=len(reports), background="\n".join(f"- {line}" for line in facts) or "- none",
-                         reports="\n".join(lines), stop=STOP)
+                           urgency=event.urgency, official=event.official or "none yet", count=len(reports),
+                           latest=len(reports), background="\n".join(f"- {line}" for line in facts) or "- none",
+                           reports="\n".join(lines), stop=STOP, precedences=precedence_definitions(),
+                           precedence=PRECEDENCE.get(event.urgency, PRECEDENCE["low"]))
 
 
 def _zulu(value) -> str:

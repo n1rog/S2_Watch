@@ -289,6 +289,8 @@ def test_ollama_answers_questions_about_the_assessment_from_its_reports(tmp_path
     assert "[1] 011200Z Oct — MagCommstat (K1ABC)" in prompt and "- Earlier related activity: none." in prompt
     assert "ASSESSMENT UNDER REVIEW:\nBLUF: Flooding on the river" in prompt and "TREND: escalating — road" in prompt
     assert prompt.endswith("Analyst: Why escalating?\nYou:") and "Write exactly these sections" not in prompt
+    assert "- PR – PRIORITY: Ahead of routine traffic. Elevated handling required. Handled same day." in prompt
+    assert "- FL – FLASH: Interrupt all traffic." in prompt and "would start at IM – IMMEDIATE" in prompt   # urgency high
     assert options["keep_alive"] == "5m" and "\nAnalyst:" in options["options"]["stop"]
     discussion.ask("And the NWS warning?", "")
     assert "CONVERSATION SO FAR:\nAnalyst: Why escalating?\nYou: Road closures came" in asked[1][0]

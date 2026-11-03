@@ -7,7 +7,7 @@ import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFontDatabase, QGuiApplication
 from PySide6.QtWidgets import (
     QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPlainTextEdit,
@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
 
 from s2_watch.analysis.ollama import draft_assessment
 from s2_watch.followup import JS8CALL_TARGET, FollowUpFacts, dtg, flmsg_text, full_report, js8call_text
-from s2_watch.s2_report import PRECEDENCE, file_stem, parse_report
+from s2_watch.s2_report import PRECEDENCE_LEVELS, file_stem, parse_report
 
 
 def replace_section(report: str, subject: str, assessment: str) -> str:
@@ -76,9 +76,12 @@ class FollowUpDialog(QDialog):
         top = QFormLayout()
         top.addRow("Your callsign", self.callsign)
         self.precedence = QComboBox()
-        self.precedence.addItems(list(PRECEDENCE.values()))      # immediate, priority, routine
+        for line, meaning, when in PRECEDENCE_LEVELS:           # flash, immediate, priority, routine
+            self.precedence.addItem(line)
+            self.precedence.setItemData(self.precedence.count() - 1, f"{meaning} Handled {when}.",
+                                        Qt.ItemDataRole.ToolTipRole)
         self.precedence.setToolTip("How urgently the report should be handled. S2 Watch starts from the event's "
-                                   "urgency; choose another level here (or edit the PRECEDENCE line).")
+                                   "urgency (never Flash); choose another level here (or edit the PRECEDENCE line).")
         self.precedence.activated.connect(self._precedence_chosen)
         top.addRow("Precedence", self.precedence)
         self.top = top
