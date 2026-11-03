@@ -266,3 +266,80 @@ def test_drafts_and_briefings_use_the_accepted_assessment(tmp_path) -> None:
                                assessments={event.event_id: accepted})
     assert "assessed ESCALATING (1500Z" in briefing and "reviewed by N1ROG). Flooding on the river" in briefing
     assert ": Flooding spreads to adjacent roads | MODERATE" in briefing and "[1" not in briefing.split("SOURCE LIST")[0]
+
+
+def test_ollama_answers_questions_about_the_assessment_from_its_reports(tmp_path, monkeypatch) -> None:
+    from s2_watch.event_assessment import DISCUSS_PROMPT, Discussion
+
+    _store, event, reports = event_with_three_reports(tmp_path)
+    asked, released = [], []
+    monkeypatch.setattr(event_assessment, "make_room", lambda endpoint, model: None)
+    monkeypatch.setattr(event_assessment, "ollama_generate",
+                        lambda endpoint, model, prompt, timeout, **kwargs: asked.append((prompt, kwargs))
+                        or "Road closures came after the first report [2], [7].\n")
+    monkeypatch.setattr(event_assessment, "_ollama_json", lambda endpoint, path, payload=None: released.append(payload))
+    discussion = Discussion(event_brief(event, reports, ["Earlier related activity: none."], DISCUSS_PROMPT), 3,
+                            "http://127.0.0.1:11434", "qwen2.5:7b")
+    discussion.release()
+    assert released == []                                   # nothing asked: nothing to unload
+    accepted = parse_assessment(REPLY, 3, "qwen2.5:7b")
+    assert discussion.ask("Why  escalating?", event_assessment.assessment_text(accepted)) == \
+        "Road closures came after the first report [2]."   # [7] doesn't exist
+    prompt, options = asked[0]
+    assert "[1] 011200Z Oct — MagCommstat (K1ABC)" in prompt and "- Earlier related activity: none." in prompt
+    assert "ASSESSMENT UNDER REVIEW:\nBLUF: Flooding on the river" in prompt and "TREND: escalating — road" in prompt
+    assert prompt.endswith("Analyst: Why escalating?\nYou:") and "Write exactly these sections" not in prompt
+    assert options["keep_alive"] == "5m" and "\nAnalyst:" in options["options"]["stop"]
+    discussion.ask("And the NWS warning?", "")
+    assert "CONVERSATION SO FAR:\nAnalyst: Why escalating?\nYou: Road closures came" in asked[1][0]
+    assert "(none written yet)" in asked[1][0]
+    discussion.release()
+    assert released == [{"model": "qwen2.5:7b", "keep_alive": 0}]
+
+
+def test_the_review_window_asks_ollama_about_the_assessment_in_its_fields(tmp_path, monkeypatch) -> None:
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+
+    from s2_watch.event_assessment import Discussion
+    from s2_watch.ui.assessment_dialog import AssessmentDialog
+
+    app = QApplication.instance() or QApplication([])
+    seen = []
+
+    class Fake(Discussion):
+        def ask(self, question, assessment):
+            seen.append((question, assessment))
+            self.turns.append((question, "Report [2] says Riverside Dr is closed."))
+            return self.turns[-1][1]
+
+        def release(self):
+            seen.append("released")
+
+    dialog = AssessmentDialog("Flood", parse_assessment(REPLY, 3, "qwen2.5:7b"), 3, "N1ROG",
+                              discussion=Fake("context", 3, "http://127.0.0.1:11434", "qwen2.5:7b"))
+    dialog.show()
+    dialog.bluf.setPlainText("Edited BLUF [1].")
+    dialog.probabilities.setPlainText("Roads reopen | low\nno level here")
+    dialog.question.setFocus()
+    dialog.question.setText("Which report says the road is closed?")
+    QTest.keyClick(dialog.question, Qt.Key.Key_Return)      # Enter asks; it doesn't accept the assessment
+    for _ in range(200):
+        app.processEvents()
+        if not dialog.asking:
+            break
+    assert dialog.isVisible() and dialog.accepted is None
+    question, assessment = seen[0]
+    assert question == "Which report says the road is closed?" and dialog.question.text() == ""
+    assert "BLUF: Edited BLUF [1]." in assessment and "- Roads reopen | LOW\n- no level here" in assessment
+    text = dialog.transcript.toPlainText()
+    assert "You: Which report says the road is closed?" in text and "Ollama: Report [2] says" in text
+    dialog.reject()
+    for _ in range(50):
+        app.processEvents()
+        if "released" in seen:
+            break
+    assert "released" in seen                              # the model is unloaded when the window closes
+    plain = AssessmentDialog("Flood", parse_assessment(REPLY, 3, "m"), 3, "N1ROG")
+    assert not hasattr(plain, "question")                  # no Ollama set up: no question panel
+    dialog.deleteLater(); plain.deleteLater()

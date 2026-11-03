@@ -24,7 +24,7 @@ from s2_watch.ui.drafts_dialog import DraftsDialog
 from s2_watch import focus, world
 from s2_watch.focus import FocusArea
 from s2_watch.background import event_background, period_background
-from s2_watch.event_assessment import assess_event, event_brief, fill_report
+from s2_watch.event_assessment import DISCUSS_PROMPT, assess_event, event_brief, fill_report
 from s2_watch.silence import quiet_near
 from s2_watch.ui.focus_area_dialog import FocusAreaDialog
 from s2_watch.adapters.analyst import AnalystAdapter, entry_message
@@ -1180,6 +1180,7 @@ class MainWindow(QMainWindow):
     def connect_event_detail(self, detail: EventDetail) -> None:
         detail.quiet_for = self.quiet_near_event
         detail.assessment_brief = self.event_assessment_brief
+        detail.discussion_brief = self.event_discussion_brief
         detail.ollama_settings = self.ollama_settings
         detail.assessment_changed.connect(lambda _event_id: (self.refresh_map_events(), self.events_view.refresh()))
         detail.show_on_map.connect(self.show_event_id_on_map)
@@ -2298,6 +2299,12 @@ class MainWindow(QMainWindow):
         """What Ollama reads to assess an event (an EventSummary): its reports, confirmation and background."""
         reports = self.store.event_reports(event.event_id)
         return event_brief(event, reports, self.current_event_background(event.event_id, event)), len(reports)
+
+    def event_discussion_brief(self, event) -> tuple[str, int]:
+        """What Ollama reads to answer questions about an event's assessment."""
+        reports = self.store.event_reports(event.event_id)
+        return event_brief(event, reports, self.current_event_background(event.event_id, event),
+                           DISCUSS_PROMPT), len(reports)
 
     def draft_followup_for_report(self, report_id: int | None) -> None:
         """Draft a follow-up from a saved report (from the Reports list or an event)."""

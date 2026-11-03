@@ -1,19 +1,21 @@
 """Review, edit and accept an event's assessment (Ollama's proposal, the accepted one, or a new
-one written from scratch), and look back at its history."""
+one written from scratch), ask Ollama about it, and look back at its history."""
 
 from __future__ import annotations
 
 import re
+import threading
 from dataclasses import replace
 from datetime import datetime, timezone
 from html import escape
 
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QComboBox, QDialog, QDialogButtonBox, QFormLayout, QLabel, QLineEdit, QMessageBox, QPlainTextEdit, QTextBrowser,
-    QVBoxLayout,
+    QComboBox, QDialog, QDialogButtonBox, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPlainTextEdit,
+    QPushButton, QScrollArea, QSplitter, QTextBrowser, QVBoxLayout, QWidget,
 )
 
-from s2_watch.event_assessment import LEVELS, TREND_MARKS, TRENDS, EventAssessment
+from s2_watch.event_assessment import LEVELS, TREND_MARKS, TRENDS, Discussion, EventAssessment, assessment_text
 
 
 def _lines(editor: QPlainTextEdit) -> list[str]:
@@ -31,17 +33,22 @@ def _paragraphs(text: str) -> list[str]:
 
 
 class AssessmentDialog(QDialog):
-    """The assessment's sections as editable fields; Accept makes it the event's assessment."""
+    """The assessment's sections as editable fields; Accept makes it the event's assessment. With a
+    Discussion, a panel beside them asks Ollama about the assessment as it stands in the fields."""
+
+    answered = Signal(str, str)         # answer, error (from a thread)
 
     def __init__(self, title: str, assessment: EventAssessment, report_count: int, analyst: str, parent=None,
-                 heading: str = "") -> None:
+                 heading: str = "", discussion: Discussion | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle(f"Assessment — {title}")
-        self.resize(820, 760)
+        self.resize(1320 if discussion else 820, 760)
         self.source = assessment
         self.report_count = report_count
         self.analyst = analyst
         self.accepted: EventAssessment | None = None
+        self.discussion = discussion
+        self.asking = False
         intro = QLabel(heading or "Check each statement against the numbered reports in the event's details, "
                                   "correct it, then Accept. Numbers in brackets cite those reports.")
         intro.setWordWrap(True)
@@ -80,8 +87,103 @@ class AssessmentDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout = QVBoxLayout(self)
         layout.addWidget(intro)
-        layout.addLayout(form)
+        if discussion is None:
+            layout.addLayout(form)
+        else:
+            fields = QWidget()
+            fields.setLayout(form)
+            scroll = QScrollArea()
+            scroll.setWidgetResizable(True)
+            scroll.setWidget(fields)
+            split = QSplitter(Qt.Orientation.Horizontal)
+            split.addWidget(scroll)
+            split.addWidget(self._discussion_panel())
+            split.setSizes([800, 520])
+            layout.addWidget(split, 1)
         layout.addWidget(buttons)
+
+    def _discussion_panel(self) -> QWidget:
+        self.transcript = QTextBrowser()
+        self.transcript.setHtml("<p style='color:gray'>Ask Ollama about this assessment: why it says something, "
+                                "which report a statement rests on, what the reports leave out. It answers from "
+                                "the event's reports and the assessment as it stands in the fields, citing "
+                                "reports by number. Its answers don't change the assessment.</p>")
+        self.question = QLineEdit()
+        self.question.setPlaceholderText("e.g. Why is the trend escalating?")
+        self.ask_button = QPushButton("Ask")
+        self.ask_button.setAutoDefault(False)
+        self.ask_button.clicked.connect(self.ask)
+        self.ask_status = QLabel("")
+        self.ask_status.setWordWrap(True)
+        self.answered.connect(self._answered)
+        self._asked = False
+        row = QHBoxLayout()
+        row.addWidget(self.question, 1)
+        row.addWidget(self.ask_button)
+        panel = QWidget()
+        column = QVBoxLayout(panel)
+        column.setContentsMargins(0, 0, 0, 0)
+        column.addWidget(QLabel(f"<b>Ask about this assessment</b> ({escape(self.discussion.model)})"))
+        column.addWidget(self.transcript, 1)
+        column.addWidget(self.ask_status)
+        column.addLayout(row)
+        return panel
+
+    def keyPressEvent(self, event) -> None:
+        # Enter in the question asks it, rather than accepting the assessment.
+        if self.discussion is not None and self.focusWidget() is self.question \
+                and event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            self.ask()
+            return
+        super().keyPressEvent(event)
+
+    def current_text(self) -> str:
+        """The assessment as it stands in the fields (unchecked), for the model to read."""
+        probabilities = [(statement.strip() or level.strip(), level.strip().upper() if statement.strip() else "")
+                         for statement, _, level in (line.rpartition("|") for line in _lines(self.probabilities))]
+        return assessment_text(EventAssessment(
+            bluf=" ".join(self.bluf.toPlainText().split()), trend=self.trend.currentData(),
+            trend_reason=self.trend_reason.text().strip(), agreement=" ".join(self.agreement.toPlainText().split()),
+            assessment=_paragraphs(self.assessment.toPlainText()), probabilities=probabilities,
+            gaps=_lines(self.gaps), mitigation=_lines(self.mitigation), guidance=_lines(self.guidance)))
+
+    def ask(self) -> None:
+        question = " ".join(self.question.text().split())
+        if self.discussion is None or self.asking or not question:
+            return
+        self.asking = True
+        self.ask_button.setEnabled(False)
+        self.ask_status.setText("Ollama is thinking… a minute or two on a computer without a suitable graphics card.")
+        self._add_turn("You", question)
+        self.question.clear()
+        discussion, assessment = self.discussion, self.current_text()
+
+        def work() -> None:
+            try:
+                self.answered.emit(discussion.ask(question, assessment), "")
+            except Exception as error:      # noqa: BLE001 - shown to the operator
+                self.answered.emit("", str(error) or type(error).__name__)
+
+        threading.Thread(target=work, daemon=True, name="s2-watch-assessment-question").start()
+
+    def _answered(self, answer: str, error: str) -> None:
+        self.asking = False
+        self.ask_button.setEnabled(True)
+        self.ask_status.setText(f"<span style='color:#c62828'>No answer: {escape(error)}</span>" if error else "")
+        if answer:
+            self._add_turn("Ollama", answer)
+
+    def _add_turn(self, who: str, text: str) -> None:
+        if not self._asked:              # the first question replaces the hint
+            self.transcript.clear()
+            self._asked = True
+        self.transcript.append(f"<p><b>{who}:</b> {escape(text)}</p>")
+
+    def done(self, result: int) -> None:
+        # The model stays loaded during the conversation; unloaded once the window closes.
+        if self.discussion is not None:
+            threading.Thread(target=self.discussion.release, daemon=True, name="s2-watch-release-model").start()
+        super().done(result)
 
     @staticmethod
     def _text(text: str, height: int) -> QPlainTextEdit:

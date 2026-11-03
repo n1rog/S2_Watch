@@ -57,8 +57,10 @@ class EventDetail(QWidget):
         self.format_time = format_time
         self.current = None
         self.quiet_for = None          # event -> quiet coverage cells near it (s2_watch.silence)
-        # Set by the main window: event -> (prompt, report count); () -> (endpoint, model).
+        # Set by the main window: event -> (prompt, report count); () -> (endpoint, model);
+        # event -> (what a discussion of its assessment starts from, report count).
         self.assessment_brief = None
+        self.discussion_brief = None
         self.ollama_settings = None
         self._assessing: dict[int, str] = {}       # event id -> model, while Ollama works
         self._assessment_errors: dict[int, str] = {}
@@ -182,7 +184,13 @@ class EventDetail(QWidget):
 
         event = self.current
         analyst = self.store.get_setting("operator.callsign", "").upper()
-        dialog = AssessmentDialog(event.title, assessment, event.reports, analyst, self, heading)
+        discussion = None
+        if self.discussion_brief is not None and self.ollama_settings is not None:
+            from s2_watch.event_assessment import Discussion
+
+            context, count = self.discussion_brief(event)
+            discussion = Discussion(context, count, *self.ollama_settings())
+        dialog = AssessmentDialog(event.title, assessment, event.reports, analyst, self, heading, discussion)
         if dialog.exec() and dialog.accepted is not None:
             self.store.accept_event_assessment(event.event_id, dialog.accepted)
             self.show_event(self.current)

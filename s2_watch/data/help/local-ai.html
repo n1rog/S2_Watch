@@ -51,6 +51,22 @@ MAGNET guidance.</li>
 <p>It becomes the event's <b>Analyst assessment</b>, shown at the top of its details with who accepted it and when
 (<i>Ollama-drafted (qwen2.5:7b), reviewed by N1ROG</i>). <b>Dismiss</b> drops a proposal you don't want. With no assessment yet,
 <b>write one</b> starts an empty one of your own (<i>written by N1ROG</i>); <b>edit</b> changes the accepted one.</p>
+<h2>Asking Ollama about an assessment</h2>
+<p>The review window (<b>Review &amp; accept…</b>, <b>edit</b> or <b>write one</b>) has an <b>Ask about this assessment</b>
+panel beside the fields. Type a question and press <kbd>Enter</kbd> or <b>Ask</b>, for example:</p>
+<ul>
+<li><i>Why is the trend escalating?</i></li>
+<li><i>Which report says the road is closed?</i></li>
+<li><i>Is the probability of flooding spreading supported by the reports?</i></li>
+</ul>
+<p>Ollama answers from the event's reports (the same ones the assessment read) and the assessment <i>as it stands in the
+fields</i>, so you can ask about a change you've just made. It cites reports by number, and says when the reports don't
+support a statement or don't answer the question. Follow-up questions see the earlier questions and answers.</p>
+<p>The answers are for discussion only: they don't change the assessment. If one shows the assessment is wrong, correct
+the field yourself, or close the window and assess again. The conversation isn't saved; it ends when the window closes.</p>
+<p>An answer takes about as long as an assessment (a minute or two without a suitable graphics card). It uses the
+<b>Event assessment model</b>, which stays loaded while you ask and is unloaded when the window closes; like an
+assessment, it unloads other models first and won't start when memory is short.</p>
 <p>When new reports arrive, the accepted assessment shows <b>⚠ Out of date</b>. Assess again: the new result appears below yours
 as a <b>Proposed update</b>, with <b>What changed</b> (trend, probability levels, new gaps, newer reports read). Accept it (after
 editing), or dismiss it. Every accepted version is kept: <b>history</b> lists them, newest first, so a handover can see when the

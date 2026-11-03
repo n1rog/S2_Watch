@@ -215,7 +215,10 @@ memory is free; the model is unloaded as soon as it answers.
 The model's result is a **proposed** assessment. **Review & accept…** opens it as editable
 fields; once accepted it is the event's **analyst assessment** (who and when, every earlier
 version kept under **history**). **Dismiss** drops a proposal; **write one** starts an
-assessment from scratch. When new reports arrive, a fresh assessment shows as a proposed
+assessment from scratch. Beside the fields, **Ask about this assessment** puts questions to
+the same model ("Why is the trend escalating?"): it answers from the event's reports and the
+assessment as edited, citing reports by number, and remembers the conversation until the
+window closes; its answers never change the assessment. When new reports arrive, a fresh assessment shows as a proposed
 update beside the accepted one, with what changed (trend, probability levels, new gaps). The
 accepted assessment marks the event's trend in the lists (▲ escalating, ▬ stable, ▼ winding
 down, ? unclear), fills MAGNET drafts of the event, and is listed (trend, who, when, BLUF,

@@ -13,6 +13,10 @@ event or a report.
 The model's latest result is a proposal. The analyst reviews it, edits it and accepts it; the
 accepted assessment belongs to the event (with who accepted it and when, every earlier
 version kept) and is what drafts and briefings use. An analyst can also write one from scratch.
+
+While reviewing, the analyst can ask the model about the assessment (a Discussion): it answers
+from the same reports and the assessment as it stands in the editor, keeping the conversation.
+The answers are for discussion only; they never change the assessment.
 """
 
 from __future__ import annotations
@@ -64,6 +68,29 @@ GAPS: up to four lines starting with "- ": questions the reports leave unanswere
 MITIGATION: up to three lines starting with "- ": actions tied to the threats in the reports.
 GUIDANCE: up to three lines starting with "- ": actions for MAGNET amateur-radio operators.
 {stop}"""
+
+DISCUSS_PROMPT = """You are helping a MAGNET S2 (amateur-radio emergency network intelligence) analyst who is
+reviewing an assessment of ONE event. Answer the analyst's questions using ONLY the numbered reports and
+background below, and the assessment.
+Rules:
+- No facts, numbers, places, forecasts or impacts that are not in the reports. If the reports don't say it,
+  say that they don't.
+- Cite the reports your answer rests on by number in brackets, e.g. [3] or [1, 4].
+- Where the reports don't support a statement in the assessment, say so and name the reports.
+- Answer in a few plain sentences, no headings.
+
+Event: {title}
+Category: {category} · Place: {place} · Urgency: {urgency} · Official confirmation: {official}
+The event has {count} reports. The current situation is report [{latest}].
+
+Background (facts):
+{background}
+
+{reports}
+"""
+DISCUSS_OPTIONS = {"num_predict": 400, "repeat_penalty": 1.15, "stop": ["\nAnalyst:", STOP]}
+DISCUSS_KEEP_ALIVE = "5m"   # loaded while the conversation goes on; unloaded when the window closes
+DISCUSS_TURNS = 6           # earlier questions and answers the model is shown again
 
 _CITATION = re.compile(r"\[(\d+(?:\s*[,–-]\s*\d+)*)\]")
 
@@ -124,8 +151,9 @@ def _line(number: int, report: dict) -> str:
     return f"[{number}] {_zulu(report['first_seen'])} — {who}{' — ' + place if place else ''}: {text}{confirmed}"
 
 
-def event_brief(event, reports: list[dict], background: list[str] | None = None) -> str:
-    """The prompt for one event (an EventSummary) and its reports (in the order heard)."""
+def event_brief(event, reports: list[dict], background: list[str] | None = None, template: str = PROMPT) -> str:
+    """The prompt for one event (an EventSummary) and its reports (in the order heard); ``template``
+    DISCUSS_PROMPT gives what a Discussion starts from."""
     chosen = selected(reports)
     if len(chosen) < len(reports):
         skipped = chosen[1][0] - 2
@@ -139,7 +167,7 @@ def event_brief(event, reports: list[dict], background: list[str] | None = None)
 
     place = ", ".join(part for part in (event_where(event), f"MARS Region {event.region}" if event.region else "") if part)
     facts = [line for line in (background or []) if not line.startswith("(")]
-    return PROMPT.format(title=event.title, category=event.category, place=place or "unknown",
+    return template.format(title=event.title, category=event.category, place=place or "unknown",
                          urgency=event.urgency, official=event.official or "none yet", count=len(reports),
                          latest=len(reports), background="\n".join(f"- {line}" for line in facts) or "- none",
                          reports="\n".join(lines), stop=STOP)
@@ -287,6 +315,58 @@ def assess_event(brief: str, count: int, endpoint: str, model: str, timeout: flo
     make_room(endpoint, model)
     reply = ollama_generate(endpoint, model, brief, timeout, options=OPTIONS, keep_alive=0)
     return parse_assessment(reply, count, model)
+
+
+class Discussion:
+    """Questions and answers about one event's assessment. ``context`` is event_brief(...,
+    template=DISCUSS_PROMPT) and ``count`` its number of reports."""
+
+    def __init__(self, context: str, count: int, endpoint: str, model: str, timeout: float = 600.0) -> None:
+        self.context, self.count, self.endpoint, self.model, self.timeout = context, count, endpoint, model, timeout
+        self.turns: list[tuple[str, str]] = []      # (question, answer)
+
+    def prompt(self, question: str, assessment: str) -> str:
+        lines = [self.context, "ASSESSMENT UNDER REVIEW:", assessment.strip() or "(none written yet)", ""]
+        if self.turns:
+            lines.append("CONVERSATION SO FAR:")
+            for asked, answered in self.turns[-DISCUSS_TURNS:]:
+                lines += [f"Analyst: {asked}", f"You: {answered}"]
+        lines += [f"Analyst: {' '.join(question.split())}", "You:"]
+        return "\n".join(lines)
+
+    def ask(self, question: str, assessment: str) -> str:
+        """Ollama's answer (citations of reports that don't exist dropped); raises OllamaError."""
+        make_room(self.endpoint, self.model)
+        reply = ollama_generate(self.endpoint, self.model, self.prompt(question, assessment), self.timeout,
+                                options=DISCUSS_OPTIONS, keep_alive=DISCUSS_KEEP_ALIVE)
+        answer = _cited(" ".join(reply.replace(STOP, "").split()), self.count)
+        if not answer:
+            raise OllamaError("Ollama gave no answer")
+        self.turns.append((" ".join(question.split()), answer))
+        return answer
+
+    def release(self) -> None:
+        """Unload the model once the conversation is over (when it was asked anything)."""
+        if self.turns:
+            try:
+                _ollama_json(self.endpoint, "/api/generate", {"model": self.model, "keep_alive": 0})
+            except (OSError, ValueError):
+                pass
+
+
+def assessment_text(assessment: EventAssessment) -> str:
+    """An assessment as the model is shown it in a Discussion."""
+    lines = [f"BLUF: {assessment.bluf}" if assessment.bluf else "",
+             f"TREND: {assessment.trend}" + (f" — {assessment.trend_reason}" if assessment.trend_reason else ""),
+             f"AGREEMENT: {assessment.agreement}" if assessment.agreement else ""]
+    if assessment.assessment:
+        lines += ["ASSESSMENT:", *assessment.assessment]
+    for heading, items in (("PROBABILITY", [f"{s} | {level}" if level else s for s, level in assessment.probabilities]),
+                           ("GAPS", assessment.gaps), ("MITIGATION", assessment.mitigation),
+                           ("GUIDANCE", assessment.guidance)):
+        if items:
+            lines += [f"{heading}:", *(f"- {item}" for item in items)]
+    return "\n".join(line for line in lines if line)
 
 
 TREND_MARKS = {"escalating": "▲", "stable": "▬", "winding down": "▼", "unclear": "?"}
