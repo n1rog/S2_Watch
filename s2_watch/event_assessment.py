@@ -80,7 +80,7 @@ Rules:
 - Answer in a few plain sentences, no headings.
 - For message precedence, use only MAGNET's levels below, not military or other definitions.
 
-MAGNET message precedence, highest first:
+MAGNET message precedence is how quickly the analyst must inform others about the event. Highest first:
 {precedences}
 A follow-up report on this event would start at {precedence} (from its urgency); the analyst may choose another level.
 

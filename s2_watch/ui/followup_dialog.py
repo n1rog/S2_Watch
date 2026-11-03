@@ -78,9 +78,9 @@ class FollowUpDialog(QDialog):
         self.precedence = QComboBox()
         for line, meaning, when in PRECEDENCE_LEVELS:           # flash, immediate, priority, routine
             self.precedence.addItem(line)
-            self.precedence.setItemData(self.precedence.count() - 1, f"{meaning} Handled {when}.",
+            self.precedence.setItemData(self.precedence.count() - 1, f"Inform others {when}. {meaning}",
                                         Qt.ItemDataRole.ToolTipRole)
-        self.precedence.setToolTip("How urgently the report should be handled. S2 Watch starts from the event's "
+        self.precedence.setToolTip("How quickly you must inform others about this event. S2 Watch starts from the event's "
                                    "urgency (never Flash); choose another level here (or edit the PRECEDENCE line).")
         self.precedence.activated.connect(self._precedence_chosen)
         top.addRow("Precedence", self.precedence)
