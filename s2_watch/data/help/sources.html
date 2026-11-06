@@ -14,7 +14,7 @@ stored messages and map pins. A pin sent over the air (<code>@MAGNET PIN RADIATI
 <i>PIN RADIATION EM93DN …</i>, placed at its grid square.</td><td>The database path, e.g.
 <code>~/MyApps/SpotterX/js8spotter.db</code>. SpotterX keeps a new database: if you move from JS8SuperSpotter, change the
 path, or the source goes quiet.</td></tr>
-<tr><td>APRS</td><td>Bulletins (BLN0–BLN9 and named groups) from APRS-IS, receive-only, U.S. stations only</td>
+<tr><td>APRS</td><td>Bulletins (BLN0–BLN9 and named groups) from APRS-IS, receive-only, from stations in your coverage</td>
 <td>Tick <b>Read APRS bulletins</b> and enter your call sign with an SSID, e.g. <code>N0ABC-13</code>. Servers refuse
 anonymous logins; nothing is sent to RF.</td></tr>
 </table>
@@ -90,16 +90,23 @@ or a major city abroad are placed there on the map.</li>
 <li><b>What's on screen follows it too.</b> Untick an area and the map markers, the rows under the map and the events located there
 hide at once, including ones received earlier; tick it again and they come back. Nothing is deleted, and a message that names no place
 always shows.</li>
-<li>APRS bulletins from stations abroad are kept once the coverage reaches beyond the U.S.</li>
+<li><b>APRS follows it by station.</b> APRS-IS carries the whole world, so a bulletin is kept only when its station is in a covered
+area: placed by its position beacon, or else a U.S. call sign counts as the U.S. A station abroad that sends no beacon can't be placed
+and is dropped unless every area is ticked. Bulletins already on screen hide the same way.</li>
 <li>State Department travel advisories always show: they are U.S. guidance about other countries.</li>
 </ul>
 <div class="example"><p><b>Example.</b> Tick <b>Europe</b> and <b>Asia and the Middle East</b>. Within a few minutes you get
 <i>USGS: M4.9 earthquake — 53 km WNW of Leni, Italy</i>, news such as <i>Drone attack on Kyiv overnight</i> placed at Kyiv, Ukraine,
 and <i>Internet outage: North Korea</i>. A message from K9DGY, <code>QST YEMEN … SAUDI-LED COALITION AIRSTRIKES</code>, is placed in
 Yemen. The list's heading shows the coverage, and briefings name it as their geographic focus.</p></div>
+<div class="example"><p><b>Example.</b> With <b>United States</b> and <b>North America</b> ticked, <code>DO4DR-10: BLN1WXERZ: DWD WARNUNG vor
+FROST in ERZ</code> isn't kept: its station's beacon puts it in Germany. <code>DB0RVB: BLN1WXGOE: DWD WARNUNG vor FROST</code> sends no
+beacon and its call sign isn't a U.S. one, so it isn't kept either. <code>VE3XYZ: BLN1: Ice storm in Ottawa</code>, beaconing from
+Canada, is.</p></div>
 <p>Places abroad are found by country name or by city (about 1,900 cities of 200,000 people or more, and every capital). U.S. places
 always come first: “Paris, TX” stays in Texas, “Lebanon, PA” in Pennsylvania, and a name such as Chad, Jordan or Turkey counts as a
-country only after “in”, “from”, “near” or similar.</p>
+country only after “in”, “from”, “near” or similar. A city whose name is also an everyday word (Hail, Nice, Male, Van, Split,
+Reading, Tours) counts only with its country named: “HAIL REPORTED” and “MALE SUSPECT” stay where they are, “Nice, France” is Nice.</p>
 <ul>
 <li><b>A headline's outlet isn't a place.</b> The newspaper's name after a “|” (or after a dash, when it matches the sender's site)
 counts only when the headline names no place itself: “French protests kick off | The Peninsula Qatar” is not about Qatar, while

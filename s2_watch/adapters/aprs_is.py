@@ -4,8 +4,10 @@ A background thread keeps a connection to an APRS-IS server, logged in receive-o
 unverified login, passcode -1, sends nothing to RF) with a filter for bulletins. Servers
 refuse anonymous logins (N0CALL), so the login is the operator's call sign with an SSID
 (Configuration → Sources; -13 by default, to stay clear of the operator's own APRS
-software). Only U.S. stations' bulletins are kept, unless the coverage
-(Configuration → Coverage) includes areas beyond the U.S. APRS-IS
+software). Only bulletins from stations in the coverage (Configuration → Coverage) are
+kept: a station is placed by its position beacon, or else a U.S. call sign is taken as the
+U.S.; a station elsewhere whose position isn't heard is dropped unless the whole world is
+covered (APRS-IS carries the world: a German frost warning is no use to a U.S. watch). APRS-IS
 carries live traffic only: there is no backlog to read, so S2 Watch shows what arrives
 while it runs (and the saved reports, as for every source). Bulletins repeat every few
 minutes; each is handed over once a day.
@@ -72,6 +74,29 @@ def with_position(message: Message, lat: float, lon: float) -> Message:
     return replace(message, raw_content=f"{message.raw_content} [{station} position: lat {lat:.4f}, lon {lon:.4f}]",
                    fields={**message.fields, "lat": f"{lat:.4f}", "lon": f"{lon:.4f}"})
 US_CALL = re.compile(r"^(?:A[A-L]|[KNW])[A-Z]?\d")     # U.S. stations (APRS-IS carries the world)
+
+
+def station_area(message: Message) -> str | None:
+    """The world area of a bulletin's station: where its beacon puts it, else the U.S. for a
+    U.S. call sign; None when it can't be told."""
+    from s2_watch import world
+
+    try:
+        area = world.area_at(float(message.fields["lat"]), float(message.fields["lon"]))
+    except (KeyError, ValueError):
+        area = None
+    if area is None and US_CALL.match(message.fields.get("station") or message.fields.get("sender", "")):
+        area = "us"     # no beacon (or one far at sea): a U.S. call sign
+    return area
+
+
+def station_covered(message: Message) -> bool:
+    """Whether a bulletin's station is in the coverage; one that can't be placed isn't,
+    unless the whole world is covered."""
+    from s2_watch import world
+
+    area = station_area(message)
+    return world.everything_covered() or (area is not None and world.covers(area))
 
 
 def parse_bulletin(line: str, when: datetime, us_only: bool = True) -> Message | None:
@@ -186,10 +211,15 @@ class AprsIsAdapter:
             self._seen[key] = now
             station = message.fields["station"]
             if station in self._positions:
-                self._pending.append(with_position(message, *self._positions[station]))
-            else:
-                self._waiting.append((now, message))
+                self._keep(with_position(message, *self._positions[station]))
+                return
+            self._waiting.append((now, message))
         self._watch(station)
+
+    def _keep(self, message: Message) -> None:
+        """Hand a bulletin over if its station is in the coverage (called holding the lock)."""
+        if station_covered(message):
+            self._pending.append(message)
 
     def read_messages(self) -> list[Message]:
         now = datetime.now(timezone.utc)
@@ -198,9 +228,9 @@ class AprsIsAdapter:
             for since, message in self._waiting:
                 position = self._positions.get(message.fields["station"])
                 if position is not None:
-                    self._pending.append(with_position(message, *position))
+                    self._keep(with_position(message, *position))
                 elif now - since >= POSITION_WAIT:
-                    self._pending.append(message)          # no beacon heard: without a position
+                    self._keep(message)          # no beacon heard: without a position
                 else:
                     still.append((since, message))
             self._waiting = still

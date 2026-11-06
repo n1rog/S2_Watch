@@ -194,3 +194,42 @@ def test_aprs_bulletins_carry_their_stations_position(monkeypatch) -> None:
     adapter._waiting = [(when - timedelta(minutes=11), message) for when, message in adapter._waiting]
     [silent] = adapter.read_messages()                         # no beacon within 10 minutes: without one
     assert "position" not in silent.raw_content and "lat" not in silent.fields
+
+
+def test_aprs_keeps_only_stations_inside_the_coverage(coverage) -> None:
+    from datetime import timedelta
+
+    from s2_watch.adapters import aprs_is
+    from s2_watch.missed_news import in_coverage
+
+    coverage({"us", "north_america"})                          # not the whole world
+    adapter = aprs_is.AprsIsAdapter(login="")
+    adapter._socket = type("Socket", (), {"sendall": lambda self, data: None})()
+    adapter._received("DO4DR-10>APRS,TCPIP*::BLN1WXERZ:DWD WARNUNG vor FROST in ERZ bis 07.11. 09:00")
+    adapter._received("DO4DR-10>APRS,TCPIP*:!5049.55N/01232.87E#")       # its beacon: Germany
+    adapter._received("DB0RVB>APRS,TCPIP*::BLN1WXGOE:DWD WARNUNG vor FROST - KREIS GOETTINGEN")   # never beacons
+    adapter._received("VE3XYZ>APRS,TCPIP*::BLN1     :Ice storm in Ottawa")
+    adapter._received("VE3XYZ>APRS,TCPIP*:!4525.20N/07541.80W#")         # Canada: North America
+    adapter._received("W5ABC>APRS,TCPIP*::BLN2     :Net tonight 1900")    # U.S. call, no beacon
+    adapter._waiting = [(when - timedelta(minutes=11), message) for when, message in adapter._waiting]
+    assert sorted(m.fields["station"] for m in adapter.read_messages()) == ["VE3XYZ", "W5ABC"]
+    # Already saved or listed: hidden the same way (a German station's warning names no place it knows).
+    german = Message("APRS", "DB0RVB: BLN1WXGOE: DWD WARNUNG vor FROST - KREIS GOETTINGEN",
+                     fields={"type": "BULLETIN", "sender": "DB0RVB", "station": "DB0RVB"})
+    resolver = LocationResolver()
+    assert not world.message_covered(german, resolver.resolve(german)) and not in_coverage(german, resolver)
+    coverage({key for key, _label in world.AREAS})            # the whole world: everything
+    assert world.message_covered(german, resolver.resolve(german)) and in_coverage(german, resolver)
+
+
+@pytest.mark.parametrize("text, label", [
+    ("HAIL REPORTED NEAR THE ARMORY", None),           # Ha'il, Saudi Arabia
+    ("NICE WEATHER FOR A WALK TODAY", None),           # Nice, France
+    ("MALE SUSPECT ARMED, HEADING EAST", None),        # Male, Maldives
+    ("VAN OVERTURNED ON I-35", None),                  # Van, Turkey
+    ("STORM DAMAGE IN NICE, FRANCE", "Nice, France"),  # with its country: the city
+    ("QST MUSCAT OMAN PORT CLOSED", "Muscat, Oman"),
+])
+def test_city_names_that_are_everyday_words_need_their_country(text, label) -> None:
+    found = LocationResolver().resolve(Message("JS8Call", text))
+    assert (found[0].label if found else None) == label

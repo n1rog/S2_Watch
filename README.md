@@ -253,7 +253,8 @@ and the coverage (`s2_watch/background.py`).
 Watch forms keep only messages with news keywords. In Ollama mode, S2 Watch also reads
 the radio traffic they didn't keep — slowly, in the background, newest first, each message
 once — and lists what the model thinks is news in the **Possible Misses** tab. It skips
-heartbeats, CQs, signal reports and messages JS8Call marks as fragments, uses the computer
+heartbeats, CQs, signal reports, messages JS8Call marks as fragments and anything outside
+the coverage (Configuration → Coverage; the list hides those too), uses the computer
 at most a third of the time and waits while it is busy. Turn it off under Configuration →
 Analysis Mode.
 
@@ -717,13 +718,17 @@ Messages naming a country or one of about 1,900 major cities abroad are placed t
 (`s2_watch/world.py`, data from Natural Earth via `tools/build_world.py`); U.S. places
 always come first. A headline's outlet name (after "|", or after a dash when it matches the
 sender's site) counts only when the headline names no place itself, and nationality words place national news that names no place
-("French protests" → France; not "French Quarter"). The offline map adds coarse land and
+("French protests" → France; not "French Quarter"). A city whose name is also an everyday
+word (Hail, Nice, Male, Van, Split, Reading) counts only with its country named, so "HAIL
+REPORTED" isn't placed in Saudi Arabia. The offline map adds coarse land and
 borders outside North America.
 
 **APRS** bulletins (BLN0–BLN9 and named groups) can be read from APRS-IS: turn it on
 under Configuration → Sources. Receive-only (passcode -1, nothing is sent to RF); servers
 refuse anonymous logins, so it logs in with your call sign and an SSID (default -13, to
-stay clear of your own APRS software). Only U.S. stations' bulletins are kept, and only
+stay clear of your own APRS software). Only bulletins from stations in the coverage are
+kept (a station is placed by its position beacon, else a U.S. call sign counts as the U.S.;
+a station abroad without a beacon is dropped unless the whole world is covered), and only
 what arrives while S2 Watch runs (APRS-IS has no backlog). APRS counts as radio traffic.
 Each bulletin carries its station's latitude and longitude (in the text and as lat/lon
 fields): stations heard sending bulletins are added to the server filter (b/CALL) so their

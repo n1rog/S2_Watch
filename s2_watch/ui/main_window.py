@@ -2065,6 +2065,7 @@ class MainWindow(QMainWindow):
         self.apply_news_rows_limit()
         self.refresh_map_events()
         self.events_view.refresh()
+        self.misses_view.refresh()
         self.refresh_official()
         self.rescan_sources()
         self.update_news_label()

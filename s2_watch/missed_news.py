@@ -57,6 +57,14 @@ def worth_checking(message: Message) -> bool:
             and not is_fragment(message.raw_content))
 
 
+def in_coverage(message: Message, resolver) -> bool:
+    """Whether a message is inside the coverage (Configuration → Coverage): news elsewhere,
+    e.g. German stations' APRS frost warnings, isn't a miss and isn't worth the model's time."""
+    from s2_watch import world
+
+    return world.everything_covered() or world.message_covered(message, resolver.resolve(message))
+
+
 def computer_busy() -> bool:
     """True when the processors are mostly in use (Linux and macOS; Windows: never)."""
     try:
@@ -81,6 +89,7 @@ class MissedNewsScanner(QObject):
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+        self._resolver = None          # made in the checking thread, which alone uses it
         self.checked = 0
 
     def configure(self, enabled: bool, model: str, endpoint: str, examples=None) -> None:
@@ -153,6 +162,12 @@ class MissedNewsScanner(QObject):
         key = check_key(message)
         if store.missed_checked(key):
             return
+        if self._resolver is None:
+            from s2_watch.locating import LocationResolver
+
+            self._resolver = LocationResolver()
+        if not in_coverage(message, self._resolver):
+            return             # not recorded: it is checked if the coverage grows to include it
         started = time.monotonic()
         try:
             result = analyzer.analyze(message)

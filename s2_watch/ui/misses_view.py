@@ -21,7 +21,7 @@ from s2_watch.analysis.base import AnalysisResult
 from s2_watch.analysis.categories import NEWS_CATEGORIES
 from s2_watch.analysis.ollama import readable_text
 from s2_watch.events import key_terms
-from s2_watch.missed_news import is_fragment
+from s2_watch.missed_news import in_coverage, is_fragment
 
 URGENCIES = ("low", "medium", "high")
 
@@ -126,6 +126,7 @@ class MissesView(QWidget):
         self.format_time = format_time
         self.watch_hours = watch_hours or (lambda: 24)
         self._misses = []
+        self._resolver = None
         self.explain = QLabel(
             "Radio messages none of your watch forms kept, read in the background by your Ollama model; these are "
             "the ones it thinks are news. Add them as reports (correcting the model first), or dismiss them. "
@@ -177,8 +178,14 @@ class MissesView(QWidget):
     def refresh(self) -> None:
         since = datetime.now(timezone.utc) - timedelta(hours=self.watch_hours())
         status = "dismissed" if self.show_dismissed.isChecked() else "new"
+        if self._resolver is None:
+            from s2_watch.locating import LocationResolver
+
+            self._resolver = LocationResolver()
+        # Outside the coverage (Configuration → Coverage) isn't shown: a German station's frost warning.
         self._misses = [miss for miss in self.store.possible_misses(status, since)
-                        if status != "new" or not is_fragment(miss[1].raw_content)]
+                        if (status != "new" or not is_fragment(miss[1].raw_content))
+                        and in_coverage(miss[1], self._resolver)]
         self.table.setRowCount(0)
         for key, message, result in self._misses:
             row = self.table.rowCount()

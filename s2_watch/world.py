@@ -37,6 +37,11 @@ SHORT_NAMES = {"us": "United States", "north_america": "North America", "central
 # "in", "from", "near"... ("strikes in Lebanon", not "Lebanon, PA" or "Chad said").
 AMBIGUOUS = {"CHAD", "JORDAN", "TURKEY", "JERSEY", "GUERNSEY", "GEORGIA", "GUINEA", "NIGER", "LEBANON", "PERU",
              "PANAMA", "CHINA", "MALI", "OMAN", "TOGO", "CUBA", "MONTSERRAT", "DOMINICA", "SAMOA", "ARUBA"}
+# City names that are also everyday words ("HAIL REPORTED", "MALE SUSPECT", "VAN OVERTURNED",
+# "NICE WEATHER"): they count only with their country named ("Nice, France").
+AMBIGUOUS_CITIES = {"ARCHANGEL", "BOLOGNA", "COLOGNE", "COLON", "FEZ", "GENT", "HAIL", "HIMS", "HUE", "LIEGE", "MADRAS",
+                    "MALE", "NATAL", "NICE", "ORAL", "PERM", "READING", "SARI", "SPLIT", "SPRINGS", "STOKE",
+                    "TAMALE", "TOURS", "VAN", "WELLINGTON"}
 # Nationality words, for headlines that name no place ("French protests"): they count only
 # before a word about a country's affairs, never in "French Quarter" or "Chinese restaurant".
 DEMONYMS = {
@@ -180,6 +185,8 @@ class World:
             if self._us_state_after and self._us_state_after.match(upper[match.end():]):
                 continue
             options = self.cities[match.group(1)]
+            if match.group(1) in AMBIGUOUS_CITIES:
+                options = [city for city in options if city["country"] in named_codes]
             # A name a U.S. place also has counts only with its country named, unless the
             # world city dwarfs the U.S. one (London, KY is not who's rioting).
             us_size = self.us_place_sizes.get(match.group(1))
@@ -246,7 +253,16 @@ ALWAYS_COVERED_TYPES = {"TRAVEL ADVISORY"}
 
 
 def message_covered(message, locations) -> bool:
-    return message.fields.get("type") in ALWAYS_COVERED_TYPES or locations_covered(locations)
+    """Whether a message is shown under the coverage. An APRS bulletin's station must be in it
+    too (a German station's frost warning names no place S2 Watch knows)."""
+    if message.fields.get("type") in ALWAYS_COVERED_TYPES:
+        return True
+    if message.source_application == "APRS":
+        from s2_watch.adapters.aprs_is import station_covered
+
+        if not station_covered(message):
+            return False
+    return locations_covered(locations)
 
 
 def event_area(event) -> str | None:
