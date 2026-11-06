@@ -67,7 +67,10 @@ CATEGORY_PATTERNS: dict[str, str] = {
         r'\w*virus(?:es)?|food\s+recalls?|recalled|world\s+health\s+organization|cdc|hospitali[sz]ed|'
         r'hospitals?|icu|ambulances?|medical\s+emergenc(?:y|ies)|mass\s+casualt(?:y|ies)|injur(?:ed|ies)|'
         r'overdoses?|fentanyl|quarantin(?:e|ed)|vaccin(?:e|es|ation|ations)|diseases?|infections?|'
-        r'illness(?:es)?|pathogens?)\b'
+        r'illness(?:es)?|pathogens?|screw\s*worms?|livestock|infestations?|infested|aphis|usda|'
+        r'animal\s+(?:health|diseases?)|biosecurity|swine\s+fever|foot[-\s]and[-\s]mouth|chronic\s+wasting|'
+        r'rabies|rabid|anthrax|brucellosis|mad\s+cow|hpai|zoonotic|veterinar(?:y|ians?)|culled|culling|'
+        r'west\s+nile|crop\s+(?:diseases?|blight|pests?)|invasive\s+pests?)\b'
     ),
     'Infrastructure': (
         r'\b(?:power\s+(?:outages?|out|failures?|restored|loss)|outages?|blackouts?|brownouts?|'
@@ -116,6 +119,20 @@ CATEGORY_PATTERNS: dict[str, str] = {
         r'mall|concert|stadium)\s+attacks?|attacks?\s+on\s+(?:a\s+|the\s+)?(?:synagogue|church|mosque|'
         r'school|police|civilians)|beheading|sleeper\s+cells?|jttf|ntas|threat\s+level|elevated\s+threat|'
         r'hoax\s+calls?)\b'
+    ),
+}
+
+# Every earlier built-in version of a category pattern. An update puts the current pattern in
+# place of an earlier one in the operator's category form, keeping words they added around it;
+# a form whose pattern they rewrote is left alone. Add the old text here whenever a pattern changes.
+EARLIER_PATTERNS: dict[str, tuple[str, ...]] = {
+    'Health / Wellness': (
+        r'\b(?:outbreaks?|epidemic|pandemic|covid(?:-?19)?|measles|flu|influenza|h5n1|bird\s+flu|'
+        r'avian\s+flu|ebola|mpox|monkeypox|tuberculosis|norovirus|salmonella|e\.?\s*coli|listeria|'
+        r'\w*virus(?:es)?|food\s+recalls?|recalled|world\s+health\s+organization|cdc|hospitali[sz]ed|'
+        r'hospitals?|icu|ambulances?|medical\s+emergenc(?:y|ies)|mass\s+casualt(?:y|ies)|injur(?:ed|ies)|'
+        r'overdoses?|fentanyl|quarantin(?:e|ed)|vaccin(?:e|es|ation|ations)|diseases?|infections?|'
+        r'illness(?:es)?|pathogens?)\b',
     ),
 }
 

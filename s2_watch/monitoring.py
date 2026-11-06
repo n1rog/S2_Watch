@@ -1,5 +1,6 @@
 import hashlib
 from dataclasses import replace
+from datetime import datetime, timezone
 from collections.abc import Callable, Iterable
 
 from s2_watch.adapters.base import ApplicationAdapter
@@ -8,12 +9,22 @@ from s2_watch.adapters.analyst import ENTRY_TYPE
 from s2_watch.digest import split_digest
 from s2_watch.exercise import mark_exercise
 from s2_watch.models import ANY_APPLICATION, Message, WatchForm
-from s2_watch.storage import SQLiteStore
+from s2_watch.storage import FUTURE_GRACE, SQLiteStore
 
 
 def analyzer_name(analyzer) -> str:
     """Identifies an analyzer's results ("rules", "ollama:llama3.2"...)."""
     return getattr(analyzer, "name", type(analyzer).__name__) if analyzer is not None else ""
+
+
+def not_in_future(message: Message, now: datetime | None = None) -> Message:
+    """The message, dated when it was read if its source dates it in the future. The source's
+    time is kept in "source_time", which still identifies the message when it is read again."""
+    now = now or datetime.now(timezone.utc)
+    received = message.received_at if message.received_at.tzinfo else message.received_at.replace(tzinfo=timezone.utc)
+    if received <= now + FUTURE_GRACE:
+        return message
+    return replace(message, received_at=now, fields={**message.fields, "source_time": message.received_at.isoformat()})
 
 
 def message_key(message: Message) -> str:
@@ -32,7 +43,7 @@ def legacy_message_key(message: Message) -> str:
     """The key used before 0.11.0 (it includes the text), to find messages saved then."""
     identity = (
         message.fields.get("message_id") or message.fields.get("filename")
-        or message.received_at.isoformat()
+        or message.fields.get("source_time") or message.received_at.isoformat()
     )
     parts = (message.source_application, message.fields.get("type", ""), identity, message.raw_content)
     return hashlib.sha1("\x1f".join(parts).encode("utf-8")).hexdigest()
@@ -80,6 +91,7 @@ class Monitor:
             for message in adapter.read_messages():
                 if self.cancelled:
                     return
+                message = not_in_future(message)
                 if self.on_read:
                     self.on_read(message)
                 # A digest (weekly briefing, bulletin) is handled item by item; the whole

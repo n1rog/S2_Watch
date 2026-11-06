@@ -22,6 +22,11 @@ anonymous logins; nothing is sent to RF.</td></tr>
 when it starts, and how far back the map, the list under it and a shift briefing reach. Choose 3, 6, 12 or 24 hours, 2 or 5
 days, 1 or 2 weeks, or 1 month; it is also on the Map tab as <b>Watch period</b>. 3 hours keeps the picture to the current
 shift's latest activity. APRS-IS has no history: you see bulletins from the moment S2 Watch connects.</p>
+<p><b>A date in the future is a mistake.</b> When a source dates a message more than 15 minutes ahead of this computer's
+clock, S2 Watch dates it when it was read instead, so a typo can't keep a report at the top of the lists for weeks.</p>
+<div class="example"><p><b>Example.</b> In October the State Department feed dated a French Polynesia advisory
+<i>02 Dec 2026</i> (it meant 2024). It is shown as read on the day S2 Watch fetched it. Reports saved with a future date
+by earlier versions are repaired the same way.</p></div>
 <p><b>APRS bulletins carry their station's position.</b> A bulletin has no position of its own, so S2 Watch also listens for
 the position beacons of each station that sends one, and adds the station's latitude and longitude to the bulletin. A
 station's first bulletin waits up to 10 minutes for its next beacon, then comes through without a position (stations that

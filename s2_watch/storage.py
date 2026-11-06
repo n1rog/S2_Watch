@@ -33,6 +33,11 @@ class ReportInfo:
 OFFICIAL_SENDERS = {"USGS", "NIFC", "NOAA SPC", "FEMA", "FAA", "U.S. Department of State", "NWS"}
 
 
+# How far ahead of this computer's clock a source's time may be (a station's clock running
+# fast) before it is taken as a mistake, e.g. a feed dating an advisory 02 Dec 2026 in October.
+FUTURE_GRACE = timedelta(minutes=15)
+
+
 def utc_iso(value: datetime) -> str:
     if value.tzinfo is None:
         value = value.replace(tzinfo=timezone.utc)
@@ -245,6 +250,7 @@ class SQLiteStore:
             # read again isn't analysed again by the same one.
             self._add_column("ALTER TABLE analysis_results ADD COLUMN analyzer TEXT NOT NULL DEFAULT ''")
         self._remove_repeated_messages()
+        self._repair_future_times()
         self.connection.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS messages_source_key ON messages(source_key)"
         )
@@ -293,6 +299,16 @@ class SQLiteStore:
                  SELECT MIN(id) FROM messages GROUP BY source_application, raw_content, received_at)"""
         )
         self.set_setting("migrations.repeated_messages_removed", "1")
+
+    def _repair_future_times(self) -> None:
+        """Messages, reports and events a source dated in the future (before 0.49.0 read them as
+        given) are dated now; an event's own time (a march next week) is left as it is."""
+        now = datetime.now(timezone.utc)
+        ahead, at = utc_iso(now + FUTURE_GRACE), utc_iso(now)
+        self.connection.execute("UPDATE messages SET received_at = ? WHERE received_at > ?", (at, ahead))
+        for table in ("reports", "events"):
+            self.connection.execute(f"UPDATE {table} SET first_seen = ? WHERE first_seen > ?", (at, ahead))
+            self.connection.execute(f"UPDATE {table} SET last_seen = ? WHERE last_seen > ?", (at, ahead))
 
     def save_message(self, message: Message, source_key: str | None = None, legacy_key: str | None = None) -> int:
         """Save a matched message once; a message read again returns its existing id.

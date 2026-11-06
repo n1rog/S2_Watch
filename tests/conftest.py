@@ -31,7 +31,16 @@ def main_window(tmp_path):
     windows = []
 
     def open_window(database=None):
-        window = MainWindow(str(database or tmp_path / "s2.db"))
+        from s2_watch.storage import SQLiteStore
+
+        database = database or tmp_path / "s2.db"
+        # Every MagCommstat message is watched by default: keep tests off the station's own
+        # MagCommstat database unless a test names one.
+        store = SQLiteStore(database)
+        if not store.get_setting("magcommstat.database"):
+            store.set_setting("magcommstat.database", str(tmp_path / "no-magcommstat.db3"))
+        store.connection.close()
+        window = MainWindow(str(database))
         windows.append(window)
         return window
 

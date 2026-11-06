@@ -353,6 +353,9 @@ period.
 
 S2 Watch creates an unfiltered default watch form for each supported
 application: JS8Call, MagCommstat, Commstat, FLMSG, and JS8SuperSpotter.
+**All MagCommstat messages** is on from the start (and switched on once in
+existing installations): QSTs and StatReps are written as news, and one about a
+subject no category form knows would otherwise be dropped. The others start off.
 
 A watch form can also apply to **All applications**. S2 Watch adds one such form
 for each news category (Civil Unrest, Climate / Environment, Crime, Economy,
@@ -364,7 +367,15 @@ and avoid common false matches such as "who", "Bill", "snap(shot)", or "deploy"
 environmental hazards (wildfire, smoke and air quality, earthquakes, evacuations,
 chemical spills; radiological and nuclear incidents at high urgency). The offline analyzer uses the same vocabulary, so a message a
 category form captures is classified in that category. The forms are added once;
-a category form you delete is not recreated.
+a category form you delete is not recreated. An update brings each category form's
+built-in words up to date, keeping words you added around them; a form whose pattern
+you rewrote is left alone. Health / Wellness includes animal and crop health
+(screwworm, livestock infestations, USDA and APHIS notices, African swine fever,
+foot-and-mouth, chronic wasting disease, rabies, crop blight).
+
+A source that dates a message more than 15 minutes in the future (a feed's typo, such
+as a State Department advisory dated 02 Dec 2026 in October) has it dated when it was
+read instead; records saved that way by earlier versions are repaired at launch.
 S2 Watch remembers its settings between launches: which watch forms are enabled,
 map filters and overlays, focus regions, theme, analysis and alert options, the window
 size and position, the tab you were on, Newsworthiness column widths, and the Metrics

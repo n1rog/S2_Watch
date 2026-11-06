@@ -239,9 +239,10 @@ class Wizard:
             "Include OSINT (free official/open sources: FAA security restrictions, FEMA, USGS, SPC storm reports,\n"
             "  NIFC wildfires, State Dept advisories, news on unrest) as reports? Needs internet.",
             self.forms.get(("OSINT", DEFAULT_WATCH_FORMS["OSINT"]), True))
-        # The per-application "every message" forms stay disabled; enable them in the app if wanted.
-        self.say("Per-application forms (every message from one application) are left disabled;\n"
-                 "  enable them later from Configuration → Watch Forms if you want them.")
+        # The per-application "every message" forms stay as installed (only MagCommstat's is on).
+        self.say("Every MagCommstat message (QSTs, StatReps) is kept, whatever its words. The other\n"
+                 "  per-application forms (every message from one application) are left disabled;\n"
+                 "  change them later from Configuration → Watch Forms if you want.")
 
     def step_analysis(self) -> None:
         self.heading("5. Analysis")
