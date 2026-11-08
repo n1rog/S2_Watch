@@ -599,8 +599,9 @@ Nearby markers that do not overlap are never grouped. Selecting a message in the
 Newsworthiness table flashes its group when its marker is inside one.
 Map markers use category-based icons after newsworthiness analysis. The map
 includes a category legend and independent category filters; filter choices
-are saved locally. A **Show map icon legend** control hides or shows the
-legend while leaving all map markers visible. Routine locations use a neutral icon; newsworthy locations
+are saved locally. The icons head the legend in the map's top-right corner,
+above the NWS and aircraft keys. A **Show map icon legend** control hides or shows them
+while leaving all map markers visible. Routine locations use a neutral icon; newsworthy locations
 use a distinct color and symbol for their assigned category. Climate /
 Environment locations use a cloud-and-lightning icon. Watch Forms do not
 currently include a category filter because categories are assigned after a

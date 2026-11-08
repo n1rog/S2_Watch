@@ -262,3 +262,10 @@ def test_aircraft_lists_are_remembered_and_reach_the_map(main_window, tmp_path) 
     reopened = main_window(tmp_path / "s2.db")
     assert reopened.aircraft_kind_lists["military"].text() == "REACH*"
     assert reopened.map_view._aircraft_lists["military"] == ["REACH*"]
+
+
+def test_the_icon_legend_is_part_of_the_map_legend(main_window) -> None:
+    window = main_window()
+    assert window.map_view._icon_legend                     # on by default, drawn by the page
+    window.map_legend_filter.setChecked(False)
+    assert not window.map_view._icon_legend and window.store.get_setting("map.legend.visible") == "0"

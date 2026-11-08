@@ -4,7 +4,7 @@ from pathlib import Path
 from html import escape
 
 from PySide6.QtCore import QObject, Qt, QTimer, QUrl, Signal, Slot
-from PySide6.QtWidgets import QGridLayout, QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
 from s2_watch import world
 from s2_watch.analysis.categories import NEWS_CATEGORIES
@@ -103,6 +103,7 @@ class MapView(QWidget):
         self._aircraft: tuple[list[dict], str] | None = None
         self._aircraft_kinds: dict[str, bool] = {}
         self._aircraft_lists: dict[str, list[str]] = {}
+        self._icon_legend = True
         self._focus_regions: list[int] = []
         self._nws_alerts: list[dict] | None = None
         self._coverage: list[dict] | None = None
@@ -127,24 +128,6 @@ class MapView(QWidget):
         self._fallback = QLabel("Map engine unavailable. Location markers will appear below.")
         self._fallback.setWordWrap(True)
         layout = QVBoxLayout(self)
-        self._legend_widget = QWidget(self)
-        legend = QGridLayout(self._legend_widget)
-        legend.addWidget(QLabel("<b>Map icon legend</b>"), 0, 0, 1, 4)
-        legend_categories = (*NEWS_CATEGORIES, "routine")
-        for index, category in enumerate(legend_categories):
-            symbol, color = self.CATEGORY_ICONS[category]
-            icon = QLabel(symbol)
-            icon.setFixedSize(28, 28)
-            icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            icon.setStyleSheet(
-                f"background-color: {color}; color: white; border-radius: 14px; "
-                "font-weight: bold; border: 1px solid white;"
-            )
-            label = QLabel(category)
-            row, column = divmod(index, 2)
-            legend.addWidget(icon, row + 1, column * 2)
-            legend.addWidget(label, row + 1, column * 2 + 1)
-        layout.addWidget(self._legend_widget)
         if self._web_view:
             layout.addWidget(self._web_view)
             self._web_view.loadFinished.connect(self._page_loaded)
@@ -156,7 +139,9 @@ class MapView(QWidget):
             self._render()
 
     def set_legend_visible(self, visible: bool) -> None:
-        self._legend_widget.setVisible(visible)
+        """Show or hide the map icons in the on-map legend (with the NWS and aircraft keys)."""
+        self._icon_legend = visible
+        self._run(f"setIconLegendVisible({json.dumps(visible)})")
 
     def set_radar_visible(self, visible: bool) -> None:
         self._radar_visible = visible
@@ -393,6 +378,7 @@ class MapView(QWidget):
             if self._coverage is not None:
                 self._run(f"setCoverage({json.dumps(self._coverage)})")
             self._run(f"setFocusRegions({json.dumps(self._focus_regions)}, true)")
+            self._run(f"setIconLegendVisible({json.dumps(self._icon_legend)})")
             if getattr(self, "_focus_area", None):
                 self._run(f"setFocusArea({json.dumps(self._focus_area)})")
             if self._aircraft_kinds:
@@ -429,12 +415,17 @@ html,body,#map{{height:100%;margin:0}}
 .place-label{{background:none;border:none}}
 .place-label span{{display:block;transform:translate(-50%,-50%);white-space:nowrap;font:11px sans-serif;color:#37474f;text-shadow:0 0 2px #f2efe9,0 0 2px #f2efe9,0 0 2px #f2efe9}}
 .category-marker span{{display:flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:50%;color:white;font-weight:bold;font-size:15px;border:2px solid white;box-shadow:0 1px 4px #555}}
-.overlay-legend{{background:rgba(255,255,255,.92);color:#1b1b1b;padding:6px 9px;border-radius:4px;font:12px sans-serif;box-shadow:0 1px 3px rgba(0,0,0,.3);max-width:230px}}
+.overlay-legend{{background:rgba(255,255,255,.92);color:#1b1b1b;padding:6px 9px;border-radius:4px;font:12px sans-serif;box-shadow:0 1px 3px rgba(0,0,0,.3);max-width:270px}}
 .overlay-legend b{{display:block;margin-top:4px}}
 .overlay-legend b:first-child{{margin-top:0}}
 .overlay-legend i{{display:inline-block;width:12px;height:12px;border-radius:2px;margin-right:6px;vertical-align:-2px}}
 .overlay-legend span,.overlay-legend .note{{color:#52514e}}
 .overlay-legend .note{{font-size:11px}}
+.overlay-legend{{max-height:calc(100vh - 24px);overflow-y:auto;box-sizing:border-box}}
+.overlay-legend .icon-legend{{display:grid;grid-template-columns:1fr 1fr;gap:2px 8px}}
+.overlay-legend .icon-legend div{{display:flex;align-items:center;line-height:1.15}}
+.overlay-legend em{{flex:none;display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;color:white;font:bold 10px sans-serif;border:1px solid white;box-shadow:0 0 0 1px rgba(0,0,0,.3);margin-right:5px}}
+.overlay-legend em.stack{{width:18px;height:18px;border-width:2px;font-size:9px}}
 .radar-stamp{{background:rgba(255,255,255,.88);color:#1b1b1b;padding:3px 8px;border-radius:4px;font:12px sans-serif;box-shadow:0 1px 3px rgba(0,0,0,.3)}}
 .radar-stamp span{{color:#52514e}}
 .radar-stamp .radar-step{{margin-left:4px;font-variant-numeric:tabular-nums}}
@@ -1114,8 +1105,19 @@ function setAircraftVisible(visible) {{
 const overlayLegend = L.control({{position: 'topright'}});
 overlayLegend.onAdd = () => {{ const element = L.DomUtil.create('div', 'overlay-legend'); L.DomEvent.disableClickPropagation(element); return element; }};
 const swatch = (fill, border) => '<i style="background:' + fill + ';border:1px solid ' + (border || fill) + '"></i>';
+// Map icons first: the markers are always there, the overlays come and go.
+const iconLegendOrder = {json.dumps([*NEWS_CATEGORIES, "routine"])};
+let iconLegendShown = true;
+function setIconLegendVisible(visible) {{ iconLegendShown = visible; updateOverlayLegend(); }}
 function updateOverlayLegend() {{
   const parts = [];
+  if (iconLegendShown) {{
+    parts.push('<b>Map icons</b><div class="icon-legend">' + iconLegendOrder.map(category => {{
+      const spec = categoryIcons[category];
+      return '<div><em style="background:' + spec[1] + '">' + spec[0] + '</em>' + escapeHtml(category === 'routine' ? 'Routine' : category) + '</div>';
+    }}).join('') + '</div><div class="note"><em class="stack" style="background:' + categoryIcons['Crime'][1] +
+      '">3</em>Reports in one spot, in the colour of the most common category</div>');
+  }}
   if (overlayState.nws) {{
     const counts = nwsDrawn;
     parts.push('<b>NWS watches &amp; warnings</b>' + (nwsError ? '<div class="note">Unavailable: ' + escapeHtml(nwsError) + '</div>' : ''));
