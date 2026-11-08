@@ -280,6 +280,11 @@ air-ambulance callsigns and by registration to air-medical operators
 (`s2_watch/data/air_ambulance.json`; refresh it with
 `python tools/build_air_ambulance.py`).
 
+Each aircraft type (civilian, military, medevac) has a box for **only these
+aircraft**: tail numbers, callsigns or ICAO addresses, with `*` as a wildcard
+(`REACH*`). An empty box shows the whole type. Emergencies always show, and the
+lists change only what the map shows, not the data fetched.
+
 ## Continuous integration and releases
 
 `.github/workflows/ci.yml` runs the tests, a Linux install from the installer package,

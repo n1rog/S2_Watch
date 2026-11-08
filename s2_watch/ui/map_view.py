@@ -11,6 +11,7 @@ from s2_watch.analysis.categories import NEWS_CATEGORIES
 from s2_watch.models import Message
 from s2_watch.geo import maidenhead_to_coordinates
 from s2_watch.locating import LocationResolver
+from s2_watch.overlays import only_listed_aircraft
 from s2_watch.geocoding import NominatimGeocoder
 
 try:
@@ -101,6 +102,7 @@ class MapView(QWidget):
         self._overlays = {"nws": False, "coverage": False, "greyline": False, "aircraft": False}
         self._aircraft: tuple[list[dict], str] | None = None
         self._aircraft_kinds: dict[str, bool] = {}
+        self._aircraft_lists: dict[str, list[str]] = {}
         self._focus_regions: list[int] = []
         self._nws_alerts: list[dict] | None = None
         self._coverage: list[dict] | None = None
@@ -178,7 +180,20 @@ class MapView(QWidget):
 
     def set_aircraft(self, aircraft: list[dict], source: str) -> None:
         self._aircraft = (aircraft, source)
-        self._run(f"setAircraft({json.dumps(aircraft)}, {json.dumps(source)})")
+        self._send_aircraft()
+
+    def set_aircraft_lists(self, lists: dict[str, list[str]]) -> None:
+        """Only these aircraft for a kind ("civil", "military", "medical"): tail numbers,
+        callsigns or ICAO addresses, * as a wildcard; an empty list shows the whole kind."""
+        self._aircraft_lists = {kind: list(patterns) for kind, patterns in lists.items()}
+        if self._aircraft is not None:
+            self._send_aircraft()
+
+    def _send_aircraft(self) -> None:
+        # Filtered here, so the page gets (and holds) only the aircraft it can show.
+        aircraft, source = self._aircraft
+        shown = only_listed_aircraft(aircraft, self._aircraft_lists)
+        self._run(f"setAircraft({json.dumps(shown)}, {json.dumps(source)})")
 
     def set_aircraft_kinds(self, kinds: dict[str, bool]) -> None:
         """Show or hide aircraft by type: "civil", "military", "medical", "emergency"."""
@@ -383,7 +398,7 @@ class MapView(QWidget):
             if self._aircraft_kinds:
                 self._run(f"setAircraftKinds({json.dumps(self._aircraft_kinds)})")
             if self._aircraft is not None:
-                self._run(f"setAircraft({json.dumps(self._aircraft[0])}, {json.dumps(self._aircraft[1])})")
+                self._send_aircraft()
             self._push_to_page()
 
     def _push_to_page(self) -> None:

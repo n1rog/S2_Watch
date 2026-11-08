@@ -9,6 +9,7 @@ matches): the last time each 4-character grid square was heard from, so the map 
 show where the network is reporting and where it has gone quiet.
 """
 
+import fnmatch
 import json
 from pathlib import Path
 import math
@@ -398,6 +399,33 @@ def fetch_aircraft(view: tuple[float, float, float] | None = None) -> tuple[list
         records.extend(part_records)
         time.sleep(REQUEST_SPACING_S)
     return merge_aircraft(records), source
+
+
+def aircraft_kind(aircraft: dict) -> str:
+    """"military", "medical" or "civil": the map's colour (military wins over medevac)."""
+    return "military" if aircraft.get("military") else "medical" if aircraft.get("medical") else "civil"
+
+
+def parse_aircraft_list(text: str) -> list[str]:
+    """Tail numbers, callsigns or ICAO addresses typed as a list: commas, spaces or new lines
+    between them; capitals and dashes don't matter ("n-123ab" is N123AB); * is a wildcard."""
+    return [entry.replace("-", "") for entry in re.split(r"[\s,;]+", text.upper()) if entry.replace("-", "")]
+
+
+def aircraft_listed(aircraft: dict, patterns: list[str]) -> bool:
+    """Whether the aircraft's registration, callsign or ICAO address matches one of the patterns."""
+    names = {(aircraft.get(field) or "").upper().replace("-", "").strip()
+             for field in ("registration", "flight", "hex")} - {""}
+    return any(fnmatch.fnmatchcase(name, pattern) for pattern in patterns for name in names)
+
+
+def only_listed_aircraft(aircraft: list[dict], lists: dict[str, list[str]]) -> list[dict]:
+    """Keep, for each kind with a list, only the aircraft on it; a kind with an empty list keeps
+    all of its aircraft. Emergencies always pass: whether they show is the map's choice."""
+    if not any(lists.values()):
+        return aircraft
+    return [a for a in aircraft
+            if a.get("emergency") or not lists.get(aircraft_kind(a)) or aircraft_listed(a, lists[aircraft_kind(a)])]
 
 
 def merge_aircraft(records) -> list[dict]:

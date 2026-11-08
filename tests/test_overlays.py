@@ -221,3 +221,44 @@ def test_the_united_states_and_world_buttons_move_the_map(tmp_path, main_window)
     window.map_us_button.click()
     lat, lon, us_zoom = bounds()
     assert us_zoom > world_zoom and 30 < lat < 45 and -105 < lon < -90
+
+
+def test_only_listed_aircraft_of_a_kind_are_shown() -> None:
+    from s2_watch.overlays import aircraft_listed, only_listed_aircraft, parse_aircraft_list
+
+    assert parse_aircraft_list(" n-911lf, LIFE*;ae4d4d\nREACH* ") == ["N911LF", "LIFE*", "AE4D4D", "REACH*"]
+    assert parse_aircraft_list("  ,  ") == []
+    canadian = {"hex": "c03a5f", "registration": "C-GABC", "flight": "WJA123"}
+    assert aircraft_listed(canadian, parse_aircraft_list("c-gabc")) and aircraft_listed(canadian, ["CGABC"])
+    assert aircraft_listed(canadian, ["WJA*"]) and aircraft_listed(canadian, ["C03A5F"])
+    assert not aircraft_listed(canadian, ["WJA12"])          # whole names, unless a * says otherwise
+
+    cessna = {"hex": "a1", "registration": "N5178S", "flight": "N5178S", "military": False, "medical": False}
+    airliner = {"hex": "a2", "registration": "N123UA", "flight": "UAL123", "military": False, "medical": False}
+    hijacked = {"hex": "a3", "registration": "N9", "flight": "SWA9", "military": False, "medical": False,
+                "emergency": "Hijack"}
+    reach = {"hex": "ae1", "registration": "", "flight": "REACH42", "military": True, "medical": False}
+    tanker = {"hex": "ae2", "registration": "", "flight": "PACK21", "military": True, "medical": False}
+    lifeflight = {"hex": "a4", "registration": "N911LF", "flight": "N911LF", "military": False, "medical": True}
+    every = [cessna, airliner, hijacked, reach, tanker, lifeflight]
+    assert only_listed_aircraft(every, {}) is every
+    assert only_listed_aircraft(every, {"civil": [], "military": [], "medical": []}) is every
+    shown = only_listed_aircraft(every, {"civil": ["N5178S"], "military": ["REACH*"], "medical": []})
+    # The listed civilian and military aircraft, the emergency, and every medevac (no list).
+    assert shown == [cessna, hijacked, reach, lifeflight]
+
+
+def test_aircraft_lists_are_remembered_and_reach_the_map(main_window, tmp_path) -> None:
+    window = main_window()
+    box = window.aircraft_kind_lists["military"]
+    box.setText("reach*, pack21")
+    box.editingFinished.emit()
+    assert window.map_view._aircraft_lists["military"] == ["REACH*", "PACK21"]
+    assert window.store.get_setting("map.aircraft.only.military") == "reach*, pack21"
+    box.clear()                                   # the clear button applies at once
+    assert window.map_view._aircraft_lists["military"] == []
+    box.setText("REACH*")
+    box.editingFinished.emit()
+    reopened = main_window(tmp_path / "s2.db")
+    assert reopened.aircraft_kind_lists["military"].text() == "REACH*"
+    assert reopened.map_view._aircraft_lists["military"] == ["REACH*"]

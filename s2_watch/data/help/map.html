@@ -19,6 +19,14 @@ coarse land and borders elsewhere</td></tr>
 </table>
 <div class="example"><p><b>Example: saving data.</b> The aircraft layer uses about 3–4 GB of internet data a day while civilian aircraft are
 shown. Untick <b>Civilian</b> (and Medevac if you don't need it) to keep only military and emergencies, or turn aircraft off.</p></div>
+<p>To follow particular aircraft, type them in the box beside <b>Civilian</b>, <b>Military</b> or <b>Medevac</b>: tail
+numbers, callsigns or ICAO addresses, separated by commas or spaces. That type then shows only those aircraft; an empty box
+shows them all. <code>*</code> matches anything, so <code>REACH*</code> is every REACH flight. Capitals and dashes don't
+matter (<code>c-gabc</code> is C-GABC). Emergencies still show, and the list changes only what the map shows, not the data
+fetched.</p>
+<div class="example"><p><b>Example.</b> Military <code>REACH*, PACK21</code> · Medevac <code>N911LF, LIFE*</code> ·
+Civilian empty: only REACH flights and PACK21 among military aircraft, only N911LF and LIFE… flights among air
+ambulances, and all civilian traffic.</p></div>
 <p>If markers, aircraft or regions vanish while you zoom, tick <b>Configuration → Display… → Software map rendering</b> and restart
 S2 Watch: some graphics drivers (seen with Intel Iris Xe) drop them. If the map's engine is stopped, for example when the computer runs
 out of memory, S2 Watch reloads the map by itself and says so in the status bar.</p>

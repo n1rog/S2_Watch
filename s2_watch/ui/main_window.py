@@ -84,7 +84,7 @@ from s2_watch.storage import SQLiteStore
 from s2_watch.ui.icons import app_icon
 from s2_watch.ui.map_view import MapView
 from s2_watch.ui.metrics_view import MetricsView
-from s2_watch.overlays import AircraftPoller, NwsAlertsPoller
+from s2_watch.overlays import AircraftPoller, NwsAlertsPoller, parse_aircraft_list
 from s2_watch.corroboration import corroborate, official_items
 from s2_watch.digest import digest_label
 from s2_watch.default_forms import install_default_forms
@@ -365,6 +365,7 @@ class MainWindow(QMainWindow):
             map_filter_layout.addWidget(checkbox)
         # Aircraft types, indented under "Show aircraft", each remembered.
         self.aircraft_kind_filters: dict[str, QCheckBox] = {}
+        self.aircraft_kind_lists: dict[str, QLineEdit] = {}
         aircraft_kinds = QVBoxLayout()
         aircraft_kinds.setContentsMargins(24, 0, 0, 0)
         aircraft_kinds.setSpacing(2)
@@ -381,8 +382,28 @@ class MainWindow(QMainWindow):
             checkbox.setChecked(self.store.get_setting(f"map.aircraft.kind.{kind}", "1") == "1")
             checkbox.stateChanged.connect(self.aircraft_kinds_changed)
             self.aircraft_kind_filters[kind] = checkbox
-            aircraft_kinds.addWidget(checkbox)
+            if kind == "emergency":
+                aircraft_kinds.addWidget(checkbox)
+                continue
+            # Beside each type: only these aircraft of it (empty shows them all).
+            only = QLineEdit(self.store.get_setting(f"map.aircraft.only.{kind}", ""))
+            only.setPlaceholderText("all — or only these…")
+            only.setClearButtonEnabled(True)
+            only.setToolTip(
+                "Show only these aircraft of this type: tail numbers, callsigns or ICAO addresses, separated by "
+                "commas or spaces, e.g. N911LF, LIFE*, AE4D4D. * matches anything (REACH* is every REACH flight). "
+                "Capitals and dashes don't matter. Leave empty to show them all. Emergencies still show.")
+            only.editingFinished.connect(self.aircraft_lists_changed)
+            # The clear button empties the box without finishing an edit: apply that at once.
+            only.textChanged.connect(lambda text: text or self.aircraft_lists_changed())
+            self.aircraft_kind_lists[kind] = only
+            row = QHBoxLayout()
+            row.setSpacing(6)
+            row.addWidget(checkbox)
+            row.addWidget(only, 1)
+            aircraft_kinds.addLayout(row)
         map_filter_layout.addLayout(aircraft_kinds)
+        self.aircraft_lists_changed()
         self.nws_poller = NwsAlertsPoller(parent=self)
         self.nws_poller.alerts_ready.connect(self.map_view.set_nws_alerts)
         # Alerts are fetched all the time (not only when the NWS layer is shown) to
@@ -1879,10 +1900,19 @@ class MainWindow(QMainWindow):
         aircraft_on = self.map_overlay_filters["aircraft"].isChecked()
         for checkbox in self.aircraft_kind_filters.values():
             checkbox.setEnabled(aircraft_on)
+        for kind, only in self.aircraft_kind_lists.items():
+            only.setEnabled(aircraft_on and kinds[kind])
         self.map_view.set_aircraft_kinds(kinds)
         # Civilian and medevac aircraft come only from the general-traffic sweeps; with
         # both hidden, fetch just military and emergencies (saves most of the data).
         self.aircraft_poller.set_general_traffic(kinds["civil"] or kinds["medical"])
+
+    def aircraft_lists_changed(self) -> None:
+        lists = {}
+        for kind, only in self.aircraft_kind_lists.items():
+            self.store.set_setting(f"map.aircraft.only.{kind}", only.text().strip())
+            lists[kind] = parse_aircraft_list(only.text())
+        self.map_view.set_aircraft_lists(lists)
 
     def map_overlay_changed(self, overlay: str) -> None:
         visible = self.map_overlay_filters[overlay].isChecked()
