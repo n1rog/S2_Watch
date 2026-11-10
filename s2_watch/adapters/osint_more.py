@@ -169,6 +169,27 @@ def fetch_hurricanes() -> list[Message]:
 
 # -- IODA: internet outages by state -----------------------------------------------------
 IODA_URL = "https://api.ioda.inetintel.cc.gatech.edu/v2/outages/alerts"
+# The signals that measure whether service is up, and how far below normal each must fall to
+# be an outage. IODA calls a dip of 1-5% "critical" (a state's announced networks at 99%), so its
+# level alone isn't enough. Darknet traffic (stray background traffic; Washington sits at 6-11% of
+# "normal" all day) and Google traffic swing without any outage, so they never count alone.
+OUTAGE_SIGNALS = {"ping-slash24": ("reachable networks", 0.80), "bgp": ("announced networks", 0.90)}
+_OUTAGE_TEXT = re.compile(r"^Internet outage: .+ — (.+?) at (\d+)% of normal")
+
+
+def real_outage(datasource: str, share: float) -> bool:
+    """Whether a signal this far below normal is an outage: at most 80% of a state's networks
+    reachable, or at most 90% of them announced."""
+    return datasource in OUTAGE_SIGNALS and share <= OUTAGE_SIGNALS[datasource][1]
+
+
+def weak_outage_report(text: str) -> bool:
+    """A saved "Internet outage: …" report that real_outage() would no longer send."""
+    found = _OUTAGE_TEXT.match(text)
+    if not found:
+        return False
+    names = {name: source for source, (name, _limit) in OUTAGE_SIGNALS.items()}
+    return not (found.group(1) in names and real_outage(names[found.group(1)], int(found.group(2)) / 100))
 
 
 def fetch_internet_outages(hours: int = 24) -> list[Message]:
@@ -190,7 +211,9 @@ def _outages(hours: int, scope: dict, kind: str) -> list[Message]:
                                     "limit": 500, **scope})
     latest: dict[str, dict] = {}
     for alert in json.loads(_get(f"{IODA_URL}?{query}")).get("data") or []:
-        if alert.get("level") != "critical":
+        if alert.get("level") != "critical" or not alert.get("historyValue"):
+            continue
+        if not real_outage(alert.get("datasource", ""), alert["value"] / alert["historyValue"]):
             continue
         code = alert["entity"]["code"]
         if code not in latest or alert["time"] > latest[code]["time"]:
@@ -203,9 +226,8 @@ def _outages(hours: int, scope: dict, kind: str) -> list[Message]:
             area = found[4]["area"] if found and found[4] else None
             if area is None or area == "us" or not world.covers(area):
                 continue
-        share = alert["value"] / alert["historyValue"] if alert.get("historyValue") else 0
-        how = {"ping-slash24": "reachable networks", "bgp": "announced networks", "merit-nt": "darknet traffic"}.get(
-            alert.get("datasource"), alert.get("datasource", "signal"))
+        share = alert["value"] / alert["historyValue"]
+        how = OUTAGE_SIGNALS[alert["datasource"]][0]
         when = datetime.fromtimestamp(alert["time"], tz=timezone.utc)
         text = f"Internet outage: {state} — {how} at {share:.0%} of normal (IODA, critical)"
         messages.append(Message(APPLICATION, text, received_at=when, fields={

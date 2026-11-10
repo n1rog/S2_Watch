@@ -78,7 +78,17 @@ def test_rivers_storms_volcanoes_and_outages_are_one_event_each(monkeypatch) -> 
         {"entity": {"code": "4447", "name": "Virginia"}, "time": int(NOW.timestamp()) - 7200, "level": "critical",
          "value": 9000, "historyValue": 92748, "datasource": "ping-slash24"},
         {"entity": {"code": "4400", "name": "Ohio"}, "time": int(NOW.timestamp()), "level": "warning",
-         "value": 1, "historyValue": 2, "datasource": "bgp"}]})
+         "value": 1, "historyValue": 2, "datasource": "bgp"},
+        # "Critical" to IODA, but not outages: a 1% dip, and darknet / Google traffic alone.
+        {"entity": {"code": "4411", "name": "District of Columbia"}, "time": int(NOW.timestamp()), "level": "critical",
+         "value": 990, "historyValue": 1000, "datasource": "bgp"},
+        {"entity": {"code": "4452", "name": "Washington"}, "time": int(NOW.timestamp()), "level": "critical",
+         "value": 8, "historyValue": 100, "datasource": "merit-nt"},
+        {"entity": {"code": "4420", "name": "Iowa"}, "time": int(NOW.timestamp()), "level": "critical",
+         "value": 30, "historyValue": 100, "datasource": "gtr"},
+        # A later darknet alert doesn't replace Virginia's real one.
+        {"entity": {"code": "4447", "name": "Virginia"}, "time": int(NOW.timestamp()), "level": "critical",
+         "value": 2, "historyValue": 100, "datasource": "merit-nt"}]})
     [outage] = osint_more.fetch_internet_outages()          # the latest critical alert per state
     assert outage.raw_content == "Internet outage: Virginia — reachable networks at 6% of normal (IODA, critical)"
     assert incident_key(outage) == "outage:region:4447" and RULES.analyze(outage).category == "Infrastructure"
@@ -146,3 +156,32 @@ def test_feed_wording_is_recognised(text, category) -> None:
 
     result = RULES.analyze(Message("OSINT", text))
     assert result.newsworthy and result.category == category
+
+
+def test_only_deep_drops_in_service_signals_are_internet_outages(tmp_path) -> None:
+    from s2_watch.adapters.osint_more import real_outage, weak_outage_report
+    from s2_watch.analysis.base import AnalysisResult
+    from s2_watch.models import Message
+    from s2_watch.storage import SQLiteStore
+
+    assert real_outage("ping-slash24", 0.80) and not real_outage("ping-slash24", 0.81)
+    assert real_outage("bgp", 0.90) and not real_outage("bgp", 0.95)
+    assert not real_outage("merit-nt", 0.02) and not real_outage("gtr", 0.30)
+    assert weak_outage_report("Internet outage: District of Columbia — announced networks at 99% of normal (IODA, critical)")
+    assert weak_outage_report("Internet outage: Washington — darknet traffic at 8% of normal (IODA, critical)")
+    assert not weak_outage_report("Internet outage: Virginia — reachable networks at 6% of normal (IODA, critical)")
+    assert not weak_outage_report("POWER OUTAGE IN TULSA")
+
+    # Reports saved before the change leave the news once the database is opened.
+    store = SQLiteStore(tmp_path / "s2.db")
+    store.set_setting("repair.weak_outages", "0")
+    ids = {}
+    for name, text in (("weak", "Internet outage: Washington — darknet traffic at 8% of normal (IODA, critical)"),
+                       ("real", "Internet outage: Virginia — reachable networks at 6% of normal (IODA, critical)")):
+        message = Message("OSINT", text, fields={"type": "INTERNET OUTAGE", "message_id": name})
+        ids[name] = store.save_message(message, name)
+        store.save_analysis(ids[name], AnalysisResult(True, "Infrastructure", "medium", text, 0.9, ("outage",)))
+    store.connection.close()
+    store = SQLiteStore(tmp_path / "s2.db")
+    newsworthy = dict(store.connection.execute("SELECT message_id, newsworthy FROM analysis_results").fetchall())
+    assert (newsworthy[ids["weak"]], newsworthy[ids["real"]]) == (0, 1)

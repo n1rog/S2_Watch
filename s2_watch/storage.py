@@ -251,6 +251,7 @@ class SQLiteStore:
             self._add_column("ALTER TABLE analysis_results ADD COLUMN analyzer TEXT NOT NULL DEFAULT ''")
         self._remove_repeated_messages()
         self._repair_future_times()
+        self._retire_weak_outages()
         self.connection.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS messages_source_key ON messages(source_key)"
         )
@@ -299,6 +300,24 @@ class SQLiteStore:
                  SELECT MIN(id) FROM messages GROUP BY source_application, raw_content, received_at)"""
         )
         self.set_setting("migrations.repeated_messages_removed", "1")
+
+    def _retire_weak_outages(self) -> None:
+        """Once: internet "outages" saved before 0.52.0 at 95% of normal, or from darknet traffic,
+        are no longer news (s2_watch.adapters.osint_more.real_outage), so they leave the
+        news lists and their events."""
+        if self.get_setting("repair.weak_outages") == "1":
+            return
+        from s2_watch.adapters.osint_more import weak_outage_report
+
+        rows = self.connection.execute(
+            "SELECT id, report_id, raw_content FROM messages WHERE raw_content LIKE 'Internet outage:%'").fetchall()
+        weak = [(message_id, report_id) for message_id, report_id, text in rows if weak_outage_report(text)]
+        self.connection.executemany("UPDATE analysis_results SET newsworthy = 0 WHERE message_id = ?",
+                                    [(message_id,) for message_id, _report in weak])
+        self.connection.executemany("UPDATE reports SET newsworthy = 0 WHERE id = ?",
+                                    {(report_id,) for _message, report_id in weak if report_id is not None})
+        self.connection.commit()
+        self.set_setting("repair.weak_outages", "1")
 
     def _repair_future_times(self) -> None:
         """Messages, reports and events a source dated in the future (before 0.49.0 read them as

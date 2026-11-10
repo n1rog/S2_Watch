@@ -695,7 +695,9 @@ Added in 0.29 (each can be switched off under Configuration → Watch Forms):
   alerts only appear with a watch period of 2 days or more (Configuration → Sources).
 - **Space weather (NOAA SWPC)**: radio blackouts R2+, radiation storms S2+, geomagnetic
   storms G3+, which affect HF propagation.
-- **Internet outages by state (IODA, Georgia Tech)**: critical outages.
+- **Internet outages by state (IODA, Georgia Tech)**: critical alerts where at most 80% of
+  networks are reachable or at most 90% announced; darknet and Google traffic alone don't
+  count. Reports saved earlier that fall short leave the news once, on upgrade.
 - **Airport closures and ground stops (FAA)**, except for routine volume, works, and
   scheduled closure notices.
 - **USGS volcanoes** at WATCH or WARNING.
