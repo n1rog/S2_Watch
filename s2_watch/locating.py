@@ -35,6 +35,7 @@ from s2_watch.geo import (
 )
 from s2_watch.dedup import strip_envelope
 from s2_watch.geocoding import GeocodingError
+from s2_watch.towns import find_town
 from s2_watch.models import Message
 
 DATA_DIR = Path(__file__).resolve().parent / "data"
@@ -94,6 +95,28 @@ def url_place_words(url: str) -> str:
     """The words of a story's address after the site name, for finding its place."""
     path = re.sub(r"^(?:https?://)?[^/]+", "", url or "").split("?")[0]
     return " ".join(_SLUG_JUNK.sub(" ", path.replace("-", " ").replace("/", " ")).split())
+
+
+def written_as_name(phrase: str, text: str) -> bool:
+    """Whether a phrase is written as a name in the text: in text that isn't all capitals,
+    "in shooting" isn't a place but "in Etna" may be. In all capitals (radio) anything may be."""
+    letters = [c for c in text if c.isalpha()]
+    if not letters or sum(c.isupper() for c in letters) > 0.8 * len(letters):
+        return True
+    words = phrase.split()
+    if not words:
+        return False
+    pattern = r"\b" + r"\W+".join(re.escape(word) for word in words) + r"\b"
+    return any(all(word[:1].isupper() for word in match.group(0).split())
+               for match in re.finditer(pattern, text, re.IGNORECASE))
+
+
+def _named_abroad(name: str) -> bool:
+    """Whether a town's name is also a country or major city abroad (Paris, Athens, London)."""
+    from s2_watch.world import load_world
+
+    found = load_world().find(f"IN {name.upper()}")      # "in": some country names count only after it
+    return found is not None and (found[4] or {}).get("code") not in ("US", "USA")
 
 
 @dataclass(frozen=True)
@@ -580,8 +603,16 @@ class LocationResolver:
             candidates = [e for e in g.places[name] if self._allowed(context, e["state"])]
             if len(candidates) == 1 and (self._constrained(context) or candidates[0]["rank"] <= 3):
                 found.append(self._place_location(candidates[0]))
+        if not found:
+            # A smaller town a headline names without its state ("shooting in East Providence").
+            town = find_town(text, lambda state: self._allowed(context, state),
+                             context["states"] + context["suffix_states"], _named_abroad)
+            if town:
+                name, state, lat, lon = town
+                return [ResolvedLocation("city", lat, lon, f"{name}, {state}", state)]
         if not found and self.geocoder:
-            found.extend(self._geocode(unresolved, context))
+            found.extend(self._geocode([(phrase, state) for phrase, state in unresolved if written_as_name(phrase, text)],
+                                       context))
         return found
 
     def _lookup_place(self, phrase: str, state: str | None, context: dict, require_unique: bool):

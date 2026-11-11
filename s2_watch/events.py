@@ -215,15 +215,39 @@ def key_terms(text: str) -> set[str]:
 
 
 def clean_title(title: str, place: Place) -> str:
-    """A headline with the coordinates placeholder replaced by the state's (or country's) name."""
-    if "Coordinates in report" not in title:
-        return title
+    """A headline with the coordinates placeholder replaced by the state's (or country's) name,
+    and the state's name added to a headline that names no place ("Shooting" in WV is
+    "Shooting — West Virginia")."""
     from s2_watch.locating import load_gazetteer
+
+    if "Coordinates in report" not in title:
+        state = place.state or ""
+        name = load_gazetteer().state_names.get(state, "") or (state if len(state) > 2 else "")
+        if name and " — " not in title and name.lower() not in title.lower() \
+                and not re.search(rf"\b{re.escape(state)}\b", title):          # "TULSA OK - RIVER FLOODING"
+            return f"{title} — {name}"
+        return title
 
     state = place.state or ""
     name = load_gazetteer().state_names.get(state, "") or (state if len(state) > 2 else "") or (
         f"{place.lat:.2f}, {place.lon:.2f}" if place.has_point else "")
     return title.replace(" — Coordinates in report", f" — {name}" if name else "").replace("Coordinates in report", name)
+
+
+def place_title(title: str, locations) -> str:
+    """A new event's title, naming its most specific place when the summary doesn't."""
+    point = next((location for location in locations if location.level in SPECIFIC_LEVELS), None)
+    return titled_with_place(title, point.label) if point is not None else title
+
+
+def titled_with_place(title: str, label: str) -> str:
+    """A title that names no place, with the place added: "Shooting" -> "Shooting — East Providence, RI";
+    one that names it, or already says where, is left alone."""
+    town = label.split(",")[0].strip().lower()
+    if not label or " — " in title or (town and town in title.lower()):
+        return title
+    head, dot, facts = title.partition(" · ")
+    return f"{head} — {label}{dot}{facts}"
 
 
 def belongs(candidate: EventCandidate, category: str, hazards: set[str], place: Place, seen: datetime,

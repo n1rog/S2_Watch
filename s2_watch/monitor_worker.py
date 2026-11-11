@@ -14,7 +14,7 @@ from PySide6.QtCore import QObject, QTimer, Signal, Slot
 from s2_watch.analysis.base import AnalysisResult, NewsAnalyzer
 from s2_watch.analysis.ollama import readable_text
 from s2_watch.analysis.summary import is_placeholder_summary, summarize
-from s2_watch.events import incident_key, key_terms, place_from_locations, report_hazards
+from s2_watch.events import incident_key, key_terms, place_from_locations, place_title, report_hazards
 from s2_watch.exercise import mark_exercise
 from s2_watch.geocoding import NominatimGeocoder
 from s2_watch.locating import LocationResolver, ResolvedLocation
@@ -97,9 +97,19 @@ class MonitorWorker(QObject):
             locations = self.resolver.resolve(message)
             text = f"{readable_text(message)} {summary}"
             self.store.assign_event(report_id, category, report_hazards(text), place_from_locations(locations),
-                                    summary or message.raw_content[:120], incident_key(message), key_terms(text),
-                                    closing_text(message))
+                                    place_title(summary or message.raw_content[:120], locations), incident_key(message),
+                                    key_terms(text), closing_text(message))
             grouped += 1
+        # Once: events saved without a place that the towns list (0.53.0) can now place. Offline
+        # only: the online geocoder would take an hour of spaced requests for a backlog this size.
+        if self.store.get_setting("migrations.place_towns") != "1":
+            offline = LocationResolver()
+            offline.set_corrections(self.store.place_corrections())
+            for event_id, report_id, message in self.store.unplaced_events(since):
+                location = next(iter(offline.resolve(message)), None)
+                if location is not None:
+                    self.store.place_event(event_id, report_id, location)
+            self.store.set_setting("migrations.place_towns", "1")
         # Once: events whose all-clear arrived before events could close (before 0.28).
         if self.store.get_setting("migrations.history_all_clear") != "1":
             grouped += self.store.close_events_from_history(since)
@@ -213,7 +223,8 @@ class MonitorWorker(QObject):
             text = f"{readable_text(message)} {result.summary}"
             self.store.assign_event(
                 processed.report.report_id, result.category, report_hazards(text),
-                place_from_locations(processed.locations), result.summary, incident_key(message), key_terms(text),
+                place_from_locations(processed.locations), place_title(result.summary, processed.locations),
+                incident_key(message), key_terms(text),
                 closing_text(message),
             )
 

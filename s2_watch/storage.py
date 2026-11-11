@@ -883,6 +883,45 @@ class SQLiteStore:
                  old_lat, old_lon, event_id))
         self.connection.commit()
 
+    def unplaced_events(self, since: datetime) -> list[tuple[int, int, Message]]:
+        """Events since ``since`` with no place at all: (event id, its first report, that report's message)."""
+        rows = self.connection.execute(
+            """SELECT e.id, r.id, m.source_application, m.form_name, m.raw_content, m.received_at, m.fields_json
+               FROM events e
+               JOIN reports r ON r.id = (SELECT MIN(id) FROM reports WHERE event_id = e.id)
+               JOIN messages m ON m.id = (SELECT MIN(id) FROM messages WHERE report_id = r.id)
+               WHERE e.last_seen >= ? AND e.state = '' AND e.lat IS NULL""", (utc_iso(since),)).fetchall()
+        events = []
+        for event_id, report_id, application, form_name, raw, received_at, fields_json in rows:
+            try:
+                fields = json.loads(fields_json) if fields_json else {}
+            except ValueError:
+                fields = {}
+            events.append((int(event_id), int(report_id), Message(
+                application, raw, received_at=datetime.fromisoformat(received_at), form_name=form_name,
+                fields={str(k): str(v) for k, v in fields.items()})))
+        return events
+
+    def place_event(self, event_id: int, report_id: int, location) -> None:
+        """Give an event (and its first report) a place found later, and name it in their titles."""
+        from s2_watch.events import titled_with_place
+
+        self.connection.execute("UPDATE events SET lat = ?, lon = ?, state = ?, region = ? WHERE id = ?",
+                                (location.lat, location.lon, location.state or "", location.region, event_id))
+        self.connection.execute(
+            "UPDATE reports SET lat = ?, lon = ?, state = ?, region = ?, place_level = ? WHERE id = ?",
+            (location.lat, location.lon, location.state or "", location.region, location.level, report_id))
+        title = self.connection.execute("SELECT title FROM events WHERE id = ?", (event_id,)).fetchone()[0]
+        self.connection.execute("UPDATE events SET title = ? WHERE id = ?",
+                                (titled_with_place(title, location.label), event_id))
+        for analysis_id, summary in self.connection.execute(
+                """SELECT a.id, a.summary FROM analysis_results a JOIN messages m ON m.id = a.message_id
+                   WHERE m.report_id = ?""", (report_id,)).fetchall():
+            if summary == title:
+                self.connection.execute("UPDATE analysis_results SET summary = ? WHERE id = ?",
+                                        (titled_with_place(summary, location.label), analysis_id))
+        self.connection.commit()
+
     def close_events_from_history(self, since: datetime) -> int:
         """Close open events whose latest report is an all-clear (reports placed before events
         could close). Only radio and official reports close events, not news. The number closed."""

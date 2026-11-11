@@ -534,12 +534,21 @@ or "Washington County" resolves to the one in that state or region, and a geocod
 town outside the named region is rejected. For StatReps, which report on the
 sender's own area, the sender's grid square counts at its grid level. Matching is
 case-insensitive and uses bundled lists of about 3,200 US counties and 700 larger
-US cities and towns, so it works offline; smaller towns need geocoding. Links in
+US cities and towns, so it works offline. News headlines that name a smaller town
+without its state ("shooting in East Providence") are placed from the Census
+Bureau's places of 2,500 people or more (`s2_watch/data/us_towns.json`, built by
+`tools/build_us_towns.py`): only names written as names, with a place word around
+them ("in Etna", "Oldsmar Walmart", "Brownsville police"), and a shared name only
+in a state the text names or when one town is at least three times the next.
+Event titles name the place when it is known ("Shooting — East Providence, RI").
+On upgrade, events saved without a place are placed once, offline. Links in
 messages are ignored. The sender's station stays a separate marker.
 Place-name geocoding is opt-in. When enabled, only extracted place names—not
-complete message text—are sent to OpenStreetMap Nominatim, and results are
-cached locally in SQLite. It is disabled by default and uses a short timeout;
-map markers from coordinates and grids do not require geocoding.
+complete message text—are sent to OpenStreetMap Nominatim, at most one a second,
+and results are cached locally in SQLite. In mixed-case text only phrases written
+as names are looked up. It is disabled by default and uses a short timeout;
+map markers from coordinates and grids do not require geocoding. (Before 0.53.0
+a cache bug kept it from ever sending a request.)
 Three optional overlays are in the map filters (each remembered, off by default),
 with a legend in the map's top-right corner for whichever are on:
 

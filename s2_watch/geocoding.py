@@ -1,9 +1,16 @@
 import json
 import re
+import threading
+import time
 import urllib.parse
 import urllib.request
 
 from s2_watch import __version__
+
+
+REQUEST_SPACING_S = 1.1
+_SPACING = threading.Lock()
+_last_request = [0.0]
 
 
 class GeocodingError(RuntimeError):
@@ -100,8 +107,14 @@ class NominatimGeocoder:
     def geocode(self, place: str) -> tuple[float, float] | None:
         normalized = "v2:" + " ".join(place.split()).casefold()
         cached = self.cache_get(normalized)
-        if cached is not None:
+        if cached is not False:          # False: never asked; None: asked, not found
             return cached
+        # OpenStreetMap's usage policy: at most one request a second.
+        with _SPACING:
+            wait = _last_request[0] + REQUEST_SPACING_S - time.monotonic()
+            if wait > 0:
+                time.sleep(wait)
+            _last_request[0] = time.monotonic()
         query = urllib.parse.urlencode({"q": place, "format": "jsonv2", "limit": 1})
         request = urllib.request.Request(
             f"https://nominatim.openstreetmap.org/search?{query}",

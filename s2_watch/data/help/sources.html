@@ -114,6 +114,15 @@ Canada, is.</p></div>
 always come first: “Paris, TX” stays in Texas, “Lebanon, PA” in Pennsylvania, and a name such as Chad, Jordan or Turkey counts as a
 country only after “in”, “from”, “near” or similar. A city whose name is also an everyday word (Hail, Nice, Male, Van, Split,
 Reading, Tours) counts only with its country named: “HAIL REPORTED” and “MALE SUSPECT” stay where they are, “Nice, France” is Nice.</p>
+<p><b>Towns news names without their state.</b> S2 Watch knows every U.S. town of 2,500 people or more (the Census Bureau's
+list), so “1 injured in shooting in East Providence” is placed in East Providence, RI, and the event is titled
+<i>Shooting — East Providence, RI</i>. A town counts only when written as a name with a place word around it (“in Etna”,
+“Oldsmar Walmart”, “Brownsville police”, “Bronx boy”). Where towns share a name, one in a state the text names wins, else
+one at least three times the size of the next; Springfield, with many of similar size, stays unplaced without its state.
+Town names that are everyday words (Justice, Surprise, Mobile home), months (August) or part of a longer name (Morgan
+Park, Lakewood Crest) don't count. Events from before 0.53.0 that had no place get one once, when you update.</p>
+<p><b>Place-name geocoding</b> (Configuration → Display) looks up smaller places on OpenStreetMap: only the place name is
+sent, at most one a second, and each answer is kept. Before 0.53.0 it never sent anything, even when switched on.</p>
 <ul>
 <li><b>A headline's outlet isn't a place.</b> The newspaper's name after a “|” (or after a dash, when it matches the sender's site)
 counts only when the headline names no place itself: “French protests kick off | The Peninsula Qatar” is not about Qatar, while

@@ -156,7 +156,8 @@ def test_what_is_on_screen_hides_with_an_area_taken_out_of_the_coverage(main_win
 @pytest.mark.parametrize("text, sender, label", [
     ("Police fire tear gas as new French protests kick off | The Peninsula Qatar", "thepeninsulaqatar.com", "France"),
     ("Israel orders lockdown of West Bank – NBC Los Angeles", "nbclosangeles.com", "Israel"),  # not the outlet's city
-    ("Oak Brook police use plate readers – NBC Chicago", "nbcchicago.com", "Chicago, IL"),  # no other place: the outlet's
+    ("Oak Brook police use plate readers – NBC Chicago", "nbcchicago.com", "Oak Brook, IL"),  # the town, not the outlet
+    ("Police use plate readers – NBC Chicago", "nbcchicago.com", "Chicago, IL"),  # no other place: the outlet's
     ("Fire in Tulsa - Oklahoma", "example.com", "Tulsa, OK"),                  # a dash that isn't the outlet
     ("Storm floods French Quarter in New Orleans | WWL", "wwltv.com", "New Orleans, LA"),
     ("Chinese restaurant fire downtown", "example.com", None),                 # a nationality alone isn't a place

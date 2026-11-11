@@ -17,7 +17,7 @@ def test_headline_has_event_place_and_facts() -> None:
     assert headline("UT - Black Canyon Fire.  3532 acres 0pct contained.  Evacuation orders in place.") == \
         "Black Canyon Fire — Utah · 3532 acres · 0% contained"
     assert headline("AZ: 1 dead and 2 injured in Buckeye shooting  suspect still on the loose") == \
-        "Shooting — Arizona · 1 dead, 2 injured"
+        "Shooting — Buckeye, AZ · 1 dead, 2 injured"
     assert headline("Hawaii- About 19k residents remain without power after hurricane Lala") == \
         "Hurricane Lala — Hawaii · 19k without power"
 
