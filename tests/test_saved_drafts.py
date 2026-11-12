@@ -18,13 +18,20 @@ def suggest(report, endpoint, model):   # stands in for Ollama
 def test_a_briefing_is_saved_after_the_suggestion_and_reopens(tmp_path, monkeypatch) -> None:
     app = QApplication.instance() or QApplication([])
     store = SQLiteStore(tmp_path / "s2.db")
+    store.set_setting("reports.folder", str(tmp_path / "reports"))
     text = briefing_report([], NOW, 24)
-    dialog = FollowUpDialog(None, store, ollama=("http://x", "m"), text=text, suggest_fn=suggest, draft_kind="briefing")
+    dialog = FollowUpDialog(None, store, ollama=("http://x", "m"), text=text, suggest_fn=suggest, draft_kind="briefing",
+                            export=True)
     assert dialog.unsaved() and dialog.save_button.isEnabled()
     dialog._suggested(suggest(text, "", ""), "")            # the suggestion arrives
-    dialog.save_draft()
-    assert not dialog.unsaved() and dialog.save_button.text() == "Saved in S2 Watch ✓"
+    dialog.save_all()                                        # Save: kept in S2 Watch, every format written
+    assert not dialog.unsaved() and dialog.save_button.text() == "Saved ✓"
     [saved] = store.list_drafts()
+    [day] = (tmp_path / "reports").iterdir()                 # a folder for today (UTC)
+    names = sorted(path.name for path in day.iterdir())
+    stem = "MAGNET_S2_SITUATION_BRIEFING_UNITED_STATES_261011-1400Z"
+    assert names == sorted(f"{stem}{end}" for end in (".txt", "_FLMSG.txt", "_JS8Call.txt", ".docx", ".html")), names
+    assert sorted(saved["files"]) == sorted(str(day / name) for name in names)
     assert saved["kind"] == "briefing" and saved["subject"] == "Situation Briefing – the United States"
     assert saved["dtg"] == "261011-1400Z"
     assert "Activity is assessed as steady." in store.get_draft(saved["id"])["text"]

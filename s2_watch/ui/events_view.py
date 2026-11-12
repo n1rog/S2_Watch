@@ -312,7 +312,8 @@ class EventsView(QWidget):
         self.hide_closed.toggled.connect(self._filter_changed)
         self.count = QLabel()
         briefing = QPushButton("Draft briefing…")
-        briefing.setToolTip("Draft a shift briefing from these events (full report, FLMSG and JS8Call versions)")
+        briefing.setToolTip("Draft a shift briefing: choose the period (since the last briefing, or this tab's period and "
+                            "filters) and the events")
         briefing.clicked.connect(self.draft_briefing.emit)
         top = QHBoxLayout()
         top.addWidget(QLabel("Period:"))

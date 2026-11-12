@@ -291,6 +291,10 @@ class Wizard:
             "Times shown in", [("Local time", "local"), ("Zulu (UTC)", "utc")], self.current("display.time_zone", "local"))
         self.settings["ui.theme"] = self.choose(
             "Theme", [("Light", "light"), ("Dark", "dark")], self.current("ui.theme", "light"))
+        from s2_watch.report_files import FOLDER_SETTING, default_folder
+
+        self.say("Saved reports and briefings go in a folder of their own, with a subfolder for each UTC day.")
+        self.settings[FOLDER_SETTING] = self.ask("Reports folder", self.current(FOLDER_SETTING, str(default_folder())))
 
     def step_summary(self) -> bool:
         self.heading("Summary")
@@ -298,7 +302,7 @@ class Wizard:
                   "commstat.database": "CommStat", "flmsg.directory": "FLMSG", "js8superspotter.database": "JS8SuperSpotter",
                   "review.hours": "Review window (hours)", "focus.regions": "Focus regions", "analysis.mode": "Analysis",
                   "alerts.enabled": "Desktop alerts", "alerts.high_urgency_only": "High urgency only",
-                  "display.time_zone": "Time zone", "ui.theme": "Theme"}
+                  "display.time_zone": "Time zone", "ui.theme": "Theme", "reports.folder": "Reports folder"}
         for key, label in labels.items():
             if key not in self.settings:
                 continue

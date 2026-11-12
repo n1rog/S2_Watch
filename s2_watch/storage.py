@@ -160,6 +160,13 @@ class SQLiteStore:
                 updated_at TEXT NOT NULL
             )"""
         )
+        # files: JSON list of files written; sent_at: when it was marked sent; origin "scheduled"
+        # for a briefing S2 Watch drafted itself at a shift change.
+        draft_columns = {row[1] for row in self.connection.execute("PRAGMA table_info(drafts)")}
+        for column, kind in (("files", "TEXT NOT NULL DEFAULT ''"), ("sent_at", "TEXT NOT NULL DEFAULT ''"),
+                             ("event_id", "INTEGER"), ("origin", "TEXT NOT NULL DEFAULT ''")):
+            if column not in draft_columns:
+                self._add_column(f"ALTER TABLE drafts ADD COLUMN {column} {kind}")
         # Intelligence the operator entered (summaries cleared for release, e.g. from HSIN or
         # a fusion center): delivered as OSINT items of type "ANALYST ENTRY".
         self.connection.execute(
@@ -594,7 +601,8 @@ class SQLiteStore:
 
     # -- saved reports and briefings ---------------------------------------------------
 
-    def save_draft(self, kind: str, text: str, draft_id: int | None = None, report_id: int | None = None) -> int:
+    def save_draft(self, kind: str, text: str, draft_id: int | None = None, report_id: int | None = None,
+                   event_id: int | None = None, origin: str = "") -> int:
         """Save (or update) a briefing or report draft; its id."""
         from s2_watch.s2_report import parse_report
 
@@ -602,29 +610,57 @@ class SQLiteStore:
         now = utc_iso(datetime.now(timezone.utc))
         if draft_id is not None and self.connection.execute("SELECT 1 FROM drafts WHERE id = ?", (draft_id,)).fetchone():
             self.connection.execute(
-                "UPDATE drafts SET subject = ?, dtg = ?, text = ?, updated_at = ? WHERE id = ?",
-                (report.subject, report.dtg, text, now, draft_id))
+                "UPDATE drafts SET subject = ?, dtg = ?, text = ?, updated_at = ?, origin = '' WHERE id = ?",
+                (report.subject, report.dtg, text, now, draft_id))   # edited: the operator's now
         else:
+            if event_id is None and report_id is not None:
+                event_id = self.event_of_report(report_id)
             draft_id = self.connection.execute(
-                """INSERT INTO drafts(kind, subject, dtg, text, report_id, created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                (kind, report.subject, report.dtg, text, report_id, now, now)).lastrowid
+                """INSERT INTO drafts(kind, subject, dtg, text, report_id, created_at, updated_at, event_id, origin)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (kind, report.subject, report.dtg, text, report_id, now, now, event_id, origin)).lastrowid
         self.connection.commit()
         return int(draft_id)
 
+    def add_draft_files(self, draft_id: int, paths) -> None:
+        """Note files written from a draft (the newest last, each once)."""
+        row = self.connection.execute("SELECT files FROM drafts WHERE id = ?", (draft_id,)).fetchone()
+        if row is None:
+            return
+        files = [path for path in (json.loads(row[0]) if row[0] else []) if path not in {str(p) for p in paths}]
+        files += [str(path) for path in paths]
+        self.connection.execute("UPDATE drafts SET files = ? WHERE id = ?", (json.dumps(files), draft_id))
+        self.connection.commit()
+
+    def mark_draft_sent(self, draft_id: int, sent: bool = True) -> None:
+        self.connection.execute("UPDATE drafts SET sent_at = ? WHERE id = ?",
+                                (utc_iso(datetime.now(timezone.utc)) if sent else "", draft_id))
+        self.connection.commit()
+
+    _DRAFT_KEYS = ("id", "kind", "subject", "dtg", "report_id", "created_at", "updated_at", "files", "sent_at",
+                   "event_id", "origin")
+
+    def _draft(self, row) -> dict:
+        draft = dict(zip(self._DRAFT_KEYS, row))
+        try:
+            draft["files"] = json.loads(draft["files"]) if draft["files"] else []
+        except ValueError:
+            draft["files"] = []
+        return draft
+
     def list_drafts(self) -> list[dict]:
         rows = self.connection.execute(
-            "SELECT id, kind, subject, dtg, report_id, created_at, updated_at FROM drafts ORDER BY updated_at DESC"
-        ).fetchall()
-        keys = ("id", "kind", "subject", "dtg", "report_id", "created_at", "updated_at")
-        return [dict(zip(keys, row)) for row in rows]
+            f"SELECT {', '.join(self._DRAFT_KEYS)} FROM drafts ORDER BY updated_at DESC").fetchall()
+        return [self._draft(row) for row in rows]
 
     def get_draft(self, draft_id: int) -> dict | None:
         row = self.connection.execute(
-            "SELECT id, kind, subject, dtg, text, report_id, updated_at FROM drafts WHERE id = ?", (draft_id,)
-        ).fetchone()
-        keys = ("id", "kind", "subject", "dtg", "text", "report_id", "updated_at")
-        return dict(zip(keys, row)) if row else None
+            f"SELECT {', '.join(self._DRAFT_KEYS)}, text FROM drafts WHERE id = ?", (draft_id,)).fetchone()
+        if row is None:
+            return None
+        draft = self._draft(row[:-1])
+        draft["text"] = row[-1]
+        return draft
 
     def delete_draft(self, draft_id: int) -> None:
         self.connection.execute("DELETE FROM drafts WHERE id = ?", (draft_id,))

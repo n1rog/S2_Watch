@@ -1,21 +1,27 @@
 """Draft a follow-up or a briefing: edit the full report, then copy or save its FLMSG and
-JS8Call versions (made from the full report as it is edited)."""
+JS8Call versions (made from the full report as it is edited).
+
+**Save** keeps the draft in S2 Watch and writes every format (full text, FLMSG, JS8Call, and
+for MAGNET S2 reports the Word document and web page) to the day's reports folder
+(s2_watch.report_files); **More** saves one format somewhere else."""
 
 from __future__ import annotations
 
 import threading
 from datetime import datetime, timezone
+from html import escape
 from pathlib import Path
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QFontDatabase, QGuiApplication
+from PySide6.QtCore import Qt, QUrl, Signal
+from PySide6.QtGui import QDesktopServices, QFontDatabase, QGuiApplication
 from PySide6.QtWidgets import (
-    QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPlainTextEdit,
-    QPushButton, QTabWidget, QVBoxLayout, QWidget,
+    QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QMenu, QMessageBox,
+    QPlainTextEdit, QTabWidget, QToolButton, QVBoxLayout, QWidget,
 )
 
 from s2_watch.analysis.ollama import draft_assessment
 from s2_watch.followup import JS8CALL_TARGET, FollowUpFacts, dtg, flmsg_text, full_report, js8call_text
+from s2_watch import report_files
 from s2_watch.s2_report import PRECEDENCE_LEVELS, file_stem, parse_report
 
 
@@ -50,7 +56,7 @@ class FollowUpDialog(QDialog):
                  suggest_label: str = "Suggest subject && assessment (Ollama)",
                  mark_label: str = "Mark report “Follow-up created”", marked_label: str = "Marked “Follow-up created”",
                  callsign: str = "", export: bool = False, draft_kind: str = "",
-                 draft_id: int | None = None, report_id: int | None = None) -> None:
+                 draft_id: int | None = None, report_id: int | None = None, event_id: int | None = None) -> None:
         super().__init__(parent)
         self.ollama = ollama   # (endpoint, model) when Ollama is the analysis mode
         self.setWindowTitle(title)
@@ -67,7 +73,11 @@ class FollowUpDialog(QDialog):
         self.draft_kind = draft_kind
         self.draft_id = draft_id
         self.report_id = report_id
+        self.event_id = event_id
+        self.export = export            # MAGNET S2 report: Word and web versions too
         self._saved_text: str | None = None
+        self._written_text: str | None = None     # the text the files in the reports folder hold
+        self._pending_files: list[Path] = []      # written before the draft had an id
         fixed = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont)
 
         self.callsign = QLineEdit(facts.callsign if facts else callsign)
@@ -101,11 +111,9 @@ class FollowUpDialog(QDialog):
             "In the Word and web versions, \"time | event\" lines become the timeline, \"category | HIGH\" lines the "
             "probability table, and lines in (parentheses) are prompts to replace.",
             self.full), "1. Full report")
-        save = QPushButton("Save as text file…")
-        save.clicked.connect(self._save_flmsg)
         self.tabs.addTab(self._page(
             "Plain upper-case text wrapped for radio — paste into an FLMSG form (e.g. ICS-213 or blank).",
-            self.flmsg, save), "2. FLMSG")
+            self.flmsg), "2. FLMSG")
         self.tabs.addTab(self._page(
             f"A short message from the full report's fields (aim for {JS8CALL_TARGET} characters or fewer).",
             self.js8call, self.js8call_count), "3. JS8Call")
@@ -121,27 +129,48 @@ class FollowUpDialog(QDialog):
         self.suggestion_ready.connect(self._suggested)
         self.mark = buttons.addButton(mark_label, QDialogButtonBox.ButtonRole.ActionRole)
         self.mark.clicked.connect(self._mark)
-        if export:   # the MAGNET S2 report as a Word document or a web page
-            word = buttons.addButton("Save Word report…", QDialogButtonBox.ButtonRole.ActionRole)
-            word.setToolTip("Save in the MAGNET S2 Intelligence Report format (.docx)")
-            word.clicked.connect(lambda: self._export("docx"))
-            page = buttons.addButton("Save web page…", QDialogButtonBox.ButtonRole.ActionRole)
-            page.setToolTip("Save as a web page in the MAGNET template (for the website)")
-            page.clicked.connect(lambda: self._export("html"))
-        if draft_kind:
-            self.save_button = buttons.addButton("Save in S2 Watch", QDialogButtonBox.ButtonRole.ActionRole)
-            self.save_button.setToolTip("Keep this draft in S2 Watch (Reports → Saved Reports & Briefings); "
-                                        "saving again updates it")
-            self.save_button.clicked.connect(self.save_draft)
+        # One format, somewhere of your choosing (Save writes them all to the reports folder).
+        self.more = QToolButton()
+        self.more.setText("More")
+        self.more.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        more = QMenu(self.more)
+        if export:
+            more.addAction("Save Word report as…").triggered.connect(lambda: self._save_as("docx"))
+            more.addAction("Save web page as…").triggered.connect(lambda: self._save_as("html"))
+        more.addAction("Save FLMSG text as…").triggered.connect(lambda: self._save_as("flmsg"))
+        more.addAction("Save JS8Call text as…").triggered.connect(lambda: self._save_as("js8"))
+        more.addAction("Save full report as text…").triggered.connect(lambda: self._save_as("text"))
+        more.addSeparator()
+        more.addAction("Open reports folder").triggered.connect(self._open_folder)
+        self.more.setMenu(more)
+        buttons.addButton(self.more, QDialogButtonBox.ButtonRole.ActionRole)
+        self.save_button = buttons.addButton("Save", QDialogButtonBox.ButtonRole.ActionRole)
+        self.save_button.setDefault(True)
+        self.save_button.setToolTip(
+            ("Keep this draft in S2 Watch (the Reports tab) and write " if draft_kind else "Write ")
+            + ("the full report, FLMSG and JS8Call text, Word report and web page" if export
+               else "the full report, FLMSG and JS8Call text")
+            + " to today's reports folder. Saving again updates them.")
+        self.save_button.clicked.connect(self.save_all)
         buttons.addButton(QDialogButtonBox.StandardButton.Close).clicked.connect(self.close)
+        self.saved_line = QLabel()
+        self.saved_line.setTextFormat(Qt.TextFormat.RichText)
+        self.saved_line.setWordWrap(True)
+        self.saved_line.linkActivated.connect(lambda link: QDesktopServices.openUrl(QUrl.fromLocalFile(link)))
+        self.saved_line.setVisible(False)
 
         layout = QVBoxLayout(self)
         layout.addLayout(top)
         layout.addWidget(self.tabs)
+        layout.addWidget(self.saved_line)
         layout.addWidget(buttons)
         self._derive()
         if draft_id is not None:
             self._saved_text = self.full.toPlainText()   # reopened: nothing unsaved yet
+            draft = store.get_draft(draft_id)
+            if draft and draft["files"]:
+                self._written_text = self._saved_text
+                self._show_saved(Path(draft["files"][-1]).parent, len(draft["files"]), earlier=True)
         self._update_save_button()
         self.full.textChanged.connect(self._update_save_button)
 
@@ -201,13 +230,6 @@ class FollowUpDialog(QDialog):
         editor = (self.full, self.flmsg, self.js8call)[self.tabs.currentIndex()]
         QGuiApplication.clipboard().setText(editor.toPlainText())
 
-    def _save_flmsg(self) -> None:
-        when = (self.facts.now or self.facts.message.received_at) if self.facts else datetime.now(timezone.utc)
-        name = f"{self.file_prefix}-" + dtg(when).replace(" ", "-") + ".txt"
-        path, _ = QFileDialog.getSaveFileName(self, "Save FLMSG text", str(Path.home() / name), "Text files (*.txt)")
-        if path:
-            Path(path).write_text(self.flmsg.toPlainText(), encoding="ascii", errors="replace")
-
     def _suggest(self) -> None:
         if not self.ollama:
             return
@@ -247,20 +269,69 @@ class FollowUpDialog(QDialog):
         if magcon:
             self.store.set_setting("magcon.status", magcon)   # the next report starts from it
 
-    def _export(self, kind: str) -> None:
+    # -- files ---------------------------------------------------------------------------
+
+    def _stem(self) -> str:
         report = parse_report(self.full.toPlainText())
-        name = f"{file_stem(report.subject, report.dtg)}.{kind}"
-        filters = "Word documents (*.docx)" if kind == "docx" else "Web pages (*.html)"
-        path, _ = QFileDialog.getSaveFileName(self, "Save MAGNET S2 report", str(Path.home() / name), filters)
+        if self.export or report.subject:
+            return file_stem(report.subject, report.dtg)
+        when = (self.facts.now or self.facts.message.received_at) if self.facts else datetime.now(timezone.utc)
+        return f"{self.file_prefix}-" + dtg(when).replace(" ", "-")
+
+    def _write_files(self) -> list[Path]:
+        folder = report_files.day_folder(self.store)
+        return report_files.save_all(folder, self._stem(), self.full.toPlainText(), self.flmsg.toPlainText(),
+                                     self.js8call.toPlainText(), self.export)
+
+    def _record_files(self, paths) -> None:
+        if self.draft_id is not None:
+            self.store.add_draft_files(self.draft_id, [*self._pending_files, *paths])
+            self._pending_files = []
+        else:
+            self._pending_files.extend(paths)
+
+    def _show_saved(self, folder: Path, count: int, earlier: bool = False) -> None:
+        when = "Saved earlier" if earlier else f"Saved {count} files"
+        self.saved_line.setText(f"{when} to {escape(str(folder))} — <a href=\"{escape(str(folder))}\">open folder</a>")
+        self.saved_line.setVisible(True)
+
+    def _open_folder(self) -> None:
+        folder = report_files.reports_folder(self.store)
+        folder.mkdir(parents=True, exist_ok=True)
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
+
+    def _save_as(self, kind: str) -> None:
+        """One format, to a place the operator picks (starting where they last saved one)."""
+        stem = self._stem()
+        suffix, label, filters = {
+            "docx": (".docx", "Save Word report", "Word documents (*.docx)"),
+            "html": (".html", "Save web page", "Web pages (*.html)"),
+            "flmsg": ("_FLMSG.txt", "Save FLMSG text", "Text files (*.txt)"),
+            "js8": ("_JS8Call.txt", "Save JS8Call text", "Text files (*.txt)"),
+            "text": (".txt", "Save full report", "Text files (*.txt)"),
+        }[kind]
+        start = self.store.get_setting(report_files.LAST_DIRECTORY_SETTING, "") or str(report_files.day_folder(self.store))
+        path, _ = QFileDialog.getSaveFileName(self, label, str(Path(start) / f"{stem}{suffix}"), filters)
         if not path:
             return
-        if kind == "docx":
-            from s2_watch.s2_docx import write_docx
-            write_docx(report, path)
+        path = Path(path)
+        if kind in ("docx", "html"):
+            report = parse_report(self.full.toPlainText())
+            if kind == "docx":
+                from s2_watch.s2_docx import write_docx
+                report_files.write_atomic(path, lambda temporary: write_docx(report, temporary))
+            else:
+                from s2_watch.s2_html import write_html
+                report_files.write_atomic(path, lambda temporary: write_html(report, temporary))
         else:
-            from s2_watch.s2_html import write_html
-            write_html(report, path)
+            text = {"flmsg": self.flmsg, "js8": self.js8call, "text": self.full}[kind].toPlainText()
+            report_files.write_text(path, text, "utf-8" if kind == "text" else "ascii")
+        self.store.set_setting(report_files.LAST_DIRECTORY_SETTING, str(path.parent))
+        self._record_files([path])
         self._remember_magcon()
+        self.saved_line.setText(f"Saved {escape(path.name)} to {escape(str(path.parent))} — "
+                                f"<a href=\"{escape(str(path.parent))}\">open folder</a>")
+        self.saved_line.setVisible(True)
 
     # -- saving inside S2 Watch ---------------------------------------------------------
 
@@ -268,20 +339,39 @@ class FollowUpDialog(QDialog):
         return bool(self.draft_kind) and self.full.toPlainText() != self._saved_text
 
     def save_draft(self) -> None:
+        """Keep the draft in S2 Watch (no files)."""
+        if not self.draft_kind:
+            return
         text = self.full.toPlainText()
-        self.draft_id = self.store.save_draft(self.draft_kind, text, self.draft_id, self.report_id)
+        self.draft_id = self.store.save_draft(self.draft_kind, text, self.draft_id, self.report_id, self.event_id)
         self._saved_text = text
+        if self._pending_files:
+            self._record_files([])
         self._remember_magcon()
         self._update_save_button()
 
-    def _update_save_button(self) -> None:
-        if not self.draft_kind:
+    def save_all(self) -> None:
+        """Save: keep the draft in S2 Watch and write every format to today's reports folder."""
+        self.save_draft()
+        try:
+            paths = self._write_files()
+        except OSError as error:
+            QMessageBox.warning(self, "Not saved", f"The report files could not be written: {error}\n\n"
+                                "Choose another reports folder under Configuration → Reports Folder…")
             return
-        if self.unsaved():
-            self.save_button.setText("Save in S2 Watch")
+        self._written_text = self.full.toPlainText()
+        self._record_files(paths)
+        self._remember_magcon()
+        self._show_saved(paths[0].parent, len(paths))
+        self._update_save_button()
+
+    def _update_save_button(self) -> None:
+        current = self.full.toPlainText()
+        if self.unsaved() or current != self._written_text:
+            self.save_button.setText("Save")
             self.save_button.setEnabled(not self.full.isReadOnly())
         else:
-            self.save_button.setText("Saved in S2 Watch ✓")
+            self.save_button.setText("Saved ✓")
             self.save_button.setEnabled(False)
 
     def done(self, result: int) -> None:
@@ -294,7 +384,7 @@ class FollowUpDialog(QDialog):
             if answer == QMessageBox.StandardButton.Cancel:
                 return
             if answer == QMessageBox.StandardButton.Save:
-                self.save_draft()
+                self.save_all()
         super().done(result)
 
     def closeEvent(self, event) -> None:
@@ -305,6 +395,7 @@ class FollowUpDialog(QDialog):
         self._remember_magcon()
         if self.draft_kind:
             self.save_draft()   # what was sent (or followed up) is kept
+            self.store.mark_draft_sent(self.draft_id)
         self.marked = True
         self.mark.setEnabled(False)
         self.mark.setText(self.marked_label)

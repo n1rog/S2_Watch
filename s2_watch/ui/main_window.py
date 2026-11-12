@@ -43,6 +43,10 @@ from s2_watch.events import (incident_key, incident_marks, key_terms, place_from
                              set_quiet_hours)
 from s2_watch.monitoring import legacy_message_key, message_key
 from s2_watch.ui.followup_dialog import FollowUpDialog
+from s2_watch.ui.briefing_dialog import BriefingPeriodDialog
+from s2_watch import report_files
+from s2_watch.briefing_periods import (BRIEFING_TIMES_SETTING, LAST_BRIEFING_SETTING, LAST_SCHEDULED_SETTING,
+                                       briefing_times, due_briefing, hours_between, last_briefing, period_start)
 
 
 class SortableTableItem(QTableWidgetItem):
@@ -620,6 +624,8 @@ class MainWindow(QMainWindow):
             configuration_menu.addAction(title).triggered.connect(
                 lambda _checked=False, dialog=dialog: self.open_settings_dialog(dialog)
             )
+        configuration_menu.addAction("Reports Folder…").triggered.connect(self.choose_reports_folder)
+        configuration_menu.addAction("Briefing Schedule…").triggered.connect(self.choose_briefing_schedule)
         configuration_menu.addSeparator()
         configuration_menu.addAction("Back Up Now").triggered.connect(lambda: self.back_up_database(force=True))
         configuration_menu.addAction("Open Backups Folder").triggered.connect(self.open_backups_folder)
@@ -634,8 +640,7 @@ class MainWindow(QMainWindow):
         assess_action.setShortcut(QKeySequence("Ctrl+Shift+A"))
         assess_action.setToolTip("What the selected event's reports add up to (Help → Local AI)")
         assess_action.triggered.connect(lambda: self.assess_event_id(self.selected_event_id()))
-        reports_menu.addAction("Draft Shift Briefing…").triggered.connect(
-            lambda: self.draft_briefing(int(self.review_duration.currentData())))
+        reports_menu.addAction("Draft Shift Briefing…").triggered.connect(self.draft_briefing)
         reports_menu.addAction("Saved Reports && Briefings…").triggered.connect(self.show_saved_drafts)
         reports_menu.addAction("Sender Track Records…").triggered.connect(self.show_sender_records)
         reports_menu.addAction("Keyword Noise…").triggered.connect(self.show_keyword_noise)
@@ -733,8 +738,9 @@ class MainWindow(QMainWindow):
         map_toolbar.addWidget(self.map_world_button)
         map_toolbar.addStretch(1)
         map_briefing = QPushButton("Draft briefing…")
-        map_briefing.setToolTip("Draft a MAGNET S2 briefing from the events in the watch period")
-        map_briefing.clicked.connect(lambda: self.draft_briefing(int(self.review_duration.currentData())))
+        map_briefing.setToolTip("Draft a MAGNET S2 briefing: choose the period (since the last briefing by default) "
+                                "and the events")
+        map_briefing.clicked.connect(self.draft_briefing)
         map_toolbar.addWidget(map_briefing)
         map_layout = QVBoxLayout()
         map_layout.addLayout(map_toolbar)
@@ -914,6 +920,9 @@ class MainWindow(QMainWindow):
         self.map_regions_changed()
         self.map_online_tiles_changed()
         self.connect_js8call()
+        self._briefing_timer = QTimer(self)
+        self._briefing_timer.timeout.connect(self.check_scheduled_briefing)
+        self._briefing_timer.start(60_000)
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.poll)
         self.timer.start(1000)
@@ -2251,44 +2260,102 @@ class MainWindow(QMainWindow):
     def _s2_js8(self, text: str) -> str:
         return js8_report(text, self.store.get_setting("operator.callsign", ""))
 
-    def draft_briefing(self, hours: int | None = None) -> None:
-        """A MAGNET S2 briefing: from the map, its watch period; from the Events tab, that tab's
-        period and filters."""
-        from_map = hours is not None
-        hours = hours if from_map else self.events_view.period_hours()
-        last = self.store.get_setting("briefing.last", "")
-        try:
-            last_briefing = datetime.fromisoformat(last) if last else None
-        except ValueError:
-            last_briefing = None
-        now = datetime.now(timezone.utc)
-        if from_map:
-            events = [event for event in self.store.events_since(now - timedelta(hours=hours)) if world.event_covered(event)]
-        else:
-            events = self.events_view.visible_events()
+    def briefing_events(self, key: str, start: datetime | None) -> list:
+        """The events a briefing period covers: since ``start``, or the Events tab's (start None)."""
+        if start is None:
+            return self.events_view.visible_events()
+        return [event for event in self.store.events_since(start) if world.event_covered(event)]
+
+    def briefing_text(self, events, start: datetime, now: datetime) -> str:
+        hours = hours_between(start, now)
         magcon = self.store.get_setting("magcon.status", DEFAULT_MAGCON)
         background = period_background(events, self.nws_alerts, osint_sources.cached_messages(BACKGROUND_KINDS), now,
-                                       now - timedelta(hours=hours), magcon,
-                                       world.describe() if world.COVERAGE != {"us"} else "")
-        text = s2_briefing_report(events, now, hours, self.focus_regions, last_briefing, magcon=magcon,
+                                       start, magcon, world.describe() if world.COVERAGE != {"us"} else "")
+        return s2_briefing_report(events, now, hours, self.focus_regions, last_briefing(self.store), magcon=magcon,
                                   reports_of=self.store.event_reports, grades=self.sender_grades(),
                                   quiet_for=self.quiet_near_event, background=background,
                                   assessments={event.event_id: accepted for event in events
                                                if (accepted := self.store.accepted_assessment(event.event_id))})
+
+    def draft_briefing(self, *_args) -> None:
+        """Draft briefing (the Reports menu, the Map and Events tabs, Needs Review, Reports): one
+        way everywhere. It asks the period (since the last briefing by default) and which events."""
+        now = datetime.now(timezone.utc)
+        chooser = BriefingPeriodDialog(self.store, self.briefing_events, self.format_display_time, self, now)
+        if chooser.exec() != QDialog.DialogCode.Accepted:
+            return
+        start = chooser.start
+        if start is None:     # the Events tab's period
+            start = now - timedelta(hours=self.events_view.period_hours())
+        self.open_briefing(self.briefing_text(chooser.events, start, now))
+
+    def open_briefing(self, text: str, draft_id: int | None = None, subject: str = "") -> None:
         ollama = None
         if self.analysis_mode.checkedAction().data() == "ollama":
             ollama = (self.ollama_endpoint.text().strip() or "http://127.0.0.1:11434",
                       self.ollama_model.text().strip() or "llama3.2")
         dialog = FollowUpDialog(
-            None, self.store, self, ollama=ollama, text=text, js8=self._s2_js8, title="Draft MAGNET S2 briefing",
+            None, self.store, self, ollama=ollama, text=text, js8=self._s2_js8,
+            title=f"Saved MAGNET S2 briefing — {subject}" if subject else "Draft MAGNET S2 briefing",
             file_prefix="MAGNET_S2", suggest_fn=draft_s2_assessment,
             suggest_label="Suggest assessment && gaps (Ollama)", mark_label="Mark briefing sent",
             marked_label="Briefing marked sent", callsign=self.store.get_setting("operator.callsign", ""),
-            export=True, draft_kind="briefing",
+            export=True, draft_kind="briefing", draft_id=draft_id,
         )
         dialog.exec()
         if dialog.marked:   # the next briefing flags what is new since this one
-            self.store.set_setting("briefing.last", now.isoformat())
+            self.store.set_setting(LAST_BRIEFING_SETTING, datetime.now(timezone.utc).isoformat())
+        self.drafts_changed()
+
+    def check_scheduled_briefing(self) -> None:
+        """At a scheduled shift change, draft a briefing since the last one for review (never sent)."""
+        now = datetime.now(timezone.utc)
+        slot = due_briefing(now, self.store)
+        if slot is None:
+            return
+        self.store.set_setting(LAST_SCHEDULED_SETTING, slot.isoformat())
+        start = period_start("since_last", now, self.store)
+        events = [event for event in self.briefing_events("since_last", start)
+                  if not (event.statuses and set(event.statuses) == {"ignored"})]
+        self.store.save_draft("briefing", self.briefing_text(events, start, now), origin="scheduled")
+        self.notify(f"Shift briefing for {slot.strftime('%H%MZ')} drafted: review it in Needs Review", 60_000)
+        self._alert_target = ("review", None)
+        self.tray.showMessage("S2 Watch: shift briefing ready",
+                              f"Drafted for {slot.strftime('%H%MZ')} ({len(events)} events). Review it before sending."
+                              "\n(Click to review.)", QSystemTrayIcon.MessageIcon.Information, 15000)
+        self.drafts_changed()
+
+    def drafts_changed(self) -> None:
+        """Saved briefings and reports changed (the Reports and Needs Review tabs list them)."""
+        for view in (getattr(self, "reports_view", None), getattr(self, "review_view", None)):
+            if view is not None:
+                view.refresh()
+
+    def choose_reports_folder(self) -> None:
+        """Configuration → Reports Folder…: where Save writes reports (a subfolder per UTC day)."""
+        current = report_files.reports_folder(self.store)
+        folder = QFileDialog.getExistingDirectory(self, "Reports folder (a subfolder is made for each UTC day)",
+                                                  str(current if current.exists() else current.parent))
+        if folder:
+            self.store.set_setting(report_files.FOLDER_SETTING, folder)
+            self.notify(f"Reports are saved in {folder}")
+
+    def choose_briefing_schedule(self) -> None:
+        """Configuration → Briefing Schedule…: UTC times to draft a shift briefing (never sent)."""
+        text, accepted = QInputDialog.getText(
+            self, "Briefing schedule",
+            "At these UTC times S2 Watch drafts a shift briefing (since the last briefing) and puts it in\n"
+            "Needs Review. Nothing is sent. Times as HHMM, e.g. \"0545 1745\"; leave empty to turn it off.",
+            text=" ".join(briefing_times(self.store.get_setting(BRIEFING_TIMES_SETTING, ""))))
+        if not accepted:
+            return
+        times = briefing_times(text)
+        if text.strip() and not times:
+            QMessageBox.warning(self, "Briefing schedule", "Write the times as HHMM, e.g. 0545 1745.")
+            return
+        self.store.set_setting(BRIEFING_TIMES_SETTING, " ".join(times))
+        self.notify(f"Shift briefings are drafted at {', '.join(t + 'Z' for t in times)}" if times
+                    else "Scheduled shift briefings are off")
 
     def show_saved_drafts(self) -> None:
         dialog = DraftsDialog(self.store, self.format_display_time, self)
@@ -2300,29 +2367,28 @@ class MainWindow(QMainWindow):
         draft = self.store.get_draft(draft_id)
         if draft is None:
             return
+        if draft["kind"] == "briefing":
+            self.open_briefing(draft["text"], draft_id, draft["subject"])
+            return
         ollama = None
         if self.analysis_mode.checkedAction().data() == "ollama":
             ollama = (self.ollama_endpoint.text().strip() or "http://127.0.0.1:11434",
                       self.ollama_model.text().strip() or "llama3.2")
-        briefing = draft["kind"] == "briefing"
         dialog = FollowUpDialog(
             None, self.store, self, ollama=ollama, text=draft["text"], js8=self._s2_js8,
-            title=f"Saved MAGNET S2 {'briefing' if briefing else 'report'} — {draft['subject']}",
+            title=f"Saved MAGNET S2 report — {draft['subject']}",
             file_prefix="MAGNET_S2", suggest_fn=draft_s2_assessment,
             suggest_label="Suggest assessment && gaps (Ollama)",
-            mark_label="Mark briefing sent" if briefing else "Mark report “Follow-up created”",
-            marked_label="Briefing marked sent" if briefing else "Marked “Follow-up created”",
+            mark_label="Mark report “Follow-up created”", marked_label="Marked “Follow-up created”",
             callsign=self.store.get_setting("operator.callsign", ""), export=True,
-            draft_kind=draft["kind"], draft_id=draft_id, report_id=draft["report_id"],
+            draft_kind=draft["kind"], draft_id=draft_id, report_id=draft["report_id"], event_id=draft["event_id"],
         )
-        if draft["report_id"] is None and not briefing:
+        if draft["report_id"] is None:
             dialog.mark.setVisible(False)
         dialog.exec()
-        if dialog.marked:
-            if briefing:
-                self.store.set_setting("briefing.last", datetime.now(timezone.utc).isoformat())
-            elif draft["report_id"] is not None:
-                self.apply_report_status([draft["report_id"]], "followup", None)
+        if dialog.marked and draft["report_id"] is not None:
+            self.apply_report_status([draft["report_id"]], "followup", None)
+        self.drafts_changed()
 
     def draft_followup(self, row: int, report_id: int) -> None:
         self.draft_followup_for_report(report_id)
@@ -2408,6 +2474,7 @@ class MainWindow(QMainWindow):
         dialog.exec()
         if dialog.marked:
             self.apply_report_status([report_id], "followup", info.note if info.status == "followup" else None)
+        self.drafts_changed()
 
     def mark_selected_reports(self, status: str) -> None:
         self.mark_reports([report_id for _row, report_id in self.selected_report_rows()], status)

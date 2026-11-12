@@ -191,8 +191,10 @@ with events labelled Of interest or Follow-up always shown.
 ## MAGNET S2 reports and briefings
 
 Follow-up reports (right-click a report or event → **Draft follow-up report…**) and shift
-briefings (**Draft briefing…** on the Map tab for the watch period, on the Events tab for
-its period, or **Reports → Draft Shift Briefing…**) are drafted as **MAGNET S2 Intelligence
+briefings (**Draft briefing…** on the Map or Events tab, or **Reports → Draft Shift
+Briefing…**, all the same: each asks the period, since the last briefing by default, and
+which events to include; **Configuration → Briefing Schedule…** drafts one at set UTC
+times for review, never sent) are drafted as **MAGNET S2 Intelligence
 Reports**: the routing table (Subject, Purpose, DTG, Reporting Period, Geographic Focus,
 Precedence, MagCon Status, Sources), then Summary (BLUF), Background, Situation with a
 timeline, Comments / Assessment with a probability table, Intelligence Gaps, Mitigation
@@ -233,15 +235,17 @@ changes until **Accept assessment**. When new reports arrive, a fresh assessment
 update beside the accepted one, with what changed (trend, probability levels, new gaps). The
 accepted assessment marks the event's trend in the lists (▲ escalating, ▬ stable, ▼ winding
 down, ? unclear), fills MAGNET drafts of the event, and is listed (trend, who, when, BLUF,
-probability lines) under COMMENTS / ASSESSMENT in shift briefings. Edit the text, then **Save Word report…** (the MAGNET .docx format) or **Save web
-page…** (the MAGNET HTML template), named `MAGNET_S2_TOPIC_YYMMDD-HHMMZ`; the FLMSG and
-JS8Call versions are made from the same text. The MagCon status used is remembered for the
-next report.
+probability lines) under COMMENTS / ASSESSMENT in shift briefings. The FLMSG and JS8Call
+versions are made from the same text. The MagCon status used is remembered for the next report.
 
-**Save in S2 Watch** keeps a draft inside S2 Watch at any point (for example after Ollama's
-suggestions); saving again updates it, closing with unsaved changes asks first, and marking a
-briefing sent or a report followed up saves it too. **Reports → Saved Reports & Briefings…**
-lists them to reopen (with every save and export option) or delete.
+**Save** keeps the draft inside S2 Watch and writes every format, named
+`MAGNET_S2_TOPIC_YYMMDD-HHMMZ`, to the reports folder's subfolder for the UTC day: the full
+text, `_FLMSG.txt`, `_JS8Call.txt`, the Word report (the MAGNET .docx format) and the web page
+(the MAGNET HTML template). The reports folder is `Documents/S2 Watch Reports` unless set under
+**Configuration → Reports Folder…** or in the setup wizard. Files are written under a temporary
+name, then renamed. **More** saves a single format elsewhere. Saving again updates the draft and
+files, closing with unsaved changes asks first, and marking a briefing sent or a report
+followed up saves it too. The **Reports** tab lists them to reopen, with their files.
 
 **Background** holds facts, then a prompt for what only the analyst knows. A follow-up
 gives the NWS watches and warnings for the event's kind of hazard in effect at its

@@ -5,13 +5,21 @@
 <table>
 <tr><th>Product</th><th>Where</th></tr>
 <tr><td>Follow-up report on one event or report</td><td>Right-click it → <b>Draft follow-up report…</b>, or the event panel's <b>Draft follow-up…</b></td></tr>
-<tr><td>Shift briefing for the watch period</td><td><b>Draft briefing…</b> on the Map tab or the Events tab, or <b>Reports → Draft Shift Briefing…</b></td></tr>
+<tr><td>Shift briefing</td><td><b>Draft briefing…</b> on the Map tab or the Events tab, or <b>Reports → Draft Shift Briefing…</b>
+(all the same)</td></tr>
 </table>
+<p>A briefing first asks its <b>period</b>: <b>Since the last briefing</b> (the default: since you last marked one sent; the last
+24 hours before the first), <b>This shift</b> (since the last scheduled briefing time, or 0600Z/1800Z), the last 12 or 24 hours,
+the Events tab's period and filters, or a number of hours. It shows the period and how many events it holds, with a tick box for
+each event: untick any to leave out (events you labelled Ignored start unticked). S2 Watch remembers your choice of period.</p>
+<p><b>Scheduled briefings</b> (<b>Configuration → Briefing Schedule…</b>): give UTC times, e.g. <code>0545 1745</code>, and at each
+one S2 Watch drafts a briefing since the last one, saves it, and puts it in <b>Needs Review</b> with a desktop alert. Nothing is ever
+sent by itself. A time missed by more than 30 minutes (S2 Watch wasn't running) is skipped.</p>
 
 <h2>The draft window</h2>
 <ol>
 <li><b>1. Full report</b>: the MAGNET S2 report. Write and edit here first. Lines in (parentheses) are prompts to replace.</li>
-<li><b>2. FLMSG</b>: upper-case text wrapped for radio, made from the full report as you edit; <b>Save as text file…</b> for an FLMSG form.</li>
+<li><b>2. FLMSG</b>: upper-case text wrapped for radio, made from the full report as you edit, for an FLMSG form.</li>
 <li><b>3. JS8Call</b>: a short message from the report's fields, with a character count.</li>
 </ol>
 <p><b>Precedence</b>, above the tabs, is how quickly you must inform others about the event:</p>
@@ -30,9 +38,21 @@ works too; the picker follows.</p>
 <p>Buttons: <b>Suggest assessment (Ollama)</b> if a local model is set up (in a report on an event it fills the assessment,
 probability table, gaps, mitigation and MAGNET guidance; an event already assessed in its details fills them when the draft
 opens: <a href="help:local-ai">Local AI</a>). A shift briefing lists every event's accepted assessment (trend, who and when,
-BLUF) under COMMENTS / ASSESSMENT; <b>Copy this tab</b>; <b>Save Word report…</b>
-and <b>Save web page…</b> in our format; <b>Save in S2 Watch</b> to reopen later from <b>Reports → Saved Reports &amp; Briefings…</b>;
-and <b>Mark report “Follow-up created”</b> / <b>Mark briefing sent</b>.</p>
+BLUF) under COMMENTS / ASSESSMENT; <b>Copy this tab</b>; <b>Mark report “Follow-up created”</b> / <b>Mark briefing sent</b>;
+<b>More</b>; and <b>Save</b>.</p>
+<h2>Saving</h2>
+<p><b>Save</b> does it all at once: it keeps the draft in S2 Watch (to reopen from the <b>Reports</b> tab) and writes every format
+to today's folder in your <b>reports folder</b>: the full report (<code>.txt</code>), the FLMSG and JS8Call text
+(<code>_FLMSG.txt</code>, <code>_JS8Call.txt</code>), the Word report (<code>.docx</code>, the MAGNET format) and the web page
+(<code>.html</code>, the MAGNET template), each named <code>MAGNET_S2_TOPIC_YYMMDD-HHMMZ</code>. A line under the report says where,
+with a link to open the folder. Saving again updates them. Closing with unsaved changes asks first, and marking a briefing sent or
+a report followed up keeps the draft too.</p>
+<p>The reports folder is <code>Documents/S2 Watch Reports</code> unless you choose another under <b>Configuration → Reports
+Folder…</b> (or in the setup wizard), with a subfolder for each UTC day (<code>2026-11-12</code>). Point it at a shared network
+folder to share reports. Files are written under a temporary name and renamed when complete, so a half-written file never appears.</p>
+<p><b>More</b> saves one format somewhere else (<b>Save Word report as…</b>, <b>web page</b>, <b>FLMSG text</b>, <b>JS8Call text</b>,
+<b>full report</b>), starting in the folder you last chose, and opens the reports folder. Every file saved either way is listed
+with the draft in the Reports tab.</p>
 
 <h2>What the report holds</h2>
 <p>The routing table (Subject, Purpose, DTG, Reporting Period, Geographic Focus, Precedence, MagCon Status, Sources), then Summary (BLUF),
