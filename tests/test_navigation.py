@@ -10,8 +10,9 @@ from s2_watch.models import Message
 OLD = datetime.now(timezone.utc) - timedelta(days=10)
 
 
-def add_event(store, text="Water main break in Pickens", when=OLD, urgency="high"):
-    message = Message("OSINT", text, received_at=when, fields={"type": "NEWS"})
+def add_event(store, text="Water main break in Pickens", when=OLD, urgency="high", official=False):
+    fields = {"type": "NEWS", "sender": "NWS"} if official else {"type": "NEWS"}
+    message = Message("OSINT", text, received_at=when, fields=fields)
     message_id = store.save_message(message, text + when.isoformat())
     result = AnalysisResult(True, "Infrastructure", urgency, text, 0.9, ())
     store.save_analysis(message_id, result)

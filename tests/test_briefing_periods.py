@@ -57,7 +57,7 @@ def test_every_draft_briefing_button_asks_the_same_period(main_window, monkeypat
     asked = []
 
     class Chooser:
-        def __init__(self, *args):
+        def __init__(self, *args, **kwargs):
             asked.append(args)
 
         def exec(self):

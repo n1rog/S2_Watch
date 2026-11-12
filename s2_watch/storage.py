@@ -167,6 +167,10 @@ class SQLiteStore:
                              ("event_id", "INTEGER"), ("origin", "TEXT NOT NULL DEFAULT ''")):
             if column not in draft_columns:
                 self._add_column(f"ALTER TABLE drafts ADD COLUMN {column} {kind}")
+        # Report drafts saved before drafts knew their event: from the report's.
+        self.connection.execute(
+            """UPDATE drafts SET event_id = (SELECT event_id FROM reports WHERE reports.id = drafts.report_id)
+               WHERE event_id IS NULL AND report_id IS NOT NULL""")
         # Intelligence the operator entered (summaries cleared for release, e.g. from HSIN or
         # a fusion center): delivered as OSINT items of type "ANALYST ENTRY".
         self.connection.execute(

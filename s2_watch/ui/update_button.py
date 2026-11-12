@@ -54,9 +54,9 @@ class UpdateButton(QToolButton):
         if outcome:
             store.set_setting("updates.pending", "")
         if outcome == "updated":
-            self.window.statusBar().showMessage(f"Updated to S2 Watch {__version__}.", 120_000)
+            self.window.notify(f"Updated to S2 Watch {__version__}.", 120_000)
         elif outcome == "failed":
-            self.window.statusBar().showMessage(
+            self.window.notify(
                 f"The update to {pending} didn't install; still running {__version__}. "
                 f"Details: {self.log_path()}", 600_000)
 

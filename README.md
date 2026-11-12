@@ -135,7 +135,7 @@ off the news lists and events.
 
 ## Keyword noise
 
-**Reports → Keyword Noise** lists the keywords that flagged newsworthy reports you then
+**Tools → Keyword Noise** lists the keywords that flagged newsworthy reports you then
 marked Ignored, noisiest first, with how many came from radio and how many from feeds.
 **Stop using this word** and it no longer makes a report news in that category (other
 words in the same message still can), for every source; **Use again** undoes it. The
@@ -159,7 +159,7 @@ EXERCISE at the top and bottom). Possible Misses skips exercise and test traffic
 
 ## Sender track records
 
-**Reports → Sender Track Records** shows how each radio station's newsworthy reports have
+**Tools → Sender Track Records** shows how each radio station's newsworthy reports have
 held up: confirmed by an official source, or marked Of interest / Follow-up, counts for the
 station; marked Ignored counts against it. With 5 or more judged reports, the share that
 held up suggests a reliability grade: B usually reliable (85%+), C fairly reliable (65%+),
@@ -191,8 +191,8 @@ with events labelled Of interest or Follow-up always shown.
 ## MAGNET S2 reports and briefings
 
 Follow-up reports (right-click a report or event → **Draft follow-up report…**) and shift
-briefings (**Draft briefing…** on the Map or Events tab, or **Reports → Draft Shift
-Briefing…**, all the same: each asks the period, since the last briefing by default, and
+briefings (**Draft briefing…** on the Map, Events, Needs Review or Reports tab, or **Reports →
+New Briefing…**, all the same: each asks the period, since the last briefing by default, and
 which events to include; **Configuration → Briefing Schedule…** drafts one at set UTC
 times for review, never sent) are drafted as **MAGNET S2 Intelligence
 Reports**: the routing table (Subject, Purpose, DTG, Reporting Period, Geographic Focus,
@@ -211,8 +211,8 @@ Ollama, **Suggest assessment** drafts the analysis for the analyst to check: for
 an event, the COMMENTS / ASSESSMENT paragraphs with the trend and a probability table,
 INTELLIGENCE GAPS, MITIGATION RECOMMENDATIONS and MAGNET GUIDANCE, citing the SOURCE LIST.
 
-**Assess (Ollama)** (the button in an event's details, right-click → Assess event, or Reports →
-Assess Selected Event, Ctrl+Shift+A) asks a local model what the event's reports add up
+**AI assessment** (the button in an event's details, right-click → AI assessment, or Reports →
+AI Assessment of Selected Event, Ctrl+Shift+A) asks a local model what the event's reports add up
 to (`s2_watch/event_assessment.py`): BLUF, trend (escalating / stable / winding down /
 unclear), agreement between reports, assessment, probability table, gaps, mitigation and
 MAGNET guidance, each citing the reports by number. The model reads the first report and the
@@ -248,6 +248,24 @@ files, closing with unsaved changes asks first, and marking a briefing sent or a
 followed up saves it too. The **Reports** tab lists every draft with its status (Draft,
 Scheduled draft, Sent), event and files, to reopen, open its Word file or web page, show its
 folder, copy its FLMSG or JS8Call text, mark it sent, or delete it.
+
+## Concern
+
+Every event has a Concern level (High, Elevated, Guarded, Low) from fixed rules, shown in the
+event lists and the event panel with its reasons (`s2_watch/concern.py`): High is high urgency,
+confirmed (officially, or by 2+ independent sources including a radio station) and in the focus
+regions; Elevated is other high-urgency events from radio, an official source or 2+ outlets, or
+medium urgency confirmed and escalating; Guarded is medium urgency, a single news story, or an
+unconfirmed single-source radio report; Low is the rest. News alone doesn't confirm. Quiet events step down a level. It is a
+level with reasons, not a percentage. Assessment probability levels show their standard
+estimative words and ranges (ICD 203): HIGH very likely 80–95%, MODERATE likely 55–80%, LOW
+unlikely 20–45%.
+
+The **Reports** menu holds the daily work (New Briefing, AI Assessment of Selected Event,
+intelligence entries, Reports Library); **Tools** the occasional ones (Sender Track Records,
+Keyword Noise, Metrics). The 🔔 beside the clock keeps the last 20 status-bar notices with
+their times (a notice about an event opens it), so none is lost after 10 seconds. Empty event
+lists say why and what to do.
 
 ## Needs Review
 

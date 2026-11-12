@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from html import escape
 
-from s2_watch.s2_report import HEADER_FIELDS, HEADER_LABELS, TOP_BANNER, S2Report
+from s2_watch.s2_report import HEADER_FIELDS, HEADER_LABELS, TOP_BANNER, S2Report, estimative
 
 STYLE = """
 @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Barlow+Condensed:wght@400;600;700;800&family=Barlow:wght@400;500;600&display=swap');
@@ -93,7 +93,9 @@ def render_html(report: S2Report) -> str:
             elif block.kind == "probability":
                 out.append("<table class='prob-table'><thead><tr><th>Assessment Category</th><th>Probability</th></tr></thead><tbody>"
                            + "".join(f"<tr><td class='prob-cat'>{e(category)}</td>"
-                                     f"<td class='prob-level lvl-{e(level.lower())}'>{e(level.upper())}</td></tr>"
+                                     f"<td class='prob-level lvl-{e(level.lower())}'>{e(level.upper())}"
+                                     + (f"<br><small>{e(estimative(level))}</small>" if estimative(level) else "")
+                                     + "</td></tr>"
                                      for category, level in block.rows) + "</tbody></table>")
             elif block.kind == "sources":
                 items = []

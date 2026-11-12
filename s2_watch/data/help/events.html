@@ -56,9 +56,30 @@ point's latitude and longitude; a storm far out at sea shows its coordinates alo
 <p>Reports are numbered in the order heard ([1] is the first), so an assessment's citations can be checked. An event you
 have assessed shows its trend before its title in the lists: <b>▲</b> escalating, <b>▬</b> stable, <b>▼</b> winding down,
 <b>?</b> unclear (<a href="help:local-ai">Accepting an assessment</a>).</p>
-<p>Buttons: <b>Show on map</b>, <b>Draft follow-up…</b>, <b>Assess (Ollama)</b> (what the reports add up to; see
-<a href="help:local-ai">Local AI</a>), <b>Label</b>, <b>Show its reports</b>, <b>Close event…</b> / <b>Reopen event</b>.
-Right-clicking events in either list gives the same actions for several at once.</p>
+<p>Buttons, in the same order in both panels: <b>AI assessment</b> (what the reports add up to; see
+<a href="help:local-ai">Local AI</a>), <b>Draft follow-up…</b>, <b>Show on map</b>, <b>Close event…</b> / <b>Reopen event</b>,
+<b>Label</b>, <b>Show its reports</b>. Right-clicking events in either list gives the same actions for several at once.</p>
+
+<h2>Concern</h2>
+<p>Every event has a <b>Concern</b> level, in its own column in both lists (sortable) and at the top of the event panel with its
+reasons, so open events can be ranked at a glance. It comes from fixed rules, not the AI, and is a level rather than a
+percentage: a figure like “72%” would suggest more precision than the reports support, and couldn't be checked.</p>
+<table>
+<tr><th>Level</th><th>When</th></tr>
+<tr><td><b style="color:#c62828">High</b></td><td>High urgency, <b>and</b> confirmed (an official source, or 2+ independent
+sources at least one of them a radio station), <b>and</b> in your focus regions or area (or you have none)</td></tr>
+<tr><td><b style="color:#ef6c00">Elevated</b></td><td>Any other high-urgency event reported by radio, an official source or 2+
+news outlets (unconfirmed, or outside your focus), or medium urgency, confirmed, and assessed as escalating</td></tr>
+<tr><td><b style="color:#f9a825">Guarded</b></td><td>Medium urgency, a single news story (one outlet), or a single-source radio
+report not yet confirmed</td></tr>
+<tr><td><b style="color:#78909c">Low</b></td><td>Everything else. A quiet event steps down a level; a closed one is Low.</td></tr>
+</table>
+<div class="example"><p><b>Example.</b> <i>Elevated — high urgency · 1 source, unconfirmed · in focus region 6</i>. When NWS
+confirms it, or a second station reports it, it becomes <i>High — high urgency · confirmed by NWS Flood Warning · 1 source · in
+focus region 6</i>. Hover over the Concern cell for the reasons.</p>
+<p><b>News alone doesn't confirm.</b> Several outlets running one story is wide reporting, not corroboration: a news-only event
+says <i>news only</i> and reaches Elevated at most, and one outlet's story, however urgent its words, is Guarded.</p></div>
+<p>Needs Review's <b>Situation now</b> counts the open events at each level.</p>
 
 <h2>Searching</h2>
 <p>The <b>Search</b> box above the list on the Map tab (for events or reports, whichever is shown) and on the Events tab keeps the

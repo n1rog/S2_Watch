@@ -11,7 +11,9 @@ NOW = datetime.now(timezone.utc)
 def test_needs_review_is_the_first_tab_and_counts_what_waits(main_window) -> None:
     window = main_window()
     assert window.tabs.widget(0) is window.review_view and window.tabs.currentWidget() is window.review_view
-    _message, _result, _report, event_id = add_event(window.store, "Water main break in Pickens", NOW - timedelta(hours=1))
+    _message, _result, _report, event_id = add_event(window.store, "Flash flood in Pickens", NOW - timedelta(hours=1),
+                                                     official=True)       # High concern: officially confirmed
+    add_event(window.store, "Shooting in Oldsmar", NOW - timedelta(hours=1))   # one news story: not "new"
     window.review_view.refresh()
     [item] = window.review_view.items
     assert (item.kind, item.target) == ("new", event_id)

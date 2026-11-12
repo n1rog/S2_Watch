@@ -156,7 +156,7 @@ def test_the_reports_menu_assesses_the_selected_event(tmp_path, main_window, mon
 
     window = main_window(tmp_path / "menu.db")
     action = window.assess_action
-    assert action.text() == "Assess Selected Event (Ollama)" and action.shortcut().toString() == "Ctrl+Shift+A"
+    assert action.text() == "AI Assessment of Selected Event" and action.shortcut().toString() == "Ctrl+Shift+A"
     started = []
     monkeypatch.setattr(EventDetail, "assess", lambda self: started.append(self.current.event_id))
     action.trigger()                                            # nothing selected: says so

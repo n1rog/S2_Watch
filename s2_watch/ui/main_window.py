@@ -23,7 +23,7 @@ from s2_watch.followup import FollowUpFacts
 from s2_watch.ui.reports_view import ReportsView
 from s2_watch.ui.review_view import ReviewView
 from s2_watch.review import review_items
-from s2_watch.concern import situation_summary
+from s2_watch.concern import concern, situation_summary
 from s2_watch import focus, world
 from s2_watch.focus import FocusArea
 from s2_watch.background import event_background, period_background
@@ -256,7 +256,7 @@ class MainWindow(QMainWindow):
         self.ollama_assessment_model = QLineEdit(self.store.get_setting("ollama.assessment_model", "qwen2.5:7b"))
         self.ollama_assessment_model.setPlaceholderText("the Ollama model above")
         self.ollama_assessment_model.setToolTip(
-            "Used for Assess (Ollama) on events and for Suggest assessment in MAGNET drafts. A 7–8B model "
+            "Used for AI assessment of events and for Suggest assessment in MAGNET drafts. A 7–8B model "
             "(qwen2.5:7b, llama3.1:8b) sticks to the reports; a 3B model invents and misreads trends. "
             "Install with: ollama pull qwen2.5:7b")
         self.ollama_assessment_model.editingFinished.connect(lambda: self.store.set_setting(
@@ -638,22 +638,24 @@ class MainWindow(QMainWindow):
         self._backup_timer.timeout.connect(self.back_up_database)
         self._backup_timer.start(60 * 60 * 1000)
         QTimer.singleShot(60_000, self.back_up_database)
+        # Reports: the daily work. Tools: the occasional ones.
         reports_menu = self.menuBar().addMenu("Reports")
-        self.assess_action = assess_action = reports_menu.addAction("Assess Selected Event (Ollama)")
+        reports_menu.addAction("New Briefing…").triggered.connect(self.draft_briefing)
+        self.assess_action = assess_action = reports_menu.addAction("AI Assessment of Selected Event")
         assess_action.setShortcut(QKeySequence("Ctrl+Shift+A"))
-        assess_action.setToolTip("What the selected event's reports add up to (Help → Local AI)")
+        assess_action.setToolTip("What the selected event's reports add up to, by the local AI (Help → Local AI)")
         assess_action.triggered.connect(lambda: self.assess_event_id(self.selected_event_id()))
-        reports_menu.addAction("Draft Shift Briefing…").triggered.connect(self.draft_briefing)
-        reports_menu.addAction("Reports Library").triggered.connect(self.show_saved_drafts)
-        reports_menu.addAction("Sender Track Records…").triggered.connect(self.show_sender_records)
-        reports_menu.addAction("Keyword Noise…").triggered.connect(self.show_keyword_noise)
         reports_menu.addSeparator()
         reports_menu.addAction("Add Intelligence Entry…").triggered.connect(self.add_analyst_entry)
         reports_menu.addAction("Intelligence Entries…").triggered.connect(self.show_analyst_entries)
+        reports_menu.addSeparator()
+        reports_menu.addAction("Reports Library").triggered.connect(self.show_saved_drafts)
         self._entries_dialog = None
         self._noise_dialog = None
-        reports_menu.addSeparator()
-        reports_menu.addAction("Show Events").triggered.connect(lambda: self.tabs.setCurrentWidget(self.events_view))
+        tools_menu = self.menuBar().addMenu("Tools")
+        tools_menu.addAction("Sender Track Records…").triggered.connect(self.show_sender_records)
+        tools_menu.addAction("Keyword Noise…").triggered.connect(self.show_keyword_noise)
+        tools_menu.addAction("Metrics").triggered.connect(lambda: self.tabs.setCurrentWidget(self.metrics_view))
         help_menu = self.menuBar().addMenu("Help")
         # Current date/time in the chosen format, top right, with a Local/Zulu switch.
         # Kept on self: PySide doesn't take ownership of a menu-bar corner widget.
@@ -674,6 +676,16 @@ class MainWindow(QMainWindow):
         self.exercise_label.setStyleSheet("color: white; background: #c62828; font-weight: bold; padding: 1px 8px;")
         self.exercise_label.setVisible(self.exercise_in_progress())
         self.update_button = UpdateButton(self)
+        # The notices: the last 20 status messages, so one missed while away isn't lost.
+        self.notices_button = QToolButton()
+        self.notices_button.setText("🔔")
+        self.notices_button.setToolTip("Recent notices")
+        self.notices_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.notices_menu = QMenu(self.notices_button)
+        self.notices_menu.aboutToShow.connect(self.fill_notices_menu)
+        self.notices_button.setMenu(self.notices_menu)
+        self.unread_notices = 0
+        clock_layout.addWidget(self.notices_button)
         clock_layout.addWidget(self.update_button)
         clock_layout.addWidget(self.exercise_label)
         clock_layout.addWidget(self.clock_label)
@@ -750,6 +762,8 @@ class MainWindow(QMainWindow):
         self.map_view.setMinimumHeight(150)
         # Under the map: events (the default) or individual reports, switchable.
         self.map_events = EventsTable(self.format_display_time, store=self.store, state_key="events.map.header")
+        self.map_events.empty_text = ("No events in the watch period yet. Widen the watch period above, or turn on a "
+                                      "watch form under Configuration → Watch Forms so reports are kept.")
         self.map_events.menu_requested.connect(self.show_event_menu)
         self.map_events.activated.connect(self.show_event_id_on_map)
         self.event_actions: list[QAction] = []
@@ -928,7 +942,7 @@ class MainWindow(QMainWindow):
         self._worker.batch_ready.connect(self.handle_batch)
         self._worker.coverage_ready.connect(self.map_view.set_coverage)
         self._worker.coverage_ready.connect(self.coverage_updated)
-        self.map_view.engine_restarted.connect(lambda text: self.statusBar().showMessage(text, 60_000))
+        self.map_view.engine_restarted.connect(lambda text: self.notify(text, 60_000))
         self._worker.events_changed.connect(self.events_data_changed)
         self._worker_thread.start()
         self.refresh_forms()
@@ -992,9 +1006,9 @@ class MainWindow(QMainWindow):
 
     def database_backed_up(self, path, error) -> None:
         if error is not None:
-            self.statusBar().showMessage(f"Database backup failed: {error}", 15000)
+            self.notify(f"Database backup failed: {error}", 15000)
         elif path is not None:
-            self.statusBar().showMessage(f"Database backed up to {path}", 8000)
+            self.notify(f"Database backed up to {path}", 8000)
 
     def open_backups_folder(self) -> None:
         folder = backup_folder(self.database_path)
@@ -1189,12 +1203,12 @@ class MainWindow(QMainWindow):
         single = len(event_ids) == 1
         if single:
             items = reports[event_ids[0]]
+            assess = menu.addAction("AI assessment")
+            assess.setEnabled(bool(items))
+            assess.triggered.connect(lambda: self.assess_event_id(event_ids[0]))
             draft = menu.addAction("Draft follow-up report…")
             draft.setEnabled(bool(items))
             draft.triggered.connect(lambda: self.draft_followup_for_event(event_ids[0]))
-            assess = menu.addAction("Assess event (Ollama)")
-            assess.setEnabled(bool(items))
-            assess.triggered.connect(lambda: self.assess_event_id(event_ids[0]))
             menu.addAction("Show on map").triggered.connect(lambda: self.show_event_id_on_map(event_ids[0]))
             chosen = self.map_events.event_by_id(event_ids[0]) or self.events_view.table.event_by_id(event_ids[0])
             if chosen is not None and chosen.closed_at is not None:
@@ -1214,7 +1228,7 @@ class MainWindow(QMainWindow):
     def assess_event_id(self, event_id: int | None) -> None:
         """Assess (Ollama) an event: shown in the details beside its list, the assessment appears there."""
         if event_id is None:
-            self.statusBar().showMessage("Select an event first, then Reports → Assess Selected Event (Ollama)", 10_000)
+            self.notify("Select an event first, then Reports → AI Assessment of Selected Event", 10_000)
             return
         if self.tabs.currentWidget() is self.events_view:
             table, detail = self.events_view.table, self.events_view.detail
@@ -1226,22 +1240,38 @@ class MainWindow(QMainWindow):
         if detail.current is not None and detail.current.event_id == event_id:
             detail.assess()
         else:
-            self.statusBar().showMessage("That event isn't in the list: widen the watch period or the Events period",
+            self.notify("That event isn't in the list: widen the watch period or the Events period",
                                          10_000)
 
-    def notify(self, text: str, timeout_ms: int = 10_000) -> None:
-        """A status-bar notice, also kept in the notices list (the bell) so it isn't lost."""
+    def notify(self, text: str, timeout_ms: int = 10_000, event_id: int | None = None) -> None:
+        """A status-bar notice, also kept in the notices list (the bell, Needs Review) so it
+        isn't lost; ``event_id``: the event it is about (the notice opens it)."""
         self.statusBar().showMessage(text, timeout_ms)
-        self.notices.insert(0, (datetime.now(timezone.utc), text))
+        self.notices.insert(0, (datetime.now(timezone.utc), text, event_id))
         del self.notices[self.NOTICES_KEPT:]
+        self.unread_notices = min(self.NOTICES_KEPT, getattr(self, "unread_notices", 0) + 1)
         self.notices_changed()
 
     def notices_changed(self) -> None:
         """The notices list changed (Needs Review and the bell show it)."""
+        button = getattr(self, "notices_button", None)
+        if button is not None:
+            button.setText(f"🔔 {self.unread_notices}" if self.unread_notices else "🔔")
         review = getattr(self, "review_view", None)
         if review is not None:
             review.set_notices(self.notices, self.format_display_time)
 
+    def fill_notices_menu(self) -> None:
+        self.notices_menu.clear()
+        if not self.notices:
+            self.notices_menu.addAction("No notices yet").setEnabled(False)
+        for when, text, event_id in self.notices:
+            action = self.notices_menu.addAction(f"{self.format_display_time(when)}  {text}")
+            if event_id is not None:
+                action.setToolTip("Open the event")
+                action.triggered.connect(lambda _checked=False, event_id=event_id: self.open_event(event_id))
+        self.unread_notices = 0
+        self.notices_changed()
     def show_help(self, topic: str = "") -> None:
         """Help → S2 Watch Help (F1): one window, brought forward if already open."""
         if self._help_dialog is None:
@@ -1261,8 +1291,13 @@ class MainWindow(QMainWindow):
         return quiet_near(event, getattr(self, "coverage_cells", []), datetime.now(timezone.utc),
                           lambda lat, lon: gazetteer.locate_point(lat, lon)[1])
 
+    def event_concern(self, event):
+        accepted = self.store.accepted_assessment(event.event_id)
+        return concern(event, datetime.now(timezone.utc), self.focus_regions, accepted.trend if accepted else "")
+
     def connect_event_detail(self, detail: EventDetail) -> None:
         detail.quiet_for = self.quiet_near_event
+        detail.concern_for = self.event_concern
         detail.assessment_brief = self.event_assessment_brief
         detail.discussion_brief = self.event_discussion_brief
         detail.ollama_settings = self.ollama_settings
@@ -2166,7 +2201,7 @@ class MainWindow(QMainWindow):
         self.refresh_official()
         self.rescan_sources()
         self.update_news_label()
-        self.statusBar().showMessage(f"Coverage: {world.describe()}", 10_000)
+        self.notify(f"Coverage: {world.describe()}", 10_000)
 
     def choose_focus_area(self) -> None:
         dialog = FocusAreaDialog(focus.AREA, LocationResolver(), self)
@@ -2318,7 +2353,8 @@ class MainWindow(QMainWindow):
         """Draft briefing (the Reports menu, the Map and Events tabs, Needs Review, Reports): one
         way everywhere. It asks the period (since the last briefing by default) and which events."""
         now = datetime.now(timezone.utc)
-        chooser = BriefingPeriodDialog(self.store, self.briefing_events, self.format_display_time, self, now)
+        chooser = BriefingPeriodDialog(self.store, self.briefing_events, self.format_display_time, self, now,
+                                       concern_of=self.event_concern)
         if chooser.exec() != QDialog.DialogCode.Accepted:
             return
         start = chooser.start
@@ -2646,7 +2682,8 @@ class MainWindow(QMainWindow):
         return review_items(now, events, self.store.reviews_done(), alerted=self.alerted_events,
                             proposals=self.store.proposed_assessments(),
                             event_lookup=lambda ids: self.store.events_since(None, event_ids=ids),
-                            misses=self.misses_view.current_misses(), drafts=self.store.list_drafts())
+                            misses=self.misses_view.current_misses(), drafts=self.store.list_drafts(),
+                            concern_of=self.event_concern)
 
     def situation_html(self) -> str:
         """The Needs Review side panel: open events by concern level."""
@@ -2692,7 +2729,7 @@ class MainWindow(QMainWindow):
         event = self.store.event_by_id(event_id)
         if self.store.event_assessment(event_id) is None or event is None:
             return     # it failed: the event's panel says why
-        self.notify(f"AI assessment ready: {event.title}. Review it in Needs Review.", 30_000)
+        self.notify(f"AI assessment ready: {event.title}. Review it in Needs Review.", 30_000, event_id)
         self._alert_target = ("event", event_id)
         if not self.isActiveWindow():
             self.tray.showMessage("S2 Watch: AI assessment ready", f"{event.title}\n(Click to review it.)",

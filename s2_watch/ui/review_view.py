@@ -157,5 +157,5 @@ class ReviewView(QWidget):
 
     def set_notices(self, notices, format_time) -> None:
         self.notices.clear()
-        for when, text in notices:
+        for when, text, *_event in notices:
             self.notices.addItem(f"{format_time(when)}  {text}")

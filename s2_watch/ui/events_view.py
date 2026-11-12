@@ -14,6 +14,7 @@ from PySide6.QtGui import QBrush, QColor, QFont, QPalette
 from s2_watch.focus import event_in_focus, has_focus
 from s2_watch.world import event_covered
 from s2_watch.event_assessment import TREND_MARKS
+from s2_watch.concern import COLOURS as CONCERN_COLOURS, concern
 from s2_watch.ui.event_detail import EventDetail
 from PySide6.QtWidgets import (
     QAbstractItemView, QCheckBox, QComboBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QPushButton, QSplitter,
@@ -62,11 +63,11 @@ class EventsTable(QTableWidget):
     activated = Signal(int)                   # event id (double-click)
 
     COLUMNS = ("Last activity", "Event", "Category", "Area", "Reports", "Sources", "Urgency", "Official",
-               "Radio lead", "Labels", "Status")
+               "Radio lead", "Labels", "Status", "Concern")
     EVENT_ROLE = Qt.ItemDataRole.UserRole
 
     # Starting widths (pixels); people drag them, and the table remembers theirs.
-    DEFAULT_WIDTHS = (150, 380, 150, 80, 70, 170, 80, 170, 80, 120, 110)
+    DEFAULT_WIDTHS = (150, 380, 150, 80, 70, 170, 80, 170, 80, 120, 110, 90)
 
     def __init__(self, format_time, parent=None, store=None, state_key: str = "") -> None:
         super().__init__(0, len(self.COLUMNS), parent)
@@ -103,6 +104,16 @@ class EventsTable(QTableWidget):
                 header.moveSection(header.visualIndex(status), 1)
             if store is not None and state_key:
                 store.set_setting(moved_key, "1")
+        # Concern (0.58) goes just before the event's title, once, where it is seen.
+        concern_key = f"{state_key}.concern_placed"
+        if store is None or not state_key or store.get_setting(concern_key, "") != "1":
+            column = self.COLUMNS.index("Concern")
+            header.showSection(column)
+            header.resizeSection(column, self.DEFAULT_WIDTHS[column])
+            title = header.visualIndex(self.COLUMNS.index("Event"))
+            header.moveSection(header.visualIndex(column), title if header.visualIndex(column) > title else title - 1)
+            if store is not None and state_key:
+                store.set_setting(concern_key, "1")
         self._save_timer = QTimer(self)
         self._save_timer.setSingleShot(True)
         self._save_timer.setInterval(500)
@@ -124,6 +135,21 @@ class EventsTable(QTableWidget):
         self._highlight_timer = QTimer(self)
         self._highlight_timer.setInterval(5000)
         self._highlight_timer.timeout.connect(self._fade_highlights)
+
+    empty_text = ("No events yet. Widen the period, or turn on a watch form under Configuration → Watch Forms "
+                  "so reports are kept.")
+
+    def paintEvent(self, event) -> None:
+        super().paintEvent(event)
+        if self.rowCount() == 0 and self.empty_text:     # say why the list is empty, and what to do
+            from PySide6.QtGui import QPainter
+
+            painter = QPainter(self.viewport())
+            painter.setPen(self.palette().color(QPalette.ColorRole.PlaceholderText))
+            painter.drawText(self.viewport().rect().adjusted(16, 16, -16, -16),
+                             int(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop | Qt.TextFlag.TextWordWrap),
+                             self.empty_text)
+            painter.end()
 
     def set_events(self, events, focus: set[int] | None = None, limit: int | None = None) -> None:
         """Show events: focus regions first, then the latest activity. With ``limit``, rows past
@@ -154,6 +180,7 @@ class EventsTable(QTableWidget):
             area = ", ".join(part for part in (event.state, f"R{event.region}" if event.region else "") if part)
             lead = f"{event.radio_lead_minutes} min" if event.radio_lead_minutes else ""
             in_focus = event_in_focus(event, focus)
+            level = concern(event, now, focus, trends.get(event.event_id, ""))
             cells = (
                 SortKeyItem(self.format_time(event.last_seen), (in_focus, event.last_seen.timestamp())),
                 QTableWidgetItem(f"{TREND_MARKS[trends[event.event_id]]} {event.title}"
@@ -167,7 +194,10 @@ class EventsTable(QTableWidget):
                 SortKeyItem(lead, event.radio_lead_minutes or 0),
                 QTableWidgetItem(", ".join(status for status in event.statuses if status)),
                 SortKeyItem(event.status_text(now), STATUS_RANK[event.status(now)]),
+                SortKeyItem(level.level, level.rank),
             )
+            cells[11].setToolTip(level.text())
+            cells[11].setForeground(QBrush(QColor(CONCERN_COLOURS[level.level])))
             cells[0].setData(self.EVENT_ROLE, event.event_id)
             cells[1].setToolTip(event.title + (f"\nAssessed: {trends[event.event_id]}" if event.event_id in trends else ""))
             if event.closed_at is not None:
@@ -182,6 +212,9 @@ class EventsTable(QTableWidget):
                 item.setFont(font)
                 if ignored:
                     item.setForeground(QBrush(muted))
+                elif column == 11:
+                    font.setBold(level.level in ("High", "Elevated"))
+                    item.setFont(font)
                 self.setItem(row, column, item)
         self.setSortingEnabled(sorting)
         if sorting:

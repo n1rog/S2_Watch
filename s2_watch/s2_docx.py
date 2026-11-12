@@ -15,7 +15,7 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Pt, RGBColor, Twips
 
-from s2_watch.s2_report import CLOSING, HEADER_FIELDS, HEADER_LABELS, TOP_BANNER, S2Report
+from s2_watch.s2_report import CLOSING, HEADER_FIELDS, HEADER_LABELS, TOP_BANNER, S2Report, estimative
 
 NAVY = "0D1B2A"
 BLUE = "1565C0"
@@ -261,6 +261,9 @@ def _block(document, block) -> None:
             _shade(row.cells[1], fill)
             row.cells[1].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
             _text(row.cells[1].paragraphs[0], level.upper(), 16, bold=True, color=ink)
+            if estimative(level):
+                _text(row.cells[1].add_paragraph(), estimative(level), 12, color=ink)
+                row.cells[1].paragraphs[1].alignment = WD_ALIGN_PARAGRAPH.CENTER
         _spacing(document.add_paragraph(), 0, 2)
     elif block.kind == "sources":
         for number, name, rating, description, url in block.rows:

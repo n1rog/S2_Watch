@@ -4,12 +4,16 @@ Not the AI, and not a percentage: a level the analyst can check from the reasons
 ("Elevated — high urgency · 1 source, unconfirmed · in focus region 6"). From what S2 Watch
 already knows of an event:
 
-    High      high urgency AND (officially confirmed OR 2+ independent sources) AND in a focus
-              region (or no focus regions are set)
-    Elevated  high urgency otherwise (unconfirmed, or outside the focus regions), OR medium
-              urgency confirmed (officially or by 2+ sources) and escalating
-    Guarded   medium urgency, OR a single-source radio report not yet confirmed
+    High      high urgency AND confirmed (an official source, OR 2+ independent sources one of
+              them a radio station) AND in a focus region (or no focus regions are set)
+    Elevated  high urgency otherwise (unconfirmed, or outside the focus regions) from radio, an
+              official source or 2+ outlets, OR medium urgency confirmed and escalating
+    Guarded   medium urgency, a single news story (one outlet), OR a single-source radio report
+              not yet confirmed
     Low       everything else
+
+News coverage alone doesn't confirm: several outlets running one story is wide reporting, not
+corroboration, so a news-only event reaches Elevated at most.
 
 A quiet event (no report for the quiet period) steps down one level; a closed one is Low. An
 accepted assessment's trend shows in the reasons, and escalating can raise medium to Elevated.
@@ -49,7 +53,10 @@ def concern(event, now: datetime, focus_regions=(), trend: str = "") -> Concern:
         reasons.append(f"confirmed by {event.official}")
     reasons.append(f"{sources} independent source{'s' if sources != 1 else ''}" if sources > 1
                    else "1 source" + ("" if official else ", unconfirmed"))
-    confirmed = official or sources >= 2
+    radio = any(source != "OSINT" for source in event.sources)
+    confirmed = official or (sources >= 2 and radio)
+    if sources >= 2 and not radio and not official:
+        reasons.append("news only")
     focused = has_focus(focus_regions)
     in_focus = not focused or event_in_focus(event, focus_regions)
     if focused:
@@ -60,10 +67,11 @@ def concern(event, now: datetime, focus_regions=(), trend: str = "") -> Concern:
     escalating = trend == "escalating"
     if event.urgency == "high" and confirmed and in_focus:
         level = "High"
-    elif event.urgency == "high" or (event.urgency == "medium" and confirmed and escalating):
+    elif (event.urgency == "high" and (radio or official or sources >= 2)) or \
+            (event.urgency == "medium" and confirmed and escalating):
         level = "Elevated"
-    elif event.urgency == "medium" or event.single_source(now):
-        level = "Guarded"
+    elif event.urgency in ("high", "medium") or event.single_source(now):
+        level = "Guarded"     # one news story, however urgent its words, is one outlet's account
         if event.single_source(now) and event.urgency != "medium":
             reasons.append("single source, not yet confirmed")
     else:

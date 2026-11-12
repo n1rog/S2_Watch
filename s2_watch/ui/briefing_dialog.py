@@ -19,13 +19,15 @@ class BriefingPeriodDialog(QDialog):
     """Pick the period (since the last briefing by default) and tick the events to include.
     ``events_for(key, start)`` gives the events for a period (start None: the Events tab's)."""
 
-    def __init__(self, store, events_for, format_time=None, parent=None, now: datetime | None = None) -> None:
+    def __init__(self, store, events_for, format_time=None, parent=None, now: datetime | None = None,
+                 concern_of=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Draft MAGNET S2 briefing")
         self.resize(620, 520)
         self.store = store
         self.events_for = events_for
         self.format_time = format_time
+        self.concern_of = concern_of     # event -> its Concern: shown, and the most concerning first
         self.now = now or datetime.now(timezone.utc)
         self.start: datetime | None = None
         self.events: list = []
@@ -79,11 +81,16 @@ class BriefingPeriodDialog(QDialog):
         self.hours.setVisible(key == "custom")
         self.start = None if key == "events_tab" else period_start(key, self.now, self.store, self.hours.value())
         events = self.events_for(key, self.start)
+        levels = {event.event_id: self.concern_of(event) for event in events} if self.concern_of else {}
+        if levels:
+            events = sorted(events, key=lambda event: levels[event.event_id].rank, reverse=True)
         self.list.blockSignals(True)
         self.list.clear()
         for event in events:
-            item = QListWidgetItem(f"[{URGENCY_WORDS.get(event.urgency, event.urgency)}] {event.title}"
-                                   + (" (closed)" if event.closed_at is not None else ""))
+            tag = levels[event.event_id].level if levels else URGENCY_WORDS.get(event.urgency, event.urgency)
+            item = QListWidgetItem(f"[{tag}] {event.title}" + (" (closed)" if event.closed_at is not None else ""))
+            if levels:
+                item.setToolTip(levels[event.event_id].text())
             item.setData(Qt.ItemDataRole.UserRole, event)
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             ignored = bool(event.statuses) and set(event.statuses) == {"ignored"}

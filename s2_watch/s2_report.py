@@ -50,6 +50,14 @@ def precedence_definitions() -> str:
     """The levels as Ollama is told them, one per line."""
     return "\n".join(f"- {line}: inform others {when}. {meaning}" for line, meaning, when in PRECEDENCE_LEVELS)
 LEVELS = ("HIGH", "MODERATE", "LOW")
+# The levels in standard estimative language (ICD 203) with its ranges, shown beside them.
+ESTIMATIVE = {"HIGH": ("Very likely", "80–95%"), "MODERATE": ("Likely", "55–80%"), "LOW": ("Unlikely", "20–45%")}
+
+
+def estimative(level: str) -> str:
+    """ "HIGH" -> "Very likely (80–95%)"; "" for anything else."""
+    words = ESTIMATIVE.get((level or "").strip().upper())
+    return f"{words[0]} ({words[1]})" if words else ""
 MAX_TAGS = 15
 MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 OFFICIAL_SOURCES = {"USGS", "NIFC", "NOAA SPC", "FEMA", "FAA", "U.S. Department of State", "NWS"}

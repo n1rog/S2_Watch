@@ -41,11 +41,18 @@ class ReviewItem:
 
 
 def review_items(now: datetime, events, done: set[str], *, alerted=(), proposals=(), event_lookup=None,
-                 misses=(), drafts=()) -> list[ReviewItem]:
+                 misses=(), drafts=(), concern_of=None) -> list[ReviewItem]:
     """The items waiting, newest first. ``events``: recent EventSummary objects; ``alerted``:
     event ids a desktop alert was raised for; ``proposals``: event ids with an assessment to
     review; ``event_lookup(ids)``: their summaries; ``misses``: (key, message, result);
-    ``drafts``: store.list_drafts()."""
+    ``drafts``: store.list_drafts(); ``concern_of(event)``: its Concern (s2_watch.concern).
+    A "new event" is one at High concern first heard in the last day, or an alerted one at
+    Elevated or above: high urgency alone would list every news story about a shooting."""
+    if concern_of is None:
+        from s2_watch.concern import concern
+
+        def concern_of(event):
+            return concern(event, now)
     items: list[ReviewItem] = []
     alerted = set(alerted)
     by_id = {event.event_id: event for event in events}
@@ -53,10 +60,11 @@ def review_items(now: datetime, events, done: set[str], *, alerted=(), proposals
         if event.closed_at is not None:
             continue
         sources = f"{event.reports} report{'s' if event.reports != 1 else ''} · {', '.join(event.sources)}"
-        if (event.urgency == "high" and now - event.first_seen <= NEW_FOR) or event.event_id in alerted:
-            why = "high urgency" if event.urgency == "high" else "alerted"
+        level = concern_of(event)
+        if (level.level == "High" and now - event.first_seen <= NEW_FOR) or \
+                (event.event_id in alerted and level.level in ("High", "Elevated")):
             items.append(ReviewItem(f"new:{event.event_id}", "new", event.last_seen, event.title,
-                                    f"{why} · {sources}", event.event_id))
+                                    level.text(), event.event_id))
         elif event.single_source(now):
             items.append(ReviewItem(f"single:{event.event_id}", "single", event.last_seen, event.title,
                                     f"one station, no official confirmation · {sources}", event.event_id))

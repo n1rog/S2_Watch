@@ -18,7 +18,9 @@ from PySide6.QtWidgets import QHBoxLayout, QMenu, QPushButton, QTextBrowser, QTo
 
 from s2_watch.analysis.ollama import readable_text
 from s2_watch.event_assessment import TREND_MARKS, changes
+from s2_watch.concern import COLOURS as CONCERN_COLOURS
 from s2_watch.events import quiet_hours
+from s2_watch.s2_report import estimative
 from s2_watch.models import Message
 from s2_watch.senders import GRADE_WORDS, callsign
 from s2_watch.ui.metrics_view import is_dark
@@ -58,6 +60,7 @@ class EventDetail(QWidget):
         self.format_time = format_time
         self.current = None
         self.quiet_for = None          # event -> quiet coverage cells near it (s2_watch.silence)
+        self.concern_for = None        # event -> its Concern (s2_watch.concern)
         # Set by the main window: event -> (prompt, report count); () -> (endpoint, model);
         # event -> (what a discussion of its assessment starts from, report count).
         self.assessment_brief = None
@@ -92,14 +95,16 @@ class EventDetail(QWidget):
         self.close_button.setToolTip("It's over: show it as closed, and list it as resolved in briefings. "
                                      "A new report reopens it.")
         self.close_button.clicked.connect(self._close_or_reopen)
-        self.assess_button = QPushButton("Assess (Ollama)")
-        self.assess_button.setToolTip("Ask Ollama what this event's reports add up to: trend, agreement, likely "
+        self.assess_button = QPushButton("AI assessment")
+        self.assess_button.setToolTip("Ask the local AI (Ollama) what this event's reports add up to: trend, agreement, "
+                                      "likely "
                                       "developments, gaps and recommendations, citing the reports by number. "
                                       "Takes a minute or two; the event and its reports are not changed.")
         self.assess_button.clicked.connect(self.assess)
         buttons = QHBoxLayout()
-        for button in (self.map_button, self.draft_button, self.assess_button, self.label_button, self.reports_button,
-                       self.close_button):
+        # The same order everywhere: AI assessment, Draft follow-up, Show on map, Close event.
+        for button in (self.assess_button, self.draft_button, self.map_button, self.close_button, self.label_button,
+                       self.reports_button):
             buttons.addWidget(button)
         buttons.addStretch(1)
         layout = QVBoxLayout(self)
@@ -146,7 +151,7 @@ class EventDetail(QWidget):
         self.draft_button.setEnabled(bool(reports))
         busy = event.event_id in self._assessing
         self.assess_button.setEnabled(bool(reports) and not busy and self.assessment_brief is not None)
-        self.assess_button.setText("Assessing…" if busy else "Assess (Ollama)")
+        self.assess_button.setText("Assessing…" if busy else "AI assessment")
         html = self.render(event, reports, self.store.sender_track_records(),
                            assessment=self.store.event_assessment(event.event_id),
                            accepted=self.store.accepted_assessment(event.event_id),
@@ -288,6 +293,10 @@ class EventDetail(QWidget):
                f"<p style='margin-top:0'><b>{e(event.category)}</b>"
                f"{' · ' + e(area) if area else ''} · <b style='color:{urgency_colour}'>{e(event.urgency.upper())}</b><br>"
                f"{e(when)} · {event.reports} report{'s' if event.reports != 1 else ''} from {e(sources)}</p>"]
+        if self.concern_for is not None:
+            level = self.concern_for(event)
+            out.append(f"<p style='margin:2px 0 6px'><b>Concern:</b> <b style='color:{CONCERN_COLOURS[level.level]}'>"
+                       f"{e(level.level)}</b> — {e(' · '.join(level.reasons))}</p>")
         if event.closed_at is not None:
             who = "you" if event.closed_by == "operator" else "a report"
             out.append(f"<p style='color:#2e7d32'>✓ <b>Closed</b> {e(self.format_time(event.closed_at))} by {who}"
@@ -378,8 +387,9 @@ class EventDetail(QWidget):
         for paragraph in assessment.assessment:
             out.append(f"<p style='margin:4px 0'>{e(paragraph)}</p>")
         if assessment.probabilities:
-            rows = "".join(f"<tr><td>{e(statement)}</td><td><b>{e(level)}</b></td></tr>"
-                           for statement, level in assessment.probabilities)
+            rows = "".join(f"<tr><td>{e(statement)}</td><td><b>{e(level)}</b>"
+                           + (f" <span style='color:gray'>{e(estimative(level))}</span>" if estimative(level) else "")
+                           + "</td></tr>" for statement, level in assessment.probabilities)
             out.append(f"<p style='margin:4px 0 0'><b>Probability</b></p><table cellpadding='2'>{rows}</table>")
         for title, items in (("Intelligence gaps", assessment.gaps), ("Mitigation", assessment.mitigation),
                              ("MAGNET guidance", assessment.guidance)):
@@ -405,7 +415,7 @@ class EventDetail(QWidget):
             stale = report_count - accepted.reports
             if stale > 0 and proposed is None and not assessing:
                 out.append(f"<p style='color:#e65100;margin:2px 0'>⚠ <b>Out of date:</b> {stale} new report"
-                           f"{'s' if stale != 1 else ''} since. Assess (Ollama) again for a proposed update, "
+                           f"{'s' if stale != 1 else ''} since. Click AI assessment again for a proposed update, "
                            "or edit it.</p>")
             out += self._assessment_body(accepted)
         if assessing:
@@ -425,7 +435,7 @@ class EventDetail(QWidget):
             stale = report_count - proposed.reports
             if stale > 0:
                 out.append(f"<p style='color:#e65100;margin:2px 0'>⚠ <b>Out of date:</b> {stale} new report"
-                           f"{'s' if stale != 1 else ''} since. Click Assess (Ollama) again.</p>")
+                           f"{'s' if stale != 1 else ''} since. Click AI assessment again.</p>")
             if accepted is not None:
                 changed = changes(accepted, proposed)
                 out.append("<p style='margin:4px 0'><b>What changed:</b> "
@@ -434,7 +444,7 @@ class EventDetail(QWidget):
             out += self._assessment_body(proposed)
             out.append("</div>")
         if accepted is None and proposed is None and not assessing and report_count:
-            out.append(f"<p style='color:gray;margin:6px 0'>No assessment yet: Assess (Ollama), or "
+            out.append(f"<p style='color:gray;margin:6px 0'>No assessment yet: AI assessment, or "
                        f"<a href='s2watch:write-assessment/{event_id}'>write one</a>.</p>")
         if out:
             out.insert(0, "<div style='margin:6px 0'>")

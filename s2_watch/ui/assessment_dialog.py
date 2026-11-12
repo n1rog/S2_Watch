@@ -9,6 +9,7 @@ from dataclasses import replace
 from datetime import datetime, timezone
 from html import escape
 
+from s2_watch.s2_report import estimative
 from PySide6.QtCore import Qt, QUrl, Signal
 from PySide6.QtGui import QCursor
 from PySide6.QtWidgets import (
@@ -74,6 +75,8 @@ class AssessmentDialog(QDialog):
                                            "a blank line between paragraphs")
         self.probabilities = self._text("\n".join(f"{s} | {level}" for s, level in assessment.probabilities), 70)
         self.probabilities.setPlaceholderText("One per line: what may happen next | HIGH, MODERATE or LOW")
+        self.probabilities.setToolTip("HIGH = very likely (80–95%), MODERATE = likely (55–80%), LOW = unlikely (20–45%): "
+                                      "the standard estimative language (ICD 203)")
         self.gaps = self._text("\n".join(f"- {gap}" for gap in assessment.gaps), 70)
         self.mitigation = self._text("\n".join(f"- {item}" for item in assessment.mitigation), 60)
         self.guidance = self._text("\n".join(f"- {item}" for item in assessment.guidance), 60)
@@ -304,7 +307,7 @@ class AssessmentHistoryDialog(QDialog):
                 out.append(f"<p><b>BLUF:</b> {escape(version.bluf)}</p>")
             out += [f"<p>{escape(p)}</p>" for p in version.assessment]
             if version.probabilities:
-                out.append("<p>" + "<br>".join(f"{escape(s)} — <b>{level}</b>" for s, level in version.probabilities)
+                out.append("<p>" + "<br>".join(f"{escape(s)} — <b>{level}</b> {escape(estimative(level))}" for s, level in version.probabilities)
                            + "</p>")
             out.append("<hr>")
         browser.setHtml("".join(out) or "<p>No accepted assessment yet.</p>")

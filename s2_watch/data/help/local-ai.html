@@ -22,11 +22,13 @@ Check every figure: drafts round and embellish.</li>
 <h2>Assessing an event</h2>
 <p>To start one, select an event (in the list under the map with <b>Show: Events</b>, or on the Events tab), then any of:</p>
 <ul>
-<li>the <b>Assess (Ollama)</b> button under the event's details;</li>
-<li>right-click the event → <b>Assess event (Ollama)</b>;</li>
-<li><b>Reports → Assess Selected Event (Ollama)</b>, or <kbd>Ctrl+Shift+A</kbd>.</li>
+<li>the <b>AI assessment</b> button under the event's details;</li>
+<li>right-click the event → <b>AI assessment</b>;</li>
+<li><b>Reports → AI Assessment of Selected Event</b>, or <kbd>Ctrl+Shift+A</kbd>.</li>
 </ul>
-<p>The button reads <b>Assessing…</b> while it works, and the result appears at the top of the event's details.</p>
+<p>The button reads <b>Assessing…</b> while it works, and the result appears at the top of the event's details. When it is
+ready, S2 Watch says so (a notice, and a desktop alert if you're in another window) and lists it in <b>Needs Review</b> as
+<b>AI assessment ready</b> until you accept, edit or dismiss it.</p>
 <p>The assessment asks the model what the event's reports add up to. It reads the first report
 and the latest six (numbered as in the panel), the official confirmation and the Background facts, and writes a suggestion shown
 at the top of the panel, apart from the facts:</p>
@@ -34,7 +36,9 @@ at the top of the panel, apart from the facts:</p>
 <li><b>BLUF</b>, the current situation first;</li>
 <li><b>Trend</b>: escalating, stable, winding down or unclear, and why;</li>
 <li><b>Agreement</b>: whether the reports agree or contradict each other;</li>
-<li>assessment paragraphs in measured language, a <b>Probability</b> table (HIGH / MODERATE / LOW), <b>Intelligence gaps</b>,
+<li>assessment paragraphs in measured language, a <b>Probability</b> table (HIGH / MODERATE / LOW, shown with the standard
+estimative words and ranges (ICD 203): HIGH = <i>very likely, 80–95%</i>; MODERATE = <i>likely, 55–80%</i>; LOW = <i>unlikely,
+20–45%</i>; the Word report and web page show them too), <b>Intelligence gaps</b>,
 <b>Mitigation</b> and <b>MAGNET guidance</b>.</li>
 </ul>
 <p>Every statement cites the reports it rests on, e.g. <b>[22]</b>; check them. The model is told to use only facts in the
