@@ -130,3 +130,16 @@ def _choose(entries, allowed, named_states, abroad):
     if len(entries) == 1 or (entries and entries[0][3] >= DOMINANCE * entries[1][3]):
         return entries[0]
     return None
+
+
+@lru_cache(maxsize=4096)
+def _population_near(lat: float, lon: float, km: float) -> int:
+    from s2_watch.events import distance_km
+
+    return max((entry[3] for entries in load_towns().values() for entry in entries
+                if abs(entry[1] - lat) < 0.5 and distance_km(lat, lon, entry[1], entry[2]) <= km), default=0)
+
+
+def population_near(lat: float, lon: float, km: float = 5) -> int:
+    """The population of the largest town within ``km`` of a point (0 if none): is it a city?"""
+    return _population_near(round(lat, 3), round(lon, 3), km)

@@ -39,7 +39,8 @@ from s2_watch.ui.event_detail import EventDetail
 from s2_watch.ui.events_view import EventsTable, EventsView, search_box
 from s2_watch.ui.misses_view import MissesView
 from s2_watch.missed_news import MissedNewsScanner
-from s2_watch.events import incident_key, key_terms, place_from_locations, place_title, report_hazards, set_quiet_hours
+from s2_watch.events import (incident_key, incident_marks, key_terms, place_from_locations, place_title, report_hazards,
+                             set_quiet_hours)
 from s2_watch.monitoring import legacy_message_key, message_key
 from s2_watch.ui.followup_dialog import FollowUpDialog
 
@@ -2216,7 +2217,7 @@ class MainWindow(QMainWindow):
         text = f"{readable_text(message)} {result.summary}"
         self.store.assign_event(report.report_id, result.category, report_hazards(text),
                                 place_from_locations(locations), place_title(result.summary, locations), incident_key(message),
-                                key_terms(text))
+                                key_terms(text), marks=incident_marks(text))
         self.store.set_missed_status(key, "added", corrected=result)
         self.handle_batch([ProcessedMessage(matched, result, locations, report)])
         self.update_model_examples()

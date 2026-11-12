@@ -70,7 +70,12 @@ flood are one event. Reports join an event when they are the same category and k
 hazard, within 48 hours of its latest report and about 100 km (150 km for earthquakes),
 or in the same state when only the state is known. A named official incident (a NIFC
 fire, a USGS quake, an FAA restriction) is one event however long it lasts. Stories
-without a physical hazard (crime, politics...) also need distinctive wording in common.
+without a physical hazard (crime, politics...) also need distinctive wording in common,
+except crime stories of one incident worded differently by different outlets: the same kind
+of crime in one place, telling the same big story within a day (the same or a growing toll,
+"multiple people", an active shooter) or naming the same small town (under 100,000 people,
+away from big cities) within 48 hours. Old cases (sentencings, anniversaries) and "another
+shooting" stay apart. Events split before 0.54.0 are merged this way once.
 Each event shows its sources, official confirmation and how far ahead radio reported it.
 
 Select an event to see what it is about. The panel beside the list (on the map page and

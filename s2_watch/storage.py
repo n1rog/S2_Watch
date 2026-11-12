@@ -143,7 +143,8 @@ class SQLiteStore:
         self.connection.execute("CREATE INDEX IF NOT EXISTS events_last_seen ON events(last_seen)")
         # Closed by an all-clear report or the operator (closed_by "report" / "operator").
         event_columns = {row[1] for row in self.connection.execute("PRAGMA table_info(events)")}
-        for column in ("closed_at", "close_reason", "closed_by"):
+        # marks: the incident's kind and facts ("shooting", "count:4"); place_level: how exactly it's placed.
+        for column in ("closed_at", "close_reason", "closed_by", "marks", "place_level"):
             if column not in event_columns:
                 self._add_column(f"ALTER TABLE events ADD COLUMN {column} TEXT NOT NULL DEFAULT ''")
         # Briefings and reports the operator saved in S2 Watch (the draft text, to reopen).
@@ -739,16 +740,20 @@ class SQLiteStore:
     # -- events ----------------------------------------------------------------------
 
     def assign_event(self, report_id: int, category: str, hazards: set[str], place, title: str,
-                     incident: str = "", terms: set[str] | None = None, text: str = "") -> int:
+                     incident: str = "", terms: set[str] | None = None, text: str = "",
+                     marks: set[str] | None = None) -> int:
         """Put a newsworthy report in its event (an existing one, or a new one); the event id.
 
         ``text`` is the report's words when they may close the event ("power restored",
-        "warning cancelled"); a later report reopens a closed event.
+        "warning cancelled"); a later report reopens a closed event. ``marks`` are a crime
+        report's kind and facts (``events.incident_marks``), which tie differently worded
+        stories of one incident together.
         """
         from s2_watch.events import (EVENT_GAP, INCIDENT_GAP, EventCandidate, Place, all_clear, choose_event,
                                      clean_title)
 
         terms = terms or set()
+        marks = marks or set()
         title = clean_title(title, place)
 
         row = self.connection.execute(
@@ -764,23 +769,26 @@ class SQLiteStore:
         self.connection.execute("UPDATE reports SET lat = ?, lon = ?, place_level = ? WHERE id = ?",
                                 (place.lat, place.lon, place.level, report_id))
         rows = self.connection.execute(
-            """SELECT id, category, hazards, state, region, lat, lon, first_seen, last_seen, incident, terms FROM events
+            """SELECT id, category, hazards, state, region, lat, lon, first_seen, last_seen, incident, terms, marks,
+                      place_level FROM events
                WHERE category = ? AND ((last_seen >= ? AND first_seen <= ?)
                                        OR (incident != '' AND incident = ? AND last_seen >= ?))""",
             (category, utc_iso(seen - EVENT_GAP), utc_iso(seen + EVENT_GAP), incident, utc_iso(seen - INCIDENT_GAP)),
         ).fetchall()
         candidates = [EventCandidate(row[0], row[1], {h for h in row[2].split(",") if h},
-                                     Place(row[5], row[6], "", row[3], row[4]),
+                                     Place(row[5], row[6], row[12], row[3], row[4]),
                                      datetime.fromisoformat(row[7]), datetime.fromisoformat(row[8]),
-                                     row[9], {t for t in row[10].split(",") if t}) for row in rows]
-        chosen = choose_event(candidates, category, hazards, place, seen, incident, terms)
+                                     row[9], {t for t in row[10].split(",") if t},
+                                     {m for m in row[11].split(",") if m}) for row in rows]
+        chosen = choose_event(candidates, category, hazards, place, seen, incident, terms, marks)
         if chosen is None:
             cursor = self.connection.execute(
                 """INSERT INTO events(title, category, hazards, state, region, lat, lon, first_seen, last_seen,
-                                     incident, terms)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                                     incident, terms, marks, place_level)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (title, category, ",".join(sorted(hazards)), place.state, place.region, place.lat, place.lon,
-                 first_seen, last_seen, incident, ",".join(sorted(terms))),
+                 first_seen, last_seen, incident, ",".join(sorted(terms)), ",".join(sorted(marks)),
+                 place.level if place.has_point else ""),
             )
             event_id = cursor.lastrowid
         else:
@@ -793,13 +801,17 @@ class SQLiteStore:
                 """UPDATE events SET hazards = ?, first_seen = MIN(first_seen, ?), last_seen = MAX(last_seen, ?),
                      state = CASE WHEN state = '' THEN ? ELSE state END,
                      region = COALESCE(region, ?),
+                     place_level = CASE WHEN lat IS NULL THEN ? ELSE place_level END,
                      lat = COALESCE(lat, ?), lon = COALESCE(lon, ?),
                      incident = CASE WHEN incident = '' THEN ? ELSE incident END,
-                     terms = ?
+                     terms = ?, marks = ?
                    WHERE id = ?""",
-                (merged, first_seen, last_seen, place.state, place.region, place.lat, place.lon, incident,
-                 ",".join(sorted(chosen.terms or terms)), event_id),   # the first report's words: a growing
-                                                                        # set would match ever more stories
+                (merged, first_seen, last_seen, place.state, place.region,
+                 place.level if place.has_point else "", place.lat, place.lon, incident,
+                 ",".join(sorted(chosen.terms or terms)),   # the first report's words: a growing
+                                                            # set would match ever more stories
+                 ",".join(sorted(chosen.marks | marks)),    # the facts as they come in ("4 shot", "5 shot")
+                 event_id),
             )
         self.connection.execute("UPDATE reports SET event_id = ? WHERE id = ?", (event_id, report_id))
         clear = all_clear(text) if text else ""
@@ -906,8 +918,10 @@ class SQLiteStore:
         """Give an event (and its first report) a place found later, and name it in their titles."""
         from s2_watch.events import titled_with_place
 
-        self.connection.execute("UPDATE events SET lat = ?, lon = ?, state = ?, region = ? WHERE id = ?",
-                                (location.lat, location.lon, location.state or "", location.region, event_id))
+        self.connection.execute(
+            "UPDATE events SET lat = ?, lon = ?, state = ?, region = ?, place_level = ? WHERE id = ?",
+            (location.lat, location.lon, location.state or "", location.region,
+             location.level if location.lat is not None else "", event_id))
         self.connection.execute(
             "UPDATE reports SET lat = ?, lon = ?, state = ?, region = ?, place_level = ? WHERE id = ?",
             (location.lat, location.lon, location.state or "", location.region, location.level, report_id))
@@ -921,6 +935,72 @@ class SQLiteStore:
                 self.connection.execute("UPDATE analysis_results SET summary = ? WHERE id = ?",
                                         (titled_with_place(summary, location.label), analysis_id))
         self.connection.commit()
+
+    def regroup_incidents(self, since: datetime, marks_of) -> int:
+        """Once: give events since ``since`` their incident marks (``marks_of(message, title)``)
+        and place level, and merge the crime stories that are one incident told in different
+        words (``events.same_incident``) into the earliest. Events the operator closed or
+        assessed are left alone. The number of events merged away."""
+        from s2_watch.events import EVENT_GAP, EventCandidate, Place, distance_km, same_incident
+
+        rows = self.connection.execute(
+            """SELECT e.id, e.title, e.category, e.hazards, e.state, e.region, e.lat, e.lon, e.first_seen,
+                      e.last_seen, e.incident, e.terms, r.place_level, e.closed_by,
+                      m.source_application, m.raw_content, m.fields_json,
+                      EXISTS (SELECT 1 FROM accepted_assessments a WHERE a.event_id = e.id)
+                        OR EXISTS (SELECT 1 FROM event_assessments a WHERE a.event_id = e.id)
+               FROM events e
+               JOIN reports r ON r.id = (SELECT MIN(id) FROM reports WHERE event_id = e.id)
+               JOIN messages m ON m.id = (SELECT MIN(id) FROM messages WHERE report_id = r.id)
+               WHERE e.last_seen >= ? ORDER BY e.first_seen""", (utc_iso(since),)).fetchall()
+        kept: list[tuple[EventCandidate, bool]] = []
+        merged = 0
+        for (event_id, title, category, hazards, state, region, lat, lon, first_seen, last_seen, incident, terms,
+             level, closed_by, application, raw, fields_json, assessed) in rows:
+            try:
+                fields = json.loads(fields_json) if fields_json else {}
+            except ValueError:
+                fields = {}
+            marks = marks_of(Message(application, raw, fields={str(k): str(v) for k, v in fields.items()}), title)
+            level = level if lat is not None else ""
+            self.connection.execute("UPDATE events SET marks = ?, place_level = ? WHERE id = ?",
+                                    (",".join(sorted(marks)), level, event_id))
+            event = EventCandidate(event_id, category, {h for h in hazards.split(",") if h},
+                                   Place(lat, lon, level, state, region), datetime.fromisoformat(first_seen),
+                                   datetime.fromisoformat(last_seen), incident, {t for t in terms.split(",") if t},
+                                   marks)
+            locked = closed_by == "operator" or bool(assessed)
+            if not locked and not event.hazards and not incident and event.place.has_point:
+                matching = [other for other, other_locked in kept
+                            if not other_locked and other.category == category and not other.hazards
+                            and not other.incident and event.first_seen - other.last_seen <= EVENT_GAP
+                            and same_incident(other, event.place, event.first_seen, marks, event.terms)]
+                if matching:
+                    into = min(matching, key=lambda other: distance_km(other.place.lat, other.place.lon, lat, lon))
+                    self._merge_event(event_id, into.event_id)
+                    into.last_seen = max(into.last_seen, event.last_seen)
+                    into.marks |= marks
+                    self.connection.execute("UPDATE events SET marks = ? WHERE id = ?",
+                                            (",".join(sorted(into.marks)), into.event_id))
+                    merged += 1
+                    continue
+            kept.append((event, locked))
+        self.connection.commit()
+        return merged
+
+    def _merge_event(self, event_id: int, into: int) -> None:
+        """Move an event's reports into another event and remove it."""
+        self.connection.execute("UPDATE reports SET event_id = ? WHERE event_id = ?", (into, event_id))
+        self.connection.execute(
+            """UPDATE events SET first_seen = MIN(first_seen, (SELECT first_seen FROM events WHERE id = ?)),
+                 last_seen = MAX(last_seen, (SELECT last_seen FROM events WHERE id = ?))
+               WHERE id = ?""", (event_id, event_id, into))
+        # Still going after the all-clear: open again.
+        self.connection.execute(
+            """UPDATE events SET closed_at = '', close_reason = '', closed_by = ''
+               WHERE id = ? AND closed_by = 'report' AND closed_at < (SELECT last_seen FROM events WHERE id = ?)""",
+            (into, event_id))
+        self.connection.execute("DELETE FROM events WHERE id = ?", (event_id,))
 
     def close_events_from_history(self, since: datetime) -> int:
         """Close open events whose latest report is an all-clear (reports placed before events

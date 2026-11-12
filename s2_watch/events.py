@@ -76,6 +76,7 @@ class EventCandidate:
     last_seen: datetime
     incident: str = ""
     terms: set[str] = field(default_factory=set)
+    marks: set[str] = field(default_factory=set)
 
 
 @dataclass
@@ -214,6 +215,118 @@ def key_terms(text: str) -> set[str]:
             if word not in STOP_WORDS and word not in _state_words()}
 
 
+# What kind of crime a story is about, and whether it's a big one. Outlets word one incident
+# differently ("4 shot in Washington, DC as police respond to active shooting", "Four shot in
+# Washington, DC", "Shooting near DC fitness center leaves multiple people injured"), so their
+# words rarely match; the kind, the place and the facts do.
+SAME_TOWN_KM = 5             # reports this close are about the same town
+SAME_INCIDENT_KM = 10
+CITY_REACH_KM = 25           # a town this near a big city is its suburb (Bessemer, 23 km from Birmingham)
+BIG_STORY_GAP = timedelta(hours=24)
+SMALL_TOWN = 100_000         # a town smaller than this rarely has two shootings in two days
+TOWN_LEVELS = {"city", "precise"}
+_KINDS = {
+    "shooting": re.compile(r"\bshoot(?:s|ing|ings|er|ers)?\b|\bshot\b|\bgun(?:fire|man|men|shots?)\b|\bopen(?:s|ed)? fire\b"),
+    "stabbing": re.compile(r"\bstab(?:s|bed|bing|bings)?\b"),
+    "robbery": re.compile(r"\brobb(?:ery|eries|ed|er|ers)\b|\bhold-?up\b|\bcarjack"),
+    "standoff": re.compile(r"\bstand-?off\b|\bbarricaded\b|\bhostages?\b"),
+    "abduction": re.compile(r"\bkidnap|\babduct|\bamber alert\b"),
+    "bomb": re.compile(r"\bbomb\b|\bbomb threats?\b|\bexplosive device\b|\bsuspicious (?:package|device)\b"),
+    "homicide": re.compile(r"\bhomicides?\b|\bmurder(?:s|ed)?\b|\bkill(?:s|ed|ing)\b|\bfound dead\b"),
+}
+_NUMBERS = {"two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+            "double": 2, "triple": 3}
+_COUNT = re.compile(r"\b(\d{1,3}|two|three|four|five|six|seven|eight|nine|ten)\s+(?:(?:people|persons|victims|men|"
+                    r"women|teens|children|kids|officers|deputies|students)\s+)?(?:were\s+|are\s+)?"
+                    r"(?:shot|killed|dead|injured|wounded|hurt|hospitalized|stabbed)\b"
+                    r"|\b(double|triple)\s+(?:shooting|homicide|stabbing|murder)\b")
+_MANY = re.compile(r"\b(?:multiple|several|many)\s+(?:people\s+|persons\s+|victims\s+)?(?:shot|killed|dead|injured|"
+                   r"wounded|hurt|victims|people)\b|\bmass (?:shooting|casualty)\b")
+# Stories about an old case (a sentencing, an anniversary) aren't a new incident's reports.
+_PAST = re.compile(r"\bsentenced\b|\bsentencing\b|\bconvicted\b|\bpleads?\b|\bpleaded\b|\bguilty\b|\bverdict\b|\btrial\b"
+                   r"|\barraign|\bindicted\b|\banniversary\b|\byears? (?:later|ago)\b|\bcold case\b|\blast (?:year|month)\b"
+                   r"|\bremember|\bmemorial")
+_YEAR = re.compile(r"\b(19[5-9]\d|20\d\d)\b")
+# "Another shooting", "3rd reported shooting in 24 hours": a different incident in the same town.
+_ANOTHER = re.compile(r"\b(?:another|second|third|fourth|\d+(?:st|nd|rd|th))\s+(?:\w+\s+){0,3}"
+                      r"(?:shootings?|stabbings?|homicides?|killings?|robber(?:y|ies))\b")
+_MAJOR = re.compile(r"\bactive (?:shooter|shooting|threat|attacker)\b|\bmass shooting\b"
+                    r"|\b(?:officers?|deput(?:y|ies)|troopers?|police)\s+(?:were\s+)?(?:killed|shot|dies|died|slain)\b")
+
+
+def incident_marks(text: str) -> set[str]:
+    """A crime report's kind ("shooting"), its casualty count ("count:4", "count:many") and
+    whether it's a big incident ("major": an active shooter, an officer killed)."""
+    lowered = text.lower()
+    marks = {kind for kind, pattern in _KINDS.items() if pattern.search(lowered)}
+    if not marks:
+        return set()
+    counts = {int(word) if word.isdigit() else _NUMBERS[word]
+              for word in (match.group(1) or match.group(2) for match in _COUNT.finditer(lowered))}
+    counts = {count for count in counts if 2 <= count <= 500}
+    if counts:
+        marks.add(f"count:{max(counts)}")
+    elif _MANY.search(lowered):
+        marks.add("count:many")
+    if _MAJOR.search(lowered):
+        marks.add("major")
+    if _PAST.search(lowered) or any(int(year) < datetime.now().year for year in _YEAR.findall(lowered)):
+        marks.add("past")
+    if _ANOTHER.search(lowered):
+        marks.add("another")
+    return marks
+
+
+def _kinds(marks: set[str]) -> set[str]:
+    return {mark for mark in marks if mark in _KINDS}
+
+
+def _same_kind(first: set[str], second: set[str]) -> bool:
+    """The same kind of crime; a killing goes with a shooting or a stabbing (often one story)."""
+    a, b = _kinds(first), _kinds(second)
+    return bool(a and b) and (bool((a - {"homicide"}) & (b - {"homicide"})) or "homicide" in a | b)
+
+
+def _same_big_story(first: set[str], second: set[str]) -> bool:
+    """Both a big incident: the same casualty count ("4 shot" / "Four shot" / "multiple people
+    injured"), or both an active shooter or an officer killed."""
+    count_a = next((mark for mark in first if mark.startswith("count:")), "")
+    count_b = next((mark for mark in second if mark.startswith("count:")), "")
+    if count_a and count_b and (count_a == count_b or "count:many" in (count_a, count_b)):
+        return True
+    if count_a and count_b:   # a toll that grows ("4 shot", then "1 dead, 5 injured")
+        low, high = sorted(int(count[6:]) for count in (count_a, count_b))
+        if low >= 3 and high - low <= max(2, low // 2):
+            return True
+    return "major" in first and "major" in second
+
+
+def same_incident(candidate: EventCandidate, place: Place, seen: datetime, marks: set[str],
+                  terms: set[str] | None = None) -> bool:
+    """Crime stories with different words that are still one incident: the same kind, in one
+    place, and either a big story both tell (within a day), or two stories naming the same
+    small U.S. town (within EVENT_GAP)."""
+    if not (candidate.place.has_point and place.has_point and _same_kind(candidate.marks, marks)):
+        return False
+    if ("past" in candidate.marks) != ("past" in marks):
+        return False   # "Man sentenced in 2024 shooting" isn't today's shooting
+    distance = distance_km(candidate.place.lat, candidate.place.lon, place.lat, place.lon)
+    gap = max(seen - candidate.last_seen, candidate.first_seen - seen)
+    if distance <= SAME_INCIDENT_KM and gap <= BIG_STORY_GAP and _same_big_story(candidate.marks, marks):
+        return True
+    if distance > SAME_TOWN_KM or "another" in marks | candidate.marks or not candidate.terms & (terms or set()):
+        return False   # a different shooting, or the stories don't both name the town
+    if {candidate.place.level, place.level} - TOWN_LEVELS or not (_us(candidate.place) and _us(place)):
+        return False   # a county's middle, or abroad (no town list there)
+    from s2_watch.towns import population_near
+
+    return population_near(place.lat, place.lon, CITY_REACH_KM) < SMALL_TOWN   # a city has many a day
+
+
+def _us(place: Place) -> bool:
+    return len(place.state or "") == 2
+
+
 def clean_title(title: str, place: Place) -> str:
     """A headline with the coordinates placeholder replaced by the state's (or country's) name,
     and the state's name added to a headline that names no place ("Shooting" in WV is
@@ -251,7 +364,7 @@ def titled_with_place(title: str, label: str) -> str:
 
 
 def belongs(candidate: EventCandidate, category: str, hazards: set[str], place: Place, seen: datetime,
-            incident: str = "", terms: set[str] | None = None) -> bool:
+            incident: str = "", terms: set[str] | None = None, marks: set[str] | None = None) -> bool:
     """Whether a report (category, hazards, place, time) is part of this event."""
     if candidate.category != category:
         return False
@@ -268,7 +381,7 @@ def belongs(candidate: EventCandidate, category: str, hazards: set[str], place: 
         terms = terms or set()
         common = candidate.terms & terms
         if len(common) < 2 or len(common) < 0.4 * min(len(candidate.terms), len(terms)):
-            return False
+            return same_incident(candidate, place, seen, marks or set(), terms)
     if candidate.place.has_point and place.has_point:
         radius = max((RADIUS_KM.get(family, DEFAULT_RADIUS_KM) for family in shared or hazards or candidate.hazards),
                      default=DEFAULT_RADIUS_KM)
@@ -284,10 +397,11 @@ def belongs(candidate: EventCandidate, category: str, hazards: set[str], place: 
 
 
 def choose_event(candidates: list[EventCandidate], category: str, hazards: set[str], place: Place,
-                 seen: datetime, incident: str = "", terms: set[str] | None = None) -> EventCandidate | None:
+                 seen: datetime, incident: str = "", terms: set[str] | None = None,
+                 marks: set[str] | None = None) -> EventCandidate | None:
     """The best matching event: the same incident, else the nearest with a point, else the latest."""
     matching = [candidate for candidate in candidates
-                if belongs(candidate, category, hazards, place, seen, incident, terms)]
+                if belongs(candidate, category, hazards, place, seen, incident, terms, marks)]
     if not matching:
         return None
     same_incident = [candidate for candidate in matching if incident and candidate.incident == incident]
