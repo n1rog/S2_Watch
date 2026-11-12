@@ -294,6 +294,14 @@ HEADROOM = 1.3              # a model needs about this times its file size while
 SPARE = 2 * 1024 ** 3       # left for everything else running
 
 
+def local_endpoint(endpoint: str) -> bool:
+    """Whether Ollama runs on this computer (so this computer's free memory is what it has)."""
+    from urllib.parse import urlparse
+
+    host = (urlparse(endpoint if "//" in endpoint else f"http://{endpoint}").hostname or "").lower()
+    return host in ("", "localhost", "127.0.0.1", "::1", "0.0.0.0") or host.startswith("127.")
+
+
 def make_room(endpoint: str, model: str) -> None:
     """Unload every other model from Ollama, then check the assessment model fits in memory:
     a 7B model loaded next to the classification model and a browser once ran this computer out of
@@ -308,6 +316,8 @@ def make_room(endpoint: str, model: str) -> None:
         raise OllamaError(f"Unable to contact Ollama: {error}") from error
     if size is None:
         raise OllamaError(f"model {model} isn't installed (ollama pull {model})")
+    if not local_endpoint(endpoint):
+        return   # Ollama on another computer: its memory is that computer's, which Ollama manages there
     free = available_memory()
     needed = int(size * HEADROOM) + SPARE
     if free is not None and free < needed:

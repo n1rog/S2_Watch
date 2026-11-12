@@ -131,12 +131,15 @@ class MainWindow(QMainWindow):
     # Reports labelled these stay listed however many rows Newsworthiness is set to show.
     PINNED_STATUSES = ("interest", "followup")
 
+    NOTICES_KEPT = 20
+
     def __init__(self, database_path: str = "s2_watch.db") -> None:
         super().__init__()
         self.setWindowTitle(f"S2 Watch {APP_VERSION}")
         self.resize(800, 500)
         self.database_path = database_path
         self.store = SQLiteStore(database_path)
+        self.notices: list[tuple[datetime, str]] = []      # newest first (notify)
         # MARS regions the operator focuses on; empty = the whole U.S. is treated the same.
         self.focus_regions: set[int] = {
             int(value) for value in self.store.get_setting("focus.regions", "").split(",") if value.strip().isdigit()
@@ -326,6 +329,10 @@ class MainWindow(QMainWindow):
         self.history = QListWidget()
         self.map_view = MapView()
         self.map_view._bridge.message_selected.connect(self.select_analysis_message)
+        self.map_view._bridge.event_requested.connect(self.select_analysis_message)
+        self.map_view._bridge.reports_requested.connect(self.show_marker_reports)
+        self._message_reports: dict[str, int] = {}     # a map marker's message -> its report
+        self._alert_target: tuple[str, int | None] = ("", None)   # what clicking the latest alert opens
         self.map_application_filters: dict[str, QCheckBox] = {}
         self.map_category_filters: dict[str, QCheckBox] = {}
         map_filter_layout = QVBoxLayout()
@@ -748,7 +755,7 @@ class MainWindow(QMainWindow):
         # Beside the events list: what the selected event is about.
         self.map_event_detail = EventDetail(self.store, self.format_display_time)
         self.connect_event_detail(self.map_event_detail)
-        self.map_events.itemSelectionChanged.connect(lambda: self.map_event_detail.show_event(
+        self.map_events.itemSelectionChanged.connect(lambda: self.map_event_detail.show_selection(
             next((self.map_events.event_by_id(event_id) for event_id in self.map_events.selected_events()), None)))
         self.map_events_page = QSplitter(Qt.Orientation.Horizontal)
         self.map_events_page.addWidget(self.map_events)
@@ -863,6 +870,7 @@ class MainWindow(QMainWindow):
         quit_action.triggered.connect(self.quit_from_tray)
         self.tray.setContextMenu(tray_menu)
         self.tray.activated.connect(self.tray_activated)
+        self.tray.messageClicked.connect(self.alert_clicked)
         self.tray.show()
         self.adapter: JS8CallTcpAdapter | None = None
         self.magcommstat_adapter: MagCommstatSQLiteAdapter | None = None
@@ -1179,6 +1187,16 @@ class MainWindow(QMainWindow):
         else:
             self.statusBar().showMessage("That event isn't in the list: widen the watch period or the Events period",
                                          10_000)
+
+    def notify(self, text: str, timeout_ms: int = 10_000) -> None:
+        """A status-bar notice, also kept in the notices list (the bell) so it isn't lost."""
+        self.statusBar().showMessage(text, timeout_ms)
+        self.notices.insert(0, (datetime.now(timezone.utc), text))
+        del self.notices[self.NOTICES_KEPT:]
+        self.notices_changed()
+
+    def notices_changed(self) -> None:
+        """The notices list changed (the bell shows it)."""
 
     def show_help(self, topic: str = "") -> None:
         """Help → S2 Watch Help (F1): one window, brought forward if already open."""
@@ -1702,7 +1720,7 @@ class MainWindow(QMainWindow):
     def handle_batch(self, batch: list[ProcessedMessage]) -> None:
         # Insert the whole batch with sorting off, then sort and trim once: re-sorting
         # after every row made large backlogs freeze the window.
-        alerts: list[AnalysisResult] = []
+        alerts: list[tuple[AnalysisResult, int | None]] = []   # with each one's report
         live_sorting = self.messages.isSortingEnabled()
         analysis_sorting = self.analysis.isSortingEnabled()
         self.messages.setSortingEnabled(False)
@@ -1721,6 +1739,8 @@ class MainWindow(QMainWindow):
                 continue
             self.map_view.add_message(processed.message, processed.locations,
                                       dimmed=bool(report and report.status == "ignored"))
+            if report is not None:
+                self.remember_marker_report(processed.message, report.report_id)
             if processed.result:
                 item = self.insert_analysis_row(processed.message, processed.result, report, processed.locations)
                 if report:
@@ -1732,7 +1752,7 @@ class MainWindow(QMainWindow):
                 if secondary and processed.result.urgency != "high":
                     ignored = True
                 if (report is None or report.new_report) and not ignored and self.should_alert(processed.result):
-                    alerts.append(processed.result)
+                    alerts.append((processed.result, report.report_id if report else None))
         self.trim_oldest_rows(self.messages, self.LIVE_ROWS_LIMIT)
         if self.trim_oldest_rows(self.analysis, self.ANALYSIS_ROWS_LIMIT):
             self._report_items = {
@@ -1947,7 +1967,7 @@ class MainWindow(QMainWindow):
         self.analysis.setSortingEnabled(sorting_enabled)
         self.analysis.sortItems(0, Qt.SortOrder.DescendingOrder)
         self.apply_news_rows_limit()
-        self.show_alerts([result] if self.should_alert(result) else [])
+        self.show_alerts([(result, None)] if self.should_alert(result) else [])
 
     def update_analysis_row(self, row: int, result: AnalysisResult) -> None:
         values = {"Result": "NEWSWORTHY" if result.newsworthy else "routine", "Category": result.category,
@@ -2461,26 +2481,94 @@ class MainWindow(QMainWindow):
             return False
         return not (self.alert_high_urgency.isChecked() and result.urgency != "high")
 
-    def show_alerts(self, alerts: list[AnalysisResult]) -> None:
+    def show_alerts(self, alerts: list[tuple[AnalysisResult, int | None]]) -> None:
+        """Desktop alerts for new reports (each with its report id, or None). Clicking the alert
+        opens what it is about: one report's event, or the Needs Review list for several."""
         if not alerts:
             return
-        high = any(result.urgency == "high" for result in alerts)
+        high = any(result.urgency == "high" for result, _report in alerts)
         icon = QSystemTrayIcon.MessageIcon.Warning if high else QSystemTrayIcon.MessageIcon.Information
-        if len(alerts) <= 3:
-            for result in alerts:
-                self.tray.showMessage(
-                    f"S2 Watch: {result.category.replace('_', ' ').title()}", result.summary,
-                    QSystemTrayIcon.MessageIcon.Warning if result.urgency == "high"
-                    else QSystemTrayIcon.MessageIcon.Information,
-                    10000,
-                )
+        if len(alerts) == 1:
+            result, report_id = alerts[0]
+            event_id = self.store.event_of_report(report_id) if report_id is not None else None
+            self._alert_target = ("event", event_id) if event_id is not None else ("report", report_id)
+            self.tray.showMessage(f"S2 Watch: {result.category.replace('_', ' ').title()}",
+                                  f"{result.summary}\n(Click to open.)", icon, 10000)
             return
-        # A backlog can hold hundreds of newsworthy messages; summarise instead of flooding.
-        categories = ", ".join(sorted({result.category for result in alerts}))
-        self.tray.showMessage(
-            f"S2 Watch: {len(alerts)} newsworthy messages",
-            f"Categories: {categories}. See the Newsworthiness table.", icon, 10000,
-        )
+        self._alert_target = ("review", None)
+        if len(alerts) <= 3:
+            text = "\n".join(f"• {result.summary}" for result, _report in alerts)
+        else:   # a backlog can hold hundreds of newsworthy messages; summarise instead of flooding
+            text = f"Categories: {', '.join(sorted({result.category for result, _report in alerts}))}."
+        self.tray.showMessage(f"S2 Watch: {len(alerts)} newsworthy messages", f"{text}\n(Click to review them.)",
+                              icon, 10000)
+
+    def alert_clicked(self) -> None:
+        """The latest desktop alert was clicked: bring S2 Watch forward on what it was about."""
+        self.show_from_tray()
+        kind, value = self._alert_target
+        if kind == "event" and value is not None:
+            self.open_event(value)
+        elif kind == "report" and value is not None:
+            self.show_reports([value])
+        else:
+            self.open_review()
+
+    def open_review(self) -> None:
+        """What needs the operator: the Needs Review tab."""
+        review = getattr(self, "review_view", None)
+        if review is not None:
+            self.tabs.setCurrentWidget(review)
+        else:
+            self.tabs.setCurrentWidget(self.events_view)
+
+    def open_event(self, event_id: int) -> None:
+        """Show an event on the Events tab, selected with its details, even when its filters hide it."""
+        self.tabs.setCurrentWidget(self.events_view)
+        if not self.events_view.open_event(event_id):
+            self.notify("That event no longer exists (it may have been merged into another).")
+
+    def open_event_under_map(self, event_id: int) -> None:
+        """Show an event in the list under the map with its details, or beside it with a note when
+        the watch period or row limit leaves it out."""
+        self.set_news_mode("events")
+        if self.map_events.select_event(event_id):
+            return
+        event = self.store.event_by_id(event_id)
+        if event is None:
+            self.notify("That event no longer exists (it may have been merged into another).")
+            return
+        self.map_events.clearSelection()
+        self.map_event_detail.open_event(
+            event, f"Not in the list under the map: outside the watch period ({self.review_duration.currentText()}) "
+                   "or past its row limit. Shown here anyway.")
+
+    def remember_marker_report(self, message: Message, report_id: int) -> None:
+        self._message_reports[str(id(message))] = report_id
+        if len(self._message_reports) > 100_000:      # oldest first: forget the oldest half
+            for key in list(self._message_reports)[:50_000]:
+                del self._message_reports[key]
+
+    def marker_report(self, message_id: str) -> int | None:
+        """The report a map marker's message belongs to."""
+        report_id = self._message_reports.get(message_id)
+        if report_id is not None:
+            return report_id
+        for row in range(self.analysis.rowCount()):
+            item = self.analysis.item(row, 0)
+            message = item.data(Qt.ItemDataRole.UserRole + 1) if item else None
+            if isinstance(message, Message) and str(id(message)) == message_id:
+                report_id = item.data(self.REPORT_ROLE)
+                return int(report_id) if report_id is not None else None
+        return None
+
+    def show_marker_reports(self, message_id: str) -> None:
+        report_id = self.marker_report(message_id)
+        if report_id is None:
+            self.notify("This marker is a station or routine traffic: it has no report.")
+            return
+        event_id = self.store.event_of_report(report_id)
+        self.show_reports(self.event_report_ids(event_id) if event_id is not None else [report_id])
 
     def focus_analysis_message(self, row: int, _column: int) -> None:
         item = self.analysis.item(row, 0)
@@ -2489,17 +2577,21 @@ class MainWindow(QMainWindow):
             self.map_view.focus_message(message)
 
     def select_analysis_message(self, message_id: str) -> None:
-        for row in range(self.analysis.rowCount()):
+        """A map marker was clicked: open its report's event under the map (looked up in the
+        database, so it opens though the list leaves it out), or else select the report."""
+        report_id = self.marker_report(message_id)
+        event_id = self.store.event_of_report(report_id) if report_id is not None else None
+        for row in range(self.analysis.rowCount()):      # the report row too, for the Reports view
             item = self.analysis.item(row, 0)
-            message = item.data(Qt.ItemDataRole.UserRole + 1) if item else None
-            if isinstance(message, Message) and str(id(message)) == message_id:
+            if item is not None and report_id is not None and item.data(self.REPORT_ROLE) == report_id:
                 self.analysis.selectRow(row)
                 self.analysis.scrollToItem(item)
-                report_id = item.data(self.REPORT_ROLE)
-                event_id = self.store.event_of_report(int(report_id)) if report_id is not None else None
-                if event_id is not None:
-                    self.map_events.select_event(event_id)
                 break
+        if event_id is not None:
+            self.open_event_under_map(event_id)
+        elif report_id is None:
+            self.notify("This marker is a station or routine traffic, not a report: double-click it for the "
+                        "message text.")
 
     def alert_settings_changed(self) -> None:
         self.store.set_setting("alerts.enabled", "1" if self.alerts_enabled.isChecked() else "0")
@@ -2514,7 +2606,7 @@ class MainWindow(QMainWindow):
         self.activateWindow()
 
     def tray_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
-        if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
+        if reason in (QSystemTrayIcon.ActivationReason.Trigger, QSystemTrayIcon.ActivationReason.DoubleClick):
             self.show_from_tray()
 
     def quit_from_tray(self) -> None:

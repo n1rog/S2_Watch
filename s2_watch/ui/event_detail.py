@@ -50,6 +50,7 @@ class EventDetail(QWidget):
     reopen_requested = Signal(int)
     assessment_done = Signal(int, str, str)     # event id, assessment JSON, error (from a thread)
     assessment_changed = Signal(int)            # an assessment was accepted (event id)
+    assessment_ready = Signal(int)              # Ollama finished (or failed) assessing an event
 
     def __init__(self, store, format_time, parent=None) -> None:
         super().__init__(parent)
@@ -66,6 +67,7 @@ class EventDetail(QWidget):
         self._assessment_errors: dict[int, str] = {}
         self.assessment_done.connect(self._assessed)
         self._shown_id = self._shown_html = None
+        self._pinned: tuple[int, str] | None = None     # (event id, note) shown though not in the list
         self.browser = QTextBrowser()
         self.browser.setOpenLinks(False)          # web links open in the browser; s2watch: links act here
         self.browser.anchorClicked.connect(self._link)
@@ -106,8 +108,27 @@ class EventDetail(QWidget):
         layout.addLayout(buttons)
         self.show_event(None)
 
-    def show_event(self, event) -> None:
-        """Show this event (an EventSummary), or the hint when none is selected."""
+    def show_selection(self, event) -> None:
+        """Show the event selected in the list beside this panel. With nothing selected, an event
+        opened from an alert or the map that the list doesn't show (``open_event``) stays."""
+        if event is None and self._pinned is not None:
+            pinned = self.store.event_by_id(self._pinned[0])
+            if pinned is not None:
+                self.show_event(pinned, self._pinned[1])
+                return
+        self._pinned = None
+        self.show_event(event)
+
+    def open_event(self, event, note: str = "") -> None:
+        """Show an event the list beside this panel may not show, with ``note`` saying why."""
+        self._pinned = (event.event_id, note) if note else None
+        self.show_event(event, note)
+
+    def show_event(self, event, note: str = "") -> None:
+        """Show this event (an EventSummary), or the hint when none is selected. ``note``: a
+        line above it, such as why the list beside doesn't show it."""
+        if not note and event is not None and self._pinned is not None and self._pinned[0] == event.event_id:
+            note = self._pinned[1]
         self.current = event
         if event is None:
             self._shown_id = self._shown_html = None
@@ -132,6 +153,8 @@ class EventDetail(QWidget):
                            versions=len(self.store.assessment_history(event.event_id)),
                            assessing=self._assessing.get(event.event_id, ""),
                            assessment_error=self._assessment_errors.get(event.event_id, ""))
+        if note:
+            html = (f"<p style='background:#fff4ce; color:#5c4400; padding:4px'>{escape(note)}</p>" + html)
         if event.event_id == self._shown_id and html == self._shown_html:
             return                       # a refresh with nothing new: keep the reader's place
         scroll = self.browser.verticalScrollBar()
@@ -176,6 +199,7 @@ class EventDetail(QWidget):
             self._assessment_errors[event_id] = error or "no assessment"
         if self.current is not None and self.current.event_id == event_id:
             self.show_event(self.current)
+        self.assessment_ready.emit(event_id)
 
     # -- reviewing assessments ----------------------------------------------------------
 

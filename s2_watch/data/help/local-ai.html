@@ -99,7 +99,8 @@ in history.</p></div>
 <p>It takes about two minutes on a computer without a suitable graphics card, in the background. It uses the <b>Event assessment
 model</b> (Ollama settings; default <code>qwen2.5:7b</code>): a 7–8B model sticks to the reports, while the 3B model used for
 messages misread trends and invented impacts in testing. To protect the rest of the computer, S2 Watch first unloads other
-models, checks there is enough free memory (about 8 GB for <code>qwen2.5:7b</code>; otherwise it says so and doesn't start), and
+models, checks there is enough free memory (about 8 GB for <code>qwen2.5:7b</code>; otherwise it says so and doesn't start;
+when the Ollama endpoint is another computer, that computer's memory is Ollama's to manage and this check is skipped), and
 unloads the model as soon as it answers. Close browser tabs if it reports too little memory.</p>
 <p>In a MAGNET S2 draft of that event, a current assessment fills COMMENTS / ASSESSMENT (with the trend and the probability
 table), INTELLIGENCE GAPS, MITIGATION RECOMMENDATIONS and MAGNET GUIDANCE, citing the draft's SOURCE LIST numbers.

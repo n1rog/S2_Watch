@@ -62,9 +62,20 @@ class MapBridge(QObject):
     # The zoomed-in map area (lat, lon, radius in nautical miles; radius 0 = zoomed out).
     view_changed = Signal(float, float, float)
 
+    event_requested = Signal(str)       # a marker popup's "Open event" (message id)
+    reports_requested = Signal(str)     # its "Show reports"
+
     @Slot(str)
     def select_message(self, message_id: str) -> None:
         self.message_selected.emit(message_id)
+
+    @Slot(str)
+    def open_event(self, message_id: str) -> None:
+        self.event_requested.emit(message_id)
+
+    @Slot(str)
+    def show_reports(self, message_id: str) -> None:
+        self.reports_requested.emit(message_id)
 
     @Slot(float, float, float)
     def report_view(self, lat: float, lon: float, radius_nm: float) -> None:
@@ -1176,9 +1187,26 @@ const markerLayer = (typeof L.markerClusterGroup === 'function')
   : L.layerGroup();
 markerLayer.addTo(map);
 let messageMarkers = {{}};
+// A click opens the marker's event in the panel under the map; the popup says what it is,
+// starts the report text, and has buttons for the event and its reports.
 function summaryPopup(p) {{
-  return '<b>'+escapeHtml(p.category)+'</b><br>'+escapeHtml(p.kind)+'<br>'+escapeHtml(p.application)+'<br>'+escapeHtml(p.label);
+  const text = String(p.message || '');
+  const excerpt = text.length > 280 ? text.slice(0, 280) + '…' : text;
+  let html = '<b>'+escapeHtml(p.category)+'</b> · '+escapeHtml(p.application)+'<br>'+escapeHtml(p.label);
+  if (excerpt) html += '<div style="white-space:pre-wrap;margin-top:4px;max-height:9em;overflow:auto">'+escapeHtml(excerpt)+'</div>';
+  if (p.message_id && p.kind !== 'station') {{
+    html += '<div style="margin-top:6px"><button class="popup-open-event" data-id="'+escapeHtml(p.message_id)+'">Open event</button> ' +
+            '<button class="popup-show-reports" data-id="'+escapeHtml(p.message_id)+'">Show reports</button></div>' +
+            '<div style="color:#666;font-size:11px;margin-top:3px">Double-click the marker for the full message.</div>';
+  }}
+  return html;
 }}
+document.addEventListener('click', function(event) {{
+  const button = event.target.closest ? event.target.closest('.popup-open-event, .popup-show-reports') : null;
+  if (!button || !mapBridge) return;
+  if (button.classList.contains('popup-open-event')) mapBridge.open_event(button.dataset.id);
+  else mapBridge.show_reports(button.dataset.id);
+}});
 function addMarker(p) {{
   const marker = L.marker([p.lat,p.lon],{{icon:markerIcon(p.category), opacity: p.dimmed ? 0.4 : 1}}).bindPopup(summaryPopup(p));
   marker.location = p;

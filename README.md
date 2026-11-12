@@ -450,7 +450,9 @@ classification, category, urgency, confidence, summary, source, and message.
 
 Desktop-tray alerts are available for newsworthy messages. Alerts can be
 disabled or restricted to high-urgency results, and those preferences are
-persisted locally.
+persisted locally. Clicking an alert brings S2 Watch forward on its event (several
+alerts at once: the Needs Review tab), even when the Events filters hide it; a single
+click on the tray icon brings the window forward.
 
 MagCommstat integration reads its local `traffic.db3` SQLite database without
 requiring the MagCommstat window to remain visible. The adapter reads only

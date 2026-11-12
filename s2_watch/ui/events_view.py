@@ -392,7 +392,30 @@ class EventsView(QWidget):
 
     def _selection_changed(self) -> None:
         selected = self.selected_event()
-        self.detail.show_event(self.table.event_by_id(selected) if selected is not None else None)
+        self.detail.show_selection(self.table.event_by_id(selected) if selected is not None else None)
+
+    def filter_description(self) -> str:
+        """The filters in force, for a note on an event they hide: "Events period 48 h, Hide closed"."""
+        parts = [f"Events period {self.period.currentText()}"]
+        for box in (self.multi_only, self.focus_only, self.hide_closed):
+            if box.isChecked() and box.isEnabled():
+                parts.append(box.text())
+        if self.search.text().strip():
+            parts.append(f"search \"{self.search.text().strip()}\"")
+        return ", ".join(parts)
+
+    def open_event(self, event_id: int) -> bool:
+        """Select an event, or show it beside the list with a note when the filters hide it.
+        False when there is no such event."""
+        if self.table.select_event(event_id):
+            return True
+        event = self.store.event_by_id(event_id)
+        if event is None:
+            return False
+        self.table.clearSelection()
+        self.detail.open_event(event, f"Not in the list: hidden by the current filters ({self.filter_description()}). "
+                                      "Shown here anyway.")
+        return True
 
     def _show(self, event_id) -> None:
         event = self.table.event_by_id(event_id) if event_id is not None else None

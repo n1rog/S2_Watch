@@ -1110,18 +1110,24 @@ class SQLiteStore:
             result.append((int(report_id), message, category, summary))
         return result
 
-    def events_since(self, since: datetime, regions: set[int] | None = None):
-        """Events active since ``since``, newest activity first, with their reports summarised."""
+    def events_since(self, since: datetime | None, regions: set[int] | None = None, event_ids=None):
+        """Events active since ``since``, newest activity first, with their reports summarised
+        (or, with ``event_ids``, those events however old)."""
         from s2_watch.events import EventSummary
 
+        if event_ids is not None:
+            ids = sorted({int(event_id) for event_id in event_ids})
+            clause, values = f"e.id IN ({','.join('?' * len(ids)) or 'NULL'})", ids
+        else:
+            clause, values = "e.last_seen >= ?", [utc_iso(since)]
         rows = self.connection.execute(
-            """SELECT e.id, e.title, e.category, e.state, e.region, e.first_seen, e.last_seen,
+            f"""SELECT e.id, e.title, e.category, e.state, e.region, e.first_seen, e.last_seen,
                       r.first_seen, r.sources, r.first_source, r.urgency, r.corroboration, r.status, r.lat, r.lon,
                       r.sender, e.closed_at, e.close_reason, e.closed_by, r.exercise, r.official, r.place_level
                FROM events e JOIN reports r ON r.event_id = e.id
-               WHERE e.last_seen >= ? AND r.newsworthy = 1
+               WHERE {clause} AND r.newsworthy = 1
                ORDER BY e.last_seen DESC, r.first_seen""",
-            (utc_iso(since),),
+            values,
         ).fetchall()
         rank = {"low": 1, "medium": 2, "high": 3}
         events: dict[int, dict] = {}
@@ -1181,6 +1187,10 @@ class SQLiteStore:
                 tuple(event["statuses"]), event["points"], event["closed_at"], event["close_reason"],
                 event["closed_by"], event["exercise"], len(event["voices"]), event["placed"]))
         return summaries
+
+    def event_by_id(self, event_id: int):
+        """One event's summary (an EventSummary), however old, or None."""
+        return next(iter(self.events_since(None, event_ids=[event_id])), None)
 
     def sender_track_records(self) -> dict:
         """Each radio station's track record (s2_watch.senders), by call sign. Exercise and test
