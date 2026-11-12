@@ -245,7 +245,18 @@ text, `_FLMSG.txt`, `_JS8Call.txt`, the Word report (the MAGNET .docx format) an
 **Configuration → Reports Folder…** or in the setup wizard. Files are written under a temporary
 name, then renamed. **More** saves a single format elsewhere. Saving again updates the draft and
 files, closing with unsaved changes asks first, and marking a briefing sent or a report
-followed up saves it too. The **Reports** tab lists them to reopen, with their files.
+followed up saves it too. The **Reports** tab lists every draft with its status (Draft,
+Scheduled draft, Sent), event and files, to reopen, open its Word file or web page, show its
+folder, copy its FLMSG or JS8Call text, mark it sent, or delete it.
+
+## Needs Review
+
+The first tab lists everything waiting on the operator, newest first, with a count on the
+tab: new high-urgency events (and events a desktop alert was raised for), Ollama assessments
+waiting to be accepted, scheduled shift briefings, single-source radio reports unconfirmed
+after 2 hours, possible misses, and drafts not marked sent. Each goes when acted on, or can
+be hidden; chips filter by kind. Beside it: open events by concern level, and the last 20
+status-bar notices.
 
 **Background** holds facts, then a prompt for what only the analyst knows. A follow-up
 gives the NWS watches and warnings for the event's kind of hazard in effect at its

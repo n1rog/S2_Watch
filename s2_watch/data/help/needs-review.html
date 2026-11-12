@@ -1,0 +1,34 @@
+<h1>Needs Review</h1>
+<p><b>Needs Review</b> is the first tab: everything waiting on you, newest first, so a glance on returning to the screen
+answers "what needs me now?" without opening a menu. Its tab shows how many, e.g. <b>Needs Review (6)</b>.</p>
+
+<table>
+<tr><th>Item</th><th>When it appears</th><th>Button</th></tr>
+<tr><td>New event</td><td>An open high-urgency event first heard in the last 24 hours, or one a desktop alert was raised for</td>
+<td><b>Open event</b></td></tr>
+<tr><td>AI assessment ready</td><td>Ollama finished assessing an event and the assessment waits to be accepted
+(<a href="help:local-ai">Local AI</a>)</td><td><b>Review assessment</b></td></tr>
+<tr><td>Shift briefing ready</td><td>S2 Watch drafted a briefing at a scheduled time (<a href="help:briefings">Reports and
+briefings</a>); it is never sent by itself</td><td><b>Review briefing</b></td></tr>
+<tr><td>Single source</td><td>A radio report only one station has sent, with no official confirmation after 2 hours</td>
+<td><b>Open event</b></td></tr>
+<tr><td>Possible miss</td><td>A radio message the watch forms didn't keep that the local AI thinks is news</td>
+<td><b>Add as report…</b> / <b>Not news</b></td></tr>
+<tr><td>Unsent draft</td><td>A report or briefing saved in the last 7 days but not marked sent</td><td><b>Open draft</b></td></tr>
+</table>
+<p>Double-click a row or use its button. An item goes when you act on it: opened, accepted or dismissed, sent, or added.
+<b>Hide</b> takes it off this list only (it stays everywhere else, and hidden items stay hidden). The chips above the list
+(<b>New event (2)</b>, <b>Possible miss (3)</b>…) show or hide each kind.</p>
+
+<h2>Beside the list</h2>
+<p><b>Situation now</b> counts the open events in the watch period by concern level (High, Elevated, Guarded, Low:
+<a href="help:events">Events</a> explains the levels). <b>Recent notices</b> keeps the last 20 status-bar messages with their
+times, so one you missed while away isn't lost.</p>
+
+<div class="example"><p><b>Example.</b> Back from a break: Needs Review (3) lists <i>New event — Shooting — Deming, NM (high
+urgency · 4 reports)</i>, <i>AI assessment ready — Power outage — North Platte, NE</i> and <i>Shift briefing ready —
+Situation Briefing</i>. Open the event, accept the assessment, review the briefing and send it: the list is empty.</p></div>
+
+<h2>Getting there from an alert</h2>
+<p>Clicking a desktop alert brings S2 Watch forward on the event it was about (several alerts at once: this tab).
+Clicking the tray icon once brings the window forward.</p>

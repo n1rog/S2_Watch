@@ -20,7 +20,7 @@ from s2_watch.ui.metrics_view import is_dark
 
 HELP_DIR = Path(__file__).resolve().parent.parent / "data" / "help"
 # Reading order of the topics.
-TOPICS = ("getting-started", "sources", "watch-forms", "events", "confirmation", "labels", "briefings", "exercises",
+TOPICS = ("getting-started", "needs-review", "sources", "watch-forms", "events", "confirmation", "labels", "briefings", "exercises",
           "reliability", "intelligence-entries", "focus", "map", "local-ai", "settings", "troubleshooting", "shortcuts")
 
 

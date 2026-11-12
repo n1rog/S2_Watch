@@ -208,6 +208,30 @@ class MissesView(QWidget):
             self.count_changed.emit(len(self._misses))
         self._selection_changed()
 
+    def current_misses(self) -> list:
+        """The possible misses waiting for a decision (key, message, result)."""
+        return list(self._misses) if not self.show_dismissed.isChecked() else [
+            miss for miss in self.store.possible_misses("new", datetime.now(timezone.utc)
+                                                        - timedelta(hours=self.watch_hours()))]
+
+    def add_miss(self, key: str) -> None:
+        """Add one as a report (from Needs Review): the same dialog as the Add button."""
+        miss = next((miss for miss in self.current_misses() if miss[0] == key), None)
+        if miss is None:
+            return
+        _key, message, result = miss
+        dialog = AddMissDialog(message, result, self, count_matches=self.store.keyword_matches)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.add_requested.emit(key, message, dialog.corrected(result.confidence), dialog.place.text().strip(),
+                                    dialog.chosen_keyword())
+            self.decisions_changed.emit()
+        self.refresh()
+
+    def dismiss_miss(self, key: str) -> None:
+        self.store.set_missed_status(key, "dismissed")
+        self.decisions_changed.emit()
+        self.refresh()
+
     def show_progress(self, checked: int, waiting: int, error: str = "") -> None:
         counts = self.store.missed_counts()
         found = sum(counts.get(status, 0) for status in ("new", "added", "dismissed", "deleted"))

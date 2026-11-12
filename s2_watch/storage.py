@@ -201,6 +201,9 @@ class SQLiteStore:
                 body TEXT NOT NULL
             )"""
         )
+        # Needs Review items the operator acted on or hid ("new:12", "draft:3"), so they stay gone.
+        self.connection.execute(
+            "CREATE TABLE IF NOT EXISTS review_done (key TEXT PRIMARY KEY, done_at TEXT NOT NULL)")
         self.connection.execute(
             """CREATE TABLE IF NOT EXISTS sender_trust (
                 callsign TEXT PRIMARY KEY,
@@ -1278,6 +1281,21 @@ class SQLiteStore:
                                 (event_id, assessment.to_json()))
         self.connection.execute("DELETE FROM event_assessments WHERE event_id = ?", (event_id,))
         self.connection.commit()
+
+    def proposed_assessments(self) -> list[int]:
+        """Events with an Ollama assessment waiting for review."""
+        return [int(row[0]) for row in self.connection.execute("SELECT event_id FROM event_assessments")]
+
+    def review_done(self, key: str) -> None:
+        self.connection.execute("INSERT OR REPLACE INTO review_done(key, done_at) VALUES (?, ?)",
+                                (key, utc_iso(datetime.now(timezone.utc))))
+        self.connection.commit()
+
+    def reviews_done(self) -> set[str]:
+        # Kept 60 days: event and draft ids aren't reused, and nothing older is listed.
+        since = utc_iso(datetime.now(timezone.utc) - timedelta(days=60))
+        self.connection.execute("DELETE FROM review_done WHERE done_at < ?", (since,))
+        return {row[0] for row in self.connection.execute("SELECT key FROM review_done")}
 
     def accepted_assessment(self, event_id: int):
         """The event's current accepted assessment, or None."""

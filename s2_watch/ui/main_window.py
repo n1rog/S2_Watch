@@ -20,7 +20,10 @@ from s2_watch import REPOSITORY_URL, __version__ as APP_VERSION
 from s2_watch.backups import back_up_in_background, backup_folder
 from s2_watch.s2_report import DEFAULT_MAGCON, briefing_report as s2_briefing_report, followup_report as s2_followup_report, js8_report
 from s2_watch.followup import FollowUpFacts
-from s2_watch.ui.drafts_dialog import DraftsDialog
+from s2_watch.ui.reports_view import ReportsView
+from s2_watch.ui.review_view import ReviewView
+from s2_watch.review import review_items
+from s2_watch.concern import situation_summary
 from s2_watch import focus, world
 from s2_watch.focus import FocusArea
 from s2_watch.background import event_background, period_background
@@ -641,7 +644,7 @@ class MainWindow(QMainWindow):
         assess_action.setToolTip("What the selected event's reports add up to (Help → Local AI)")
         assess_action.triggered.connect(lambda: self.assess_event_id(self.selected_event_id()))
         reports_menu.addAction("Draft Shift Briefing…").triggered.connect(self.draft_briefing)
-        reports_menu.addAction("Saved Reports && Briefings…").triggered.connect(self.show_saved_drafts)
+        reports_menu.addAction("Reports Library").triggered.connect(self.show_saved_drafts)
         reports_menu.addAction("Sender Track Records…").triggered.connect(self.show_sender_records)
         reports_menu.addAction("Keyword Noise…").triggered.connect(self.show_keyword_noise)
         reports_menu.addSeparator()
@@ -839,7 +842,10 @@ class MainWindow(QMainWindow):
         ):
             tab = QWidget()
             tab.setLayout(tab_layout)
+            tab.setObjectName(title)
             tabs.addTab(tab, title)
+            if title == "Map":
+                self.map_tab = tab
         # Events: reports (radio and official) grouped by the happening they describe.
         self.events_view = EventsView(self.store, self.format_display_time)
         self.events_view.show_on_map.connect(self.show_event_on_map)
@@ -852,15 +858,39 @@ class MainWindow(QMainWindow):
         self.misses_view.add_requested.connect(self.add_missed_report)
         self.misses_view.decisions_changed.connect(self.update_model_examples)
         self.misses_view.count_changed.connect(
-            lambda count: tabs.setTabText(tabs.indexOf(self.misses_view),
-                                          f"Possible Misses ({count})" if count else "Possible Misses"))
+            lambda count: (tabs.setTabText(tabs.indexOf(self.misses_view),
+                                           f"Possible Misses ({count})" if count else "Possible Misses"),
+                           self.review_data_changed()))
         tabs.insertTab(2, self.misses_view, "Possible Misses")
+        # Reports: every follow-up and briefing drafted here, with its files.
+        self.reports_view = ReportsView(self.store, self.format_display_time, js8=self._s2_js8)
+        self.reports_view.open_requested.connect(self.open_saved_draft)
+        self.reports_view.event_requested.connect(self.open_event)
+        self.reports_view.draft_briefing.connect(self.draft_briefing)
+        self.reports_view.changed.connect(self.drafts_changed)
+        tabs.insertTab(3, self.reports_view, "Reports")
         self.metrics_view = MetricsView(self.store)
         tabs.addTab(self.metrics_view, "Metrics")
+        # Needs Review, the first tab: everything waiting on the operator.
+        self.alerted_events: list[int] = []        # events a desktop alert was raised for (this session)
+        self.review_view = ReviewView(self.review_items, self.situation_html, self.format_display_time)
+        self.review_view.act.connect(self.review_act)
+        self.review_view.draft_briefing.connect(self.draft_briefing)
+        self.review_view.count_changed.connect(
+            lambda count: tabs.setTabText(tabs.indexOf(self.review_view),
+                                          f"Needs Review ({count})" if count else "Needs Review"))
+        tabs.insertTab(0, self.review_view, "Needs Review")
+        for widget, name in ((self.review_view, "Needs Review"), (self.events_view, "Events"),
+                             (self.misses_view, "Possible Misses"), (self.reports_view, "Reports"),
+                             (self.metrics_view, "Metrics")):
+            widget.setObjectName(name)
         self.tabs = tabs
-        saved_tab = self.store.get_setting("ui.tab", "0")
-        tabs.setCurrentIndex(int(saved_tab) if saved_tab.isdigit() and int(saved_tab) < tabs.count() else 0)
-        tabs.currentChanged.connect(lambda index: self.store.set_setting("ui.tab", str(index)))
+        # The tab open last time, by name (Needs Review first time, and after 0.57.0's new tabs).
+        saved_tab = self.store.get_setting("ui.tab.name", "Needs Review")
+        found = next((index for index in range(tabs.count()) if tabs.widget(index).objectName() == saved_tab), 0)
+        tabs.setCurrentIndex(found)
+        tabs.currentChanged.connect(
+            lambda index: self.store.set_setting("ui.tab.name", tabs.widget(index).objectName()))
         container = QWidget()
         container_layout = QVBoxLayout(container)
         container_layout.addWidget(tabs)
@@ -915,6 +945,7 @@ class MainWindow(QMainWindow):
         self.missed_scanner.progress.connect(self.missed_progress)
         self.misses_view.refresh()
         self.misses_view.show_progress(0, 0)
+        self.review_view.refresh()
         self.configure_missed_check()
         self.restore_window_state()
         self.map_regions_changed()
@@ -1132,6 +1163,7 @@ class MainWindow(QMainWindow):
     def events_data_changed(self) -> None:
         self._map_events_timer.start()
         self.events_view.data_changed()
+        self.review_data_changed()
 
     def refresh_map_events(self) -> None:
         since = datetime.now(timezone.utc) - timedelta(hours=int(self.review_duration.currentData()))
@@ -1205,7 +1237,10 @@ class MainWindow(QMainWindow):
         self.notices_changed()
 
     def notices_changed(self) -> None:
-        """The notices list changed (the bell shows it)."""
+        """The notices list changed (Needs Review and the bell show it)."""
+        review = getattr(self, "review_view", None)
+        if review is not None:
+            review.set_notices(self.notices, self.format_display_time)
 
     def show_help(self, topic: str = "") -> None:
         """Help → S2 Watch Help (F1): one window, brought forward if already open."""
@@ -1231,7 +1266,9 @@ class MainWindow(QMainWindow):
         detail.assessment_brief = self.event_assessment_brief
         detail.discussion_brief = self.event_discussion_brief
         detail.ollama_settings = self.ollama_settings
-        detail.assessment_changed.connect(lambda _event_id: (self.refresh_map_events(), self.events_view.refresh()))
+        detail.assessment_changed.connect(lambda _event_id: (self.refresh_map_events(), self.events_view.refresh(),
+                                                             self.review_data_changed()))
+        detail.assessment_ready.connect(self.assessment_ready)
         detail.show_on_map.connect(self.show_event_id_on_map)
         detail.draft_followup.connect(self.draft_followup_for_event)
         detail.mark.connect(lambda event_id, status: self.mark_reports(self.event_report_ids(event_id), status))
@@ -1316,7 +1353,7 @@ class MainWindow(QMainWindow):
     def show_reports(self, report_ids) -> None:
         """Switch to the Reports list and select these reports."""
         self.set_news_mode("reports")
-        self.tabs.setCurrentIndex(0)
+        self.tabs.setCurrentWidget(self.map_tab)
         self.analysis.clearSelection()
         wanted = set(report_ids)
         first = None
@@ -2254,7 +2291,7 @@ class MainWindow(QMainWindow):
             self.add_operator_keyword(result.category, keyword)
 
     def show_event_on_map(self, points) -> None:
-        self.tabs.setCurrentIndex(0)
+        self.tabs.setCurrentWidget(self.map_tab)
         self.map_view.show_area(points)
 
     def _s2_js8(self, text: str) -> str:
@@ -2358,9 +2395,9 @@ class MainWindow(QMainWindow):
                     else "Scheduled shift briefings are off")
 
     def show_saved_drafts(self) -> None:
-        dialog = DraftsDialog(self.store, self.format_display_time, self)
-        dialog.open_requested.connect(self.open_saved_draft)
-        dialog.exec()
+        """The Reports tab (it replaced the Saved Reports & Briefings window)."""
+        self.reports_view.refresh()
+        self.tabs.setCurrentWidget(self.reports_view)
 
     def open_saved_draft(self, draft_id: int) -> None:
         """Reopen a saved briefing or report in the drafting editor (save updates it)."""
@@ -2555,6 +2592,12 @@ class MainWindow(QMainWindow):
             return
         high = any(result.urgency == "high" for result, _report in alerts)
         icon = QSystemTrayIcon.MessageIcon.Warning if high else QSystemTrayIcon.MessageIcon.Information
+        for _result, report_id in alerts:
+            event_id = self.store.event_of_report(report_id) if report_id is not None else None
+            if event_id is not None and event_id not in self.alerted_events:
+                self.alerted_events.append(event_id)
+        del self.alerted_events[:-500]
+        self.review_data_changed()
         if len(alerts) == 1:
             result, report_id = alerts[0]
             event_id = self.store.event_of_report(report_id) if report_id is not None else None
@@ -2594,6 +2637,67 @@ class MainWindow(QMainWindow):
         self.tabs.setCurrentWidget(self.events_view)
         if not self.events_view.open_event(event_id):
             self.notify("That event no longer exists (it may have been merged into another).")
+
+    # -- Needs Review ----------------------------------------------------------------------
+
+    def review_items(self) -> list:
+        now = datetime.now(timezone.utc)
+        events = [event for event in self.store.events_since(now - timedelta(hours=48)) if world.event_covered(event)]
+        return review_items(now, events, self.store.reviews_done(), alerted=self.alerted_events,
+                            proposals=self.store.proposed_assessments(),
+                            event_lookup=lambda ids: self.store.events_since(None, event_ids=ids),
+                            misses=self.misses_view.current_misses(), drafts=self.store.list_drafts())
+
+    def situation_html(self) -> str:
+        """The Needs Review side panel: open events by concern level."""
+        now = datetime.now(timezone.utc)
+        since = now - timedelta(hours=int(self.review_duration.currentData()))
+        events = [event for event in self.store.events_since(since)
+                  if world.event_covered(event) and event.closed_at is None]
+        return situation_summary(events, now, self.focus_regions, self.event_trends(events))
+
+    def event_trends(self, events) -> dict[int, str]:
+        return {event.event_id: accepted.trend for event in events
+                if (accepted := self.store.accepted_assessment(event.event_id)) is not None}
+
+    def review_data_changed(self) -> None:
+        review = getattr(self, "review_view", None)
+        if review is not None:
+            review.data_changed()
+
+    def review_act(self, item, which: str) -> None:
+        """A Needs Review item's button: open it (and take it off the list), or hide it."""
+        if which == "secondary":
+            if item.kind == "miss":
+                self.misses_view.dismiss_miss(item.target)
+            else:
+                self.store.review_done(item.key)
+        elif item.kind in ("new", "single"):
+            self.store.review_done(item.key)
+            self.open_event(item.target)
+        elif item.kind == "assessment":
+            self.open_event(item.target)
+            detail = self.events_view.detail
+            if detail.current is not None and detail.current.event_id == item.target:
+                detail.review_proposal()
+        elif item.kind == "miss":
+            self.misses_view.add_miss(item.target)
+        else:      # a briefing or draft
+            self.store.review_done(item.key)
+            self.open_saved_draft(item.target)
+        self.review_view.refresh()
+
+    def assessment_ready(self, event_id: int) -> None:
+        """Ollama finished an assessment: say so (it waits in Needs Review)."""
+        event = self.store.event_by_id(event_id)
+        if self.store.event_assessment(event_id) is None or event is None:
+            return     # it failed: the event's panel says why
+        self.notify(f"AI assessment ready: {event.title}. Review it in Needs Review.", 30_000)
+        self._alert_target = ("event", event_id)
+        if not self.isActiveWindow():
+            self.tray.showMessage("S2 Watch: AI assessment ready", f"{event.title}\n(Click to review it.)",
+                                  QSystemTrayIcon.MessageIcon.Information, 10000)
+        self.review_data_changed()
 
     def open_event_under_map(self, event_id: int) -> None:
         """Show an event in the list under the map with its details, or beside it with a note when

@@ -194,6 +194,7 @@ def test_the_united_states_and_world_buttons_move_the_map(tmp_path, main_window)
     app = QApplication.instance()
     window = main_window(tmp_path / "view.db")
     window.resize(1200, 900)
+    window.tabs.setCurrentWidget(window.map_tab)      # Needs Review opens first
     window.show()
     view = window.map_view
     deadline = time.monotonic() + 30

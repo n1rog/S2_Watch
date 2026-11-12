@@ -4,7 +4,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 
 from s2_watch.s2_report import briefing_report
 from s2_watch.storage import SQLiteStore
-from s2_watch.ui.drafts_dialog import DraftsDialog
+from s2_watch.ui.reports_view import ReportsView
 from s2_watch.ui.followup_dialog import FollowUpDialog
 
 NOW = datetime(2026, 10, 11, 14, 0, tzinfo=timezone.utc)
@@ -45,8 +45,16 @@ def test_a_briefing_is_saved_after_the_suggestion_and_reopens(tmp_path, monkeypa
     reopened.done(0)
     assert len(store.list_drafts()) == 1 and "TAGS: weather" in store.get_draft(saved["id"])["text"]
 
-    listing = DraftsDialog(store, lambda value: str(value)[:16])
+    listing = ReportsView(store, lambda value: str(value)[:16])
     assert listing.table.rowCount() == 1 and listing.table.item(0, 3).text() == saved["subject"]
+    assert listing.table.item(0, 4).text() == "Draft" and listing.table.item(0, 6).text() == "5 files"
+    listing.table.selectRow(0)
+    assert listing.word_button.isEnabled() and listing.web_button.isEnabled() and listing.folder_button.isEnabled()
+    listing._toggle_sent()
+    assert store.list_drafts()[0]["sent_at"] and listing.table.item(0, 4).text() == "Sent"
+    listing.status.setCurrentIndex(listing.status.findData("Draft"))
+    assert listing.table.rowCount() == 0                      # filtered: drafts only
+    listing.status.setCurrentIndex(0)
     listing.table.selectRow(0)
     listing._delete()
     listing._delete()                                         # a second click confirms
