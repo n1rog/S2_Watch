@@ -153,10 +153,16 @@ drills"), and official and news feeds are never exercise traffic. Test traffic (
 A TEST", "test message") is never news.
 
 Exercise traffic is kept off the news lists, events and briefings. During an exercise,
-turn on **Configuration → Exercise in Progress** (a red EXERCISE marker shows by the
-clock): exercise traffic is then handled like real news, marked EXERCISE in the lists, the
+turn on **Configuration → Exercise in Progress**: exercise traffic is then handled like real news, marked EXERCISE in the lists, the
 event panel, follow-up reports and briefings (subject prefixed, and EXERCISE EXERCISE
 EXERCISE at the top and bottom). Possible Misses skips exercise and test traffic.
+
+Exercise traffic is purple wherever it appears: tinted rows with an "EXERCISE ·" title in the
+event lists (the Concern column reads "Exercise"), a purple bar in the event panel, a purple
+ring and EX tag on map markers, tinted rows in the Reports list and Live Monitor, an
+"Exercise traffic" item in Needs Review, and a notice when it arrives. A purple
+**EXERCISE · n** button by the clock counts the open exercise events; click it to list them
+(the Events tab's **Exercise only** filter).
 
 ## Sender track records
 
@@ -552,7 +558,9 @@ news locations from explicit latitude/longitude pairs or geocoded place names.
 The **United States** and **World** buttons above it center the map on the lower
 48 states or zoom out to the whole world.
 The map filters can independently show or hide station locations, news
-locations, and each source application. Filter choices are saved locally.
+locations, each source application and each category. Hiding a source or a category
+also hides its rows in the Events and Reports lists under the map. Filter choices are
+saved locally.
 The map works offline. Leaflet and its plugins ship with the application, and a
 built-in base map (land, lakes, country/state/province borders, US counties when
 zoomed in, and city names; Natural Earth and US Census data) is drawn beneath the

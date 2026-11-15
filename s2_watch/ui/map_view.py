@@ -9,6 +9,7 @@ from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 from s2_watch import world
 from s2_watch.analysis.categories import NEWS_CATEGORIES
 from s2_watch.models import Message
+from s2_watch.exercise import COLOUR as EXERCISE_COLOUR, EXERCISE, exercise_kind
 from s2_watch.geo import maidenhead_to_coordinates
 from s2_watch.locating import LocationResolver
 from s2_watch.overlays import only_listed_aircraft
@@ -270,6 +271,7 @@ class MapView(QWidget):
             )
         if locations is None:
             locations = self._resolver.resolve(message)
+        drill = exercise_kind(message) == EXERCISE      # a purple ring and an EX badge
         always = message.fields.get("type") in world.ALWAYS_COVERED_TYPES
         for location in locations:
             if station and (location.lat, location.lon) == station:
@@ -288,6 +290,7 @@ class MapView(QWidget):
                     "message": message.raw_content,
                     "message_id": str(id(message)),
                     "dimmed": dimmed,
+                    "exercise": drill,
                     "area": None if always else world.location_area(location),
                 }
             )
@@ -416,6 +419,7 @@ class MapView(QWidget):
         )
 
     def _load_page(self) -> None:
+        exercise = EXERCISE_COLOUR       # exercise markers and popups
         html = f"""<!doctype html>
 <html><head><meta charset="utf-8">
 <link rel="stylesheet" href="leaflet.css">
@@ -442,6 +446,8 @@ html,body,#map{{height:100%;margin:0}}
 .radar-stamp .radar-step{{margin-left:4px;font-variant-numeric:tabular-nums}}
 .region-label{{background:none;border:none}}
 .region-label span{{display:block;transform:translate(-50%,-50%);white-space:nowrap;font:bold 13px sans-serif;color:#263238;text-shadow:0 0 3px white,0 0 3px white,0 0 3px white}}
+.category-marker span.exercise{{border-color:{exercise};box-shadow:0 0 0 3px {exercise},0 1px 6px #333;position:relative}}
+.category-marker span.exercise:after{{content:'EX';position:absolute;top:-9px;right:-14px;background:{exercise};color:white;font:bold 9px sans-serif;padding:1px 3px;border-radius:3px;border:1px solid white}}
 .stack-cluster span{{display:flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:50%;color:white;font:bold 13px sans-serif;border:3px solid white;box-shadow:0 0 0 2px rgba(0,0,0,.35),0 1px 5px #555}}
 .stack-cluster.flash span,.category-marker.flash span{{animation:marker-flash 1.2s ease-in-out 3}}
 @keyframes marker-flash{{50%{{transform:scale(1.8);box-shadow:0 0 18px 8px #ffeb3b}}}}
@@ -459,9 +465,9 @@ let mapBridge = null;
 if (typeof QWebChannel !== 'undefined') {{
   new QWebChannel(qt.webChannelTransport, channel => {{ mapBridge = channel.objects.mapBridge; }});
 }}
-function markerIcon(category) {{
+function markerIcon(category, exercise) {{
   const spec=categoryIcons[category] || categoryIcons["routine"];
-  return L.divIcon({{className:"category-marker",html:'<span style="background:'+spec[1]+'">'+spec[0]+'</span>',iconSize:[26,26],iconAnchor:[13,13]}});
+  return L.divIcon({{className:"category-marker",html:'<span'+(exercise ? ' class="exercise"' : '')+' style="background:'+spec[1]+'">'+spec[0]+'</span>',iconSize:[26,26],iconAnchor:[13,13]}});
 }}
 const map=L.map('map').setView([39.5,-98.35],4);
 // Offline base map: bundled vector data drawn beneath the online tiles, so it shows
@@ -1192,7 +1198,8 @@ let messageMarkers = {{}};
 function summaryPopup(p) {{
   const text = String(p.message || '');
   const excerpt = text.length > 280 ? text.slice(0, 280) + '…' : text;
-  let html = '<b>'+escapeHtml(p.category)+'</b> · '+escapeHtml(p.application)+'<br>'+escapeHtml(p.label);
+  let html = (p.exercise ? '<div style="background:{exercise};color:white;font-weight:bold;padding:2px 6px;margin-bottom:4px">EXERCISE EXERCISE EXERCISE</div>' : '') +
+    '<b>'+escapeHtml(p.category)+'</b> · '+escapeHtml(p.application)+'<br>'+escapeHtml(p.label);
   if (excerpt) html += '<div style="white-space:pre-wrap;margin-top:4px;max-height:9em;overflow:auto">'+escapeHtml(excerpt)+'</div>';
   if (p.message_id && p.kind !== 'station') {{
     html += '<div style="margin-top:6px"><button class="popup-open-event" data-id="'+escapeHtml(p.message_id)+'">Open event</button> ' +
@@ -1208,7 +1215,7 @@ document.addEventListener('click', function(event) {{
   else mapBridge.show_reports(button.dataset.id);
 }});
 function addMarker(p) {{
-  const marker = L.marker([p.lat,p.lon],{{icon:markerIcon(p.category), opacity: p.dimmed ? 0.4 : 1}}).bindPopup(summaryPopup(p));
+  const marker = L.marker([p.lat,p.lon],{{icon:markerIcon(p.category, p.exercise), opacity: p.dimmed ? 0.4 : 1}}).bindPopup(summaryPopup(p));
   marker.location = p;
   marker.on('click', function() {{
     flashMarker(marker);
@@ -1249,7 +1256,7 @@ function setLocations(locations) {{
       marker.setOpacity(p.dimmed ? 0.4 : 1);
     }} else if (marker.location.category !== p.category) {{
       marker.location = p;
-      marker.setIcon(markerIcon(p.category));
+      marker.setIcon(markerIcon(p.category, p.exercise));
       marker.setOpacity(p.dimmed ? 0.4 : 1);
       if (!marker.isPopupOpen()) marker.setPopupContent(summaryPopup(p));
       recoloured.push(marker);

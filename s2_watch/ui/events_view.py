@@ -16,6 +16,7 @@ from s2_watch.world import event_covered
 from s2_watch.event_assessment import TREND_MARKS
 from s2_watch.concern import COLOURS as CONCERN_COLOURS, concern
 from s2_watch.ui.event_detail import EventDetail
+from s2_watch.ui.exercise_style import exercise_brush, exercise_text
 from PySide6.QtWidgets import (
     QAbstractItemView, QCheckBox, QComboBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QPushButton, QSplitter,
     QTableWidget,
@@ -65,6 +66,7 @@ class EventsTable(QTableWidget):
     COLUMNS = ("Last activity", "Event", "Category", "Area", "Reports", "Sources", "Urgency", "Official",
                "Radio lead", "Labels", "Status", "Concern")
     EVENT_ROLE = Qt.ItemDataRole.UserRole
+    EXERCISE_ROLE = Qt.ItemDataRole.UserRole + 7     # the event is exercise traffic
 
     # Starting widths (pixels); people drag them, and the table remembers theirs.
     DEFAULT_WIDTHS = (150, 380, 150, 80, 70, 170, 80, 170, 80, 120, 110, 90)
@@ -198,6 +200,12 @@ class EventsTable(QTableWidget):
             )
             cells[11].setToolTip(level.text())
             cells[11].setForeground(QBrush(QColor(CONCERN_COLOURS[level.level])))
+            if event.exercise:      # a drill is seen as a drill: badge, purple concern, tinted row
+                cells[1].setText("EXERCISE · " + cells[1].text())
+                cells[11].setText("Exercise")
+                cells[11].setToolTip(f"Exercise traffic. Were it real: {level.text()}")
+                cells[11].setForeground(QBrush(exercise_text(self)))
+                cells[0].setData(self.EXERCISE_ROLE, True)
             cells[0].setData(self.EVENT_ROLE, event.event_id)
             cells[1].setToolTip(event.title + (f"\nAssessed: {trends[event.event_id]}" if event.event_id in trends else ""))
             if event.closed_at is not None:
@@ -213,7 +221,10 @@ class EventsTable(QTableWidget):
                 if ignored:
                     item.setForeground(QBrush(muted))
                 elif column == 11:
-                    font.setBold(level.level in ("High", "Elevated"))
+                    font.setBold(level.level in ("High", "Elevated") or event.exercise)
+                    item.setFont(font)
+                if event.exercise and column == 1:
+                    font.setBold(True)
                     item.setFont(font)
                 self.setItem(row, column, item)
         self.setSortingEnabled(sorting)
@@ -276,8 +287,9 @@ class EventsTable(QTableWidget):
             event_id = self.item(row, 0).data(self.EVENT_ROLE)
             fresh = self._highlight_until.get(event_id, 0) > now
             active = active or fresh
+            drill = bool(self.item(row, 0).data(self.EXERCISE_ROLE))
             for column in range(self.columnCount()):
-                self.item(row, column).setBackground(QBrush(tint) if fresh else QBrush())
+                self.item(row, column).setBackground(QBrush(tint) if fresh else exercise_brush() if drill else QBrush())
         if active and not self._highlight_timer.isActive():
             self._highlight_timer.start()
         elif not active:
@@ -343,6 +355,10 @@ class EventsView(QWidget):
         self.hide_closed.setToolTip("Events an all-clear report, or you, closed")
         self.hide_closed.setChecked(self.store.get_setting("events.hide_closed", "0") == "1")
         self.hide_closed.toggled.connect(self._filter_changed)
+        # Not remembered: a filter left on after an exercise would hide every real event.
+        self.exercise_only = QCheckBox("Exercise only")
+        self.exercise_only.setToolTip("Only events whose reports are exercise traffic (shown in purple)")
+        self.exercise_only.toggled.connect(lambda _on: self.refresh())
         self.count = QLabel()
         briefing = QPushButton("Draft briefing…")
         briefing.setToolTip("Draft a shift briefing: choose the period (since the last briefing, or this tab's period and "
@@ -355,6 +371,7 @@ class EventsView(QWidget):
         top.addWidget(self.multi_only)
         top.addWidget(self.focus_only)
         top.addWidget(self.hide_closed)
+        top.addWidget(self.exercise_only)
         top.addStretch(1)
         self.search = search_box("Search events and their reports", lambda _text: self._show_count())
         top.addWidget(self.search)
@@ -403,6 +420,8 @@ class EventsView(QWidget):
             events = [event for event in events if event.reports > 1]
         if self.hide_closed.isChecked():
             events = [event for event in events if event.closed_at is None]
+        if self.exercise_only.isChecked():
+            events = [event for event in events if event.exercise]
         return events
 
     def refresh(self) -> None:
@@ -431,7 +450,7 @@ class EventsView(QWidget):
     def filter_description(self) -> str:
         """The filters in force, for a note on an event they hide: "Events period 48 h, Hide closed"."""
         parts = [f"Events period {self.period.currentText()}"]
-        for box in (self.multi_only, self.focus_only, self.hide_closed):
+        for box in (self.multi_only, self.focus_only, self.hide_closed, self.exercise_only):
             if box.isChecked() and box.isEnabled():
                 parts.append(box.text())
         if self.search.text().strip():

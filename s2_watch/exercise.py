@@ -21,6 +21,10 @@ from s2_watch.models import Message
 
 EXERCISE, TEST = "exercise", "test"
 BANNER = "EXERCISE EXERCISE EXERCISE"
+# Exercise traffic wears one colour everywhere (rows, markers, badges): purple, which no
+# concern level, category or highlight uses, so a drill is seen as a drill at a glance.
+COLOUR = "#8e24aa"
+TINT_ALPHA = 90          # the row tint: COLOUR at this alpha, readable in light and dark themes
 
 _NOT_REAL = re.compile(r"\b(?:not|no|non)[-\s]+real[-\s]?world\b", re.IGNORECASE)
 _REAL = re.compile(r"\breal[-\s]?world\b|\bno[-\s]+duff\b", re.IGNORECASE)

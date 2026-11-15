@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
 )
 
 from s2_watch.review import KINDS
+from s2_watch.ui.exercise_style import tint_row
 
 
 class ReviewView(QWidget):
@@ -129,6 +130,8 @@ class ReviewView(QWidget):
                 if column == 0:
                     cell.setData(Qt.ItemDataRole.UserRole, item.key)
                 self.table.setItem(row, column, cell)
+            if item.kind == "exercise":
+                tint_row(self.table, row)
             if selected is not None and item.key == selected.key:
                 self.table.selectRow(row)
         self.empty.setVisible(not self.table.rowCount())

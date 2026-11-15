@@ -16,6 +16,8 @@ from PySide6.QtWidgets import (
     QWidget, QMenu, QToolButton, QWidgetAction, QAbstractItemView, QInputDialog, QButtonGroup, QStackedWidget, QSplitter,
 )
 
+from s2_watch.exercise import EXERCISE, exercise_kind
+from s2_watch.ui.exercise_style import BADGE as EXERCISE_BADGE, tint_row
 from s2_watch import REPOSITORY_URL, __version__ as APP_VERSION
 from s2_watch.backups import back_up_in_background, backup_folder
 from s2_watch.s2_report import DEFAULT_MAGCON, briefing_report as s2_briefing_report, followup_report as s2_followup_report, js8_report
@@ -670,10 +672,13 @@ class MainWindow(QMainWindow):
         self.clock_button = QToolButton()
         self.clock_button.setToolTip("Switch all times between Local and Zulu (UTC)")
         self.clock_button.clicked.connect(self.toggle_time_format)
-        self.exercise_label = QLabel("EXERCISE")
-        self.exercise_label.setToolTip("Exercise in progress: exercise traffic is treated as news "
-                                       "(Configuration → Exercise in Progress)")
-        self.exercise_label.setStyleSheet("color: white; background: #c62828; font-weight: bold; padding: 1px 8px;")
+        # EXERCISE · n: shown during an exercise, or when exercise traffic came in lately;
+        # a click lists the exercise events.
+        self.exercise_label = QToolButton()
+        self.exercise_label.setText("EXERCISE")
+        self.exercise_label.setStyleSheet(f"QToolButton {{ {EXERCISE_BADGE} }}")
+        self.exercise_label.clicked.connect(self.show_exercise_events)
+        self.exercise_events: list = []
         self.exercise_label.setVisible(self.exercise_in_progress())
         self.update_button = UpdateButton(self)
         # The notices: the last 20 status messages, so one missed while away isn't lost.
@@ -1181,7 +1186,8 @@ class MainWindow(QMainWindow):
 
     def refresh_map_events(self) -> None:
         since = datetime.now(timezone.utc) - timedelta(hours=int(self.review_duration.currentData()))
-        self.map_events.set_events([event for event in self.store.events_since(since) if world.event_covered(event)],
+        self.map_events.set_events([event for event in self.store.events_since(since) if world.event_covered(event)
+                                    and not self.map_filter_hides(event.sources, event.category)],
                                    self.focus_regions, limit=self.news_rows.value())
 
     def selected_event_reports(self) -> list[int]:
@@ -1291,6 +1297,46 @@ class MainWindow(QMainWindow):
         return quiet_near(event, getattr(self, "coverage_cells", []), datetime.now(timezone.utc),
                           lambda lat, lon: gazetteer.locate_point(lat, lon)[1])
 
+    def update_exercise_marker(self, events=None) -> None:
+        """The EXERCISE marker by the clock: how many exercise events the last 48 hours hold.
+        Shown during an exercise, and whenever exercise traffic came in (it is off the news
+        lists then, so it would go unseen)."""
+        if events is None:
+            now = datetime.now(timezone.utc)
+            events = [event for event in self.store.events_since(now - timedelta(hours=48)) if world.event_covered(event)]
+        self.exercise_events = [event for event in events if event.exercise and event.closed_at is None]
+        count = len(self.exercise_events)
+        on = self.exercise_in_progress()
+        text = f"EXERCISE · {count}" if count else "EXERCISE"
+        changed = text != self.exercise_label.text()
+        self.exercise_label.setText(text)
+        self.exercise_label.setToolTip(
+            ("Exercise in progress: exercise traffic is handled as news, marked in purple. "
+             if on else "Exercise traffic received, but Exercise in Progress is off: it is kept off the news lists. ")
+            + (f"{count} exercise event{'s' if count != 1 else ''} in the last 48 hours: click to list "
+               f"{'them' if count != 1 else 'it'}." if count else "No exercise events yet."))
+        visible = on or bool(count)
+        if changed or visible == self.exercise_label.isHidden():
+            self.exercise_label.setVisible(visible)
+            self.clock_corner.adjustSize()      # the menu bar keeps the corner's old size otherwise
+            self.menuBar().setCornerWidget(self.clock_corner, Qt.Corner.TopRightCorner)
+
+    def exercise_received(self, processed, report) -> None:
+        """New exercise traffic: a notice (kept under the bell), whether or not an exercise is on."""
+        sender = processed.message.fields.get("sender") or processed.message.source_application
+        summary = processed.result.summary if processed.result else " ".join(processed.message.raw_content.split())[:80]
+        event_id = self.store.event_of_report(report.report_id) if report is not None else None
+        note = "" if self.exercise_in_progress() else " (Exercise in Progress is off: kept off the news lists)"
+        self.notify(f"Exercise traffic from {sender}: {summary}{note}", 15000, event_id=event_id)
+        self.review_data_changed()
+
+    def show_exercise_events(self) -> None:
+        """The Events tab, showing only exercise events."""
+        self.tabs.setCurrentWidget(self.events_view)
+        self.events_view.exercise_only.setChecked(True)
+        if len(self.exercise_events) == 1:
+            self.open_event(self.exercise_events[0].event_id)
+
     def event_concern(self, event):
         accepted = self.store.accepted_assessment(event.event_id)
         return concern(event, datetime.now(timezone.utc), self.focus_regions, accepted.trend if accepted else "")
@@ -1357,9 +1403,7 @@ class MainWindow(QMainWindow):
 
     def exercise_changed(self, on: bool) -> None:
         self.store.set_setting("exercise.in_progress", "1" if on else "0")
-        self.exercise_label.setVisible(on)
-        self.clock_corner.adjustSize()      # the menu bar keeps the corner's old size otherwise
-        self.menuBar().setCornerWidget(self.clock_corner, Qt.Corner.TopRightCorner)
+        self.update_exercise_marker()
         self.rescan_sources()      # exercise traffic joins (or leaves) the news lists and events
 
     def sender_grades(self) -> dict[str, str]:
@@ -1413,6 +1457,10 @@ class MainWindow(QMainWindow):
             if isinstance(message, Message) and not world.message_covered(message, first.data(self.LOCATIONS_ROLE)):
                 self.analysis.setRowHidden(row, True)       # outside the coverage
                 continue
+            if isinstance(message, Message) and self.map_filter_hides((message.source_application,),
+                                                                      self.report_row_category(row)):
+                self.analysis.setRowHidden(row, True)       # a source or category unticked under Map filters
+                continue
             if words:   # searching: every match, however far down
                 self.analysis.setRowHidden(row, not all(word in self.report_row_text(row) for word in words))
                 continue
@@ -1420,6 +1468,14 @@ class MainWindow(QMainWindow):
             pinned = status_item is not None and status_item.data(self.STATUS_ROLE) in self.PINNED_STATUSES
             self.analysis.setRowHidden(row, shown >= visible_rows and not pinned)
             shown += 1
+
+    def report_row_category(self, row: int) -> str:
+        """A Reports-list row's map category: its category when newsworthy, else routine."""
+        result = self.analysis.item(row, self.ANALYSIS_COLUMNS.index("Result"))
+        category = self.analysis.item(row, self.ANALYSIS_COLUMNS.index("Category"))
+        if result is None or result.text() != "NEWSWORTHY" or category is None:
+            return "routine"
+        return category.text()
 
     def report_row_text(self, row: int) -> str:
         """A Reports-list row's searchable text: its cells and the full message."""
@@ -1810,6 +1866,9 @@ class MainWindow(QMainWindow):
             if not processed.preloaded:   # Live Monitor shows traffic as it is read
                 self.insert_live_row(processed.message)
             report = processed.report
+            if (not processed.preloaded and report is not None and report.new_report     # once, not on a re-read
+                    and exercise_kind(processed.message) == EXERCISE):
+                self.exercise_received(processed, report)
             shown = self.shown_report_item(report.report_id) if report else None
             if shown is not None:
                 # Another copy of a report already on screen: count it, don't repeat it.
@@ -1903,6 +1962,8 @@ class MainWindow(QMainWindow):
             if column == 0:
                 item.setData(Qt.ItemDataRole.UserRole, message.received_at.isoformat())
             self.messages.setItem(row, column, item)
+        if exercise_kind(message) == EXERCISE:
+            tint_row(self.messages, row)
 
     def clear_live_messages(self) -> None:
         self.messages.setRowCount(0)
@@ -1979,6 +2040,15 @@ class MainWindow(QMainWindow):
                 "1" if checkbox.isChecked() else "0",
             )
         self.map_view.set_filters(applications, kinds, categories)
+        # The lists under the map follow the same source and category ticks as the markers.
+        self.refresh_map_events()
+        self.apply_news_rows_limit()
+
+    def map_filter_hides(self, applications, category: str) -> bool:
+        """True when the map's ticks hide every one of these source applications, or the category."""
+        shown = {application for application, box in self.map_application_filters.items() if box.isChecked()}
+        hidden_category = category in self.map_category_filters and not self.map_category_filters[category].isChecked()
+        return hidden_category or not any(application in shown for application in applications)
 
     def map_legend_changed(self) -> None:
         visible = self.map_legend_filter.isChecked()
@@ -2096,6 +2166,8 @@ class MainWindow(QMainWindow):
                 first = item
             self.analysis.setItem(row, column, item)
         self.style_report_row(row, report.status if report else "")
+        if exercise_kind(message) == EXERCISE:
+            tint_row(self.analysis, row)
         self.update_corroboration(row)
         self.map_view.set_message_category(message, result.category if result.newsworthy else "routine")
         return first
@@ -2638,7 +2710,8 @@ class MainWindow(QMainWindow):
             result, report_id = alerts[0]
             event_id = self.store.event_of_report(report_id) if report_id is not None else None
             self._alert_target = ("event", event_id) if event_id is not None else ("report", report_id)
-            self.tray.showMessage(f"S2 Watch: {result.category.replace('_', ' ').title()}",
+            drill = "EXERCISE · " if result.summary.upper().startswith("EXERCISE") else ""
+            self.tray.showMessage(f"S2 Watch: {drill}{result.category.replace('_', ' ').title()}",
                                   f"{result.summary}\n(Click to open.)", icon, 10000)
             return
         self._alert_target = ("review", None)
@@ -2679,6 +2752,7 @@ class MainWindow(QMainWindow):
     def review_items(self) -> list:
         now = datetime.now(timezone.utc)
         events = [event for event in self.store.events_since(now - timedelta(hours=48)) if world.event_covered(event)]
+        self.update_exercise_marker(events)
         return review_items(now, events, self.store.reviews_done(), alerted=self.alerted_events,
                             proposals=self.store.proposed_assessments(),
                             event_lookup=lambda ids: self.store.events_since(None, event_ids=ids),
@@ -2709,7 +2783,7 @@ class MainWindow(QMainWindow):
                 self.misses_view.dismiss_miss(item.target)
             else:
                 self.store.review_done(item.key)
-        elif item.kind in ("new", "single"):
+        elif item.kind in ("new", "single", "exercise"):
             self.store.review_done(item.key)
             self.open_event(item.target)
         elif item.kind == "assessment":

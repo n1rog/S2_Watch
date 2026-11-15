@@ -16,6 +16,7 @@ from PySide6.QtCore import QUrl, Signal
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QHBoxLayout, QMenu, QPushButton, QTextBrowser, QToolButton, QVBoxLayout, QWidget
 
+from s2_watch.exercise import COLOUR as EXERCISE_COLOUR
 from s2_watch.analysis.ollama import readable_text
 from s2_watch.event_assessment import TREND_MARKS, changes
 from s2_watch.concern import COLOURS as CONCERN_COLOURS
@@ -287,7 +288,9 @@ class EventDetail(QWidget):
         sources = ", ".join(event.sources)
         when = (self.format_time(event.first_seen) if event.first_seen == event.last_seen
                 else f"{self.format_time(event.first_seen)} to {self.format_time(event.last_seen)}")
-        out = [f"<p style='color:#c62828;margin:0'><b>EXERCISE</b>: these reports are exercise traffic.</p>"
+        out = [f"<table width='100%' cellpadding='6' style='margin:0 0 4px 0'><tr><td bgcolor='{EXERCISE_COLOUR}'>"
+               f"<span style='color:white'><b>EXERCISE EXERCISE EXERCISE</b> — these reports are exercise traffic, "
+               f"not a real event.</span></td></tr></table>"
                if getattr(event, "exercise", False) else "",
                f"<h3 style='margin-bottom:2px'>{e(event.title)}</h3>",
                f"<p style='margin-top:0'><b>{e(event.category)}</b>"
@@ -295,8 +298,12 @@ class EventDetail(QWidget):
                f"{e(when)} · {event.reports} report{'s' if event.reports != 1 else ''} from {e(sources)}</p>"]
         if self.concern_for is not None:
             level = self.concern_for(event)
-            out.append(f"<p style='margin:2px 0 6px'><b>Concern:</b> <b style='color:{CONCERN_COLOURS[level.level]}'>"
-                       f"{e(level.level)}</b> — {e(' · '.join(level.reasons))}</p>")
+            if getattr(event, "exercise", False):
+                out.append(f"<p style='margin:2px 0 6px'><b>Concern:</b> <b style='color:{EXERCISE_COLOUR}'>Exercise</b>"
+                           f" — were it real: {e(level.level)}, {e(' · '.join(level.reasons))}</p>")
+            else:
+                out.append(f"<p style='margin:2px 0 6px'><b>Concern:</b> <b style='color:{CONCERN_COLOURS[level.level]}'>"
+                           f"{e(level.level)}</b> — {e(' · '.join(level.reasons))}</p>")
         if event.closed_at is not None:
             who = "you" if event.closed_by == "operator" else "a report"
             out.append(f"<p style='color:#2e7d32'>✓ <b>Closed</b> {e(self.format_time(event.closed_at))} by {who}"
@@ -344,7 +351,7 @@ class EventDetail(QWidget):
             stated = report.get("event_time") or ""
             if stated and abs((_when(report["first_seen"]) - _when(stated)).total_seconds()) >= 300:
                 track += f" · time in message <b>{e(self.format_time(stated))}</b>"
-            drill = {"exercise": " · <b style='color:#c62828'>EXERCISE</b>",
+            drill = {"exercise": f" · <span style='background:{EXERCISE_COLOUR};color:white'>&nbsp;<b>EXERCISE</b>&nbsp;</span>",
                      "test": " · <b>TEST</b>"}.get(report.get("exercise") or "", "")
             copies = f" · {report['copies']} copies via {report['sources']}" if report.get("copies", 1) > 1 else ""
             label = STATUS_LABELS.get(report["status"], "")

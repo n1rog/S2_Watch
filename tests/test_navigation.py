@@ -82,3 +82,20 @@ def test_a_station_marker_says_it_has_no_report(main_window) -> None:
 def test_the_memory_check_is_only_for_ollama_on_this_computer() -> None:
     assert local_endpoint("http://127.0.0.1:11434") and local_endpoint("http://localhost:11434")
     assert not local_endpoint("http://192.168.1.50:11434") and not local_endpoint("http://ai-box.local:11434")
+
+
+def test_unticking_a_source_hides_it_in_the_lists_under_the_map(main_window) -> None:
+    from datetime import datetime, timedelta, timezone
+
+    window = main_window()
+    message, result, report_id, event_id = add_event(window.store, when=datetime.now(timezone.utc) - timedelta(hours=1))
+    window.refresh_map_events()
+    window.show_analysis(message, result)
+    assert [event.event_id for event in window.map_events.events] == [event_id]
+    assert not window.analysis.isRowHidden(0)
+    window.map_application_filters["OSINT"].setChecked(False)
+    assert window.map_events.events == []                       # the events list
+    assert window.analysis.isRowHidden(0)                       # the reports list
+    window.map_application_filters["OSINT"].setChecked(True)
+    window.map_category_filters["Infrastructure"].setChecked(False)
+    assert window.map_events.events == [] and window.analysis.isRowHidden(0)

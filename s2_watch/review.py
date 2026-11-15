@@ -1,6 +1,6 @@
 """Needs Review: everything waiting on the operator, in one list.
 
-New high-urgency events (and events a desktop alert was raised for), Ollama assessments
+New high-urgency events (and events a desktop alert was raised for), exercise traffic, Ollama assessments
 waiting to be accepted, briefings drafted at shift change, single-source radio reports no one
 has confirmed, possible misses, and drafts not yet sent. Each item goes when it is acted on
 (opened, accepted, sent) or hidden; hidden ones are remembered (``store.review_done``).
@@ -17,6 +17,7 @@ UNSENT_FOR = timedelta(days=7)         # an unsent draft is listed this long
 # kind -> (label, the primary action, the secondary action)
 KINDS = {
     "new": ("New event", "Open event", "Hide"),
+    "exercise": ("Exercise traffic", "Open event", "Hide"),
     "assessment": ("AI assessment ready", "Review assessment", "Hide"),
     "briefing": ("Shift briefing ready", "Review briefing", "Hide"),
     "single": ("Single source", "Open event", "Hide"),
@@ -60,6 +61,11 @@ def review_items(now: datetime, events, done: set[str], *, alerted=(), proposals
         if event.closed_at is not None:
             continue
         sources = f"{event.reports} report{'s' if event.reports != 1 else ''} · {', '.join(event.sources)}"
+        if event.exercise:      # listed on its own, so a drill is noticed and never taken for real
+            if now - event.first_seen <= NEW_FOR:
+                items.append(ReviewItem(f"exercise:{event.event_id}", "exercise", event.last_seen, event.title,
+                                        f"EXERCISE · {sources}", event.event_id))
+            continue
         level = concern_of(event)
         if (level.level == "High" and now - event.first_seen <= NEW_FOR) or \
                 (event.event_id in alerted and level.level in ("High", "Elevated")):
