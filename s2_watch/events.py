@@ -20,6 +20,8 @@ EVENT_GAP = timedelta(hours=48)       # a report this long after the last one st
 DEFAULT_RADIUS_KM = 100
 RADIUS_KM = {"earthquake": 150, "fire": 80, "tropical": 250, "winter": 150, "heat": 200}
 SPECIFIC_LEVELS = {"precise", "city", "county", "grid"}
+EPISODE_GAP = timedelta(hours=12)    # an airport's ground stops this far apart are separate episodes
+NATIONAL_GAP = timedelta(hours=24)    # coverage of one nationwide stoppage, this long after the last story
 INCIDENT_GAP = timedelta(days=30)     # a named fire is one event however long it burns
 SINGLE_SOURCE_AFTER = timedelta(hours=2)   # unconfirmed this long from one source: say so
 STALE_AFTER = timedelta(hours=12)     # no reports this long: the event shows as quiet (Display setting)
@@ -254,13 +256,31 @@ _MAJOR = re.compile(r"\bactive (?:shooter|shooting|threat|attacker)\b|\bmass sho
                     r"|\b(?:officers?|deput(?:y|ies)|troopers?|police)\s+(?:were\s+)?(?:killed|shot|dies|died|slain)\b")
 
 
+# A nationwide stoppage: stories about it are one event however they're worded ("FAA blames
+# Friday ground stop on equipment issue", "Airlines work through cancellations after nationwide
+# ground stop"). A ground stop *at* an airport ("FAA: ground stop at EWR airport") is local.
+_NATIONAL = {
+    "ground stop": (re.compile(r"\bground\s+stops?\b|\b(?:halts?|halted|grounds?|grounded)\s+(?:all|every)\s+"
+                               r"(?:u\.?s\.?\s+)?(?:flights|departures|planes)\b"),
+                    re.compile(r"\bground\s+stops?\s+(?:at|for|in)\s+(?!(?:all|every|u\.?s\.?|us|the\s+(?:u\.?s|country|nation))\b)\w",)),
+}
+
+
+def national_marks(text: str) -> set[str]:
+    """"national:ground stop" for a story about a nationwide stoppage (not one airport's)."""
+    lowered = text.lower()
+    return {f"national:{name}" for name, (story, local) in _NATIONAL.items()
+            if story.search(lowered) and not local.search(lowered)}
+
+
 def incident_marks(text: str) -> set[str]:
     """A crime report's kind ("shooting"), its casualty count ("count:4", "count:many") and
-    whether it's a big incident ("major": an active shooter, an officer killed)."""
+    whether it's a big incident ("major": an active shooter, an officer killed); and
+    "national:…" for a nationwide stoppage (``national_marks``)."""
     lowered = text.lower()
     marks = {kind for kind, pattern in _KINDS.items() if pattern.search(lowered)}
     if not marks:
-        return set()
+        return national_marks(text)
     counts = {int(word) if word.isdigit() else _NUMBERS[word]
               for word in (match.group(1) or match.group(2) for match in _COUNT.finditer(lowered))}
     counts = {count for count in counts if 2 <= count <= 500}
@@ -274,7 +294,7 @@ def incident_marks(text: str) -> set[str]:
         marks.add("past")
     if _ANOTHER.search(lowered):
         marks.add("another")
-    return marks
+    return marks | national_marks(text)
 
 
 def _kinds(marks: set[str]) -> set[str]:
@@ -369,7 +389,16 @@ def belongs(candidate: EventCandidate, category: str, hazards: set[str], place: 
     if candidate.category != category:
         return False
     if candidate.incident and incident:
-        return candidate.incident == incident   # two named fires are never one event
+        if candidate.incident != incident:
+            return False                        # two named fires are never one event
+        # An airport's ground stops on different days are separate episodes, not one event.
+        return not (incident.startswith("airport:") and seen - candidate.last_seen > EPISODE_GAP)
+    if candidate.incident.startswith("airport:"):
+        return False      # an airport's status updates only; news about a stoppage forms its own event
+    national = {mark for mark in (marks or set()) if mark.startswith("national:")}
+    if national & candidate.marks:
+        # One nationwide stoppage, wherever each story is placed.
+        return seen - candidate.last_seen <= NATIONAL_GAP and candidate.first_seen - seen <= NATIONAL_GAP
     if seen - candidate.last_seen > EVENT_GAP or candidate.first_seen - seen > EVENT_GAP:
         return False
     if candidate.hazards and hazards and not candidate.hazards & hazards:

@@ -14,7 +14,7 @@ from PySide6.QtCore import QObject, QTimer, Signal, Slot
 from s2_watch.analysis.base import AnalysisResult, NewsAnalyzer
 from s2_watch.analysis.ollama import readable_text
 from s2_watch.analysis.summary import is_placeholder_summary, summarize
-from s2_watch.events import incident_key, incident_marks, key_terms, place_from_locations, place_title, report_hazards
+from s2_watch.events import incident_key, incident_marks, key_terms, national_marks, place_from_locations, place_title, report_hazards
 from s2_watch.exercise import mark_exercise
 from s2_watch.geocoding import NominatimGeocoder
 from s2_watch.locating import LocationResolver, ResolvedLocation
@@ -93,6 +93,17 @@ class MonitorWorker(QObject):
             return
         since = datetime.now(timezone.utc) - timedelta(days=30)
         grouped = 0
+        # Once: an airport's ground stops weeks apart were one event, and coverage of one
+        # nationwide ground stop was split (before 0.61.7). Those events are formed again below.
+        if self.store.get_setting("migrations.ground_stops") != "1":
+            self.store.ungroup(since, lambda incident, text: incident.startswith("airport:")
+                               or bool(national_marks(text)))
+            from s2_watch.analysis.rules import RuleBasedNewsAnalyzer
+
+            rules = RuleBasedNewsAnalyzer()
+            self.store.raise_to_high(lambda message: bool(national_marks(message.raw_content))
+                                     and rules.analyze(message).urgency == "high")
+            self.store.set_setting("migrations.ground_stops", "1")
         for report_id, message, category, summary in self.store.reports_needing_events(since):
             locations = self.resolver.resolve(message)
             text = f"{readable_text(message)} {summary}"

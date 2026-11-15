@@ -809,6 +809,9 @@ class SQLiteStore:
         terms = terms or set()
         marks = marks or set()
         title = clean_title(title, place)
+        national = sorted(mark.split(":", 1)[1] for mark in marks if mark.startswith("national:"))
+        if national:      # one nationwide stoppage, whichever report came first
+            title = f"Nationwide {national[0]}"
 
         row = self.connection.execute(
             "SELECT event_id, first_seen, last_seen, exercise FROM reports WHERE id = ?", (report_id,)).fetchone()
@@ -852,8 +855,9 @@ class SQLiteStore:
         else:
             event_id = chosen.event_id
             merged = ",".join(sorted(chosen.hazards | hazards))
-            # An official incident's latest update gives the event its title (acres, containment).
-            if incident and chosen.incident == incident:
+            # An official incident's latest update gives the event its title (acres, containment);
+            # so does a nationwide stoppage's name.
+            if (incident and chosen.incident == incident) or national:
                 self.connection.execute("UPDATE events SET title = ? WHERE id = ?", (title, event_id))
             self.connection.execute(
                 """UPDATE events SET hazards = ?, first_seen = MIN(first_seen, ?), last_seen = MAX(last_seen, ?),
@@ -1045,6 +1049,26 @@ class SQLiteStore:
             kept.append((event, locked))
         self.connection.commit()
         return merged
+
+    def ungroup(self, since: datetime, regroup) -> int:
+        """Once, after a change in how events are formed: the events since ``since`` that
+        ``regroup(incident, report_text)`` picks (any of their reports) give up their reports,
+        to be grouped again under the current rules, and are removed. Events the operator
+        closed or assessed are left alone. The number of reports set free."""
+        rows = self.connection.execute(
+            """SELECT e.id, e.incident, r.report_text FROM events e JOIN reports r ON r.event_id = e.id
+               WHERE e.last_seen >= ? AND e.closed_by != 'operator'
+                 AND NOT EXISTS (SELECT 1 FROM accepted_assessments a WHERE a.event_id = e.id)
+                 AND NOT EXISTS (SELECT 1 FROM event_assessments a WHERE a.event_id = e.id)""",
+            (utc_iso(since),)).fetchall()
+        chosen = {event_id for event_id, incident, text in rows if regroup(incident or "", text or "")}
+        freed = 0
+        for event_id in chosen:
+            freed += self.connection.execute("UPDATE reports SET event_id = NULL WHERE event_id = ?",
+                                             (event_id,)).rowcount
+            self.connection.execute("DELETE FROM events WHERE id = ?", (event_id,))
+        self.connection.commit()
+        return freed
 
     def _merge_event(self, event_id: int, into: int) -> None:
         """Move an event's reports into another event and remove it."""
@@ -1337,6 +1361,30 @@ class SQLiteStore:
             changed += 1
         self.connection.commit()
         return changed
+
+    def raise_to_high(self, is_high) -> int:
+        """Once, after a rule change: stored news stories (OSINT, not the operator's decisions)
+        that ``is_high(message)`` now calls high urgency become high, their saved analysis too."""
+        rows = self.connection.execute(
+            """SELECT r.id, m.source_application, m.raw_content, m.fields_json FROM reports r
+               JOIN messages m ON m.id = (SELECT MIN(id) FROM messages WHERE report_id = r.id)
+               WHERE r.newsworthy = 1 AND r.urgency != 'high' AND r.first_source = 'OSINT'
+                 AND NOT EXISTS (SELECT 1 FROM analysis_results a WHERE a.message_id = m.id AND a.analyzer = 'operator')"""
+        ).fetchall()
+        raised = 0
+        for report_id, application, raw, fields_json in rows:
+            try:
+                fields = {str(k): str(v) for k, v in json.loads(fields_json or "{}").items()}
+            except ValueError:
+                fields = {}
+            if is_high(Message(application, raw or "", fields=fields)):
+                self.connection.execute("UPDATE reports SET urgency = 'high' WHERE id = ?", (report_id,))
+                self.connection.execute("""UPDATE analysis_results SET urgency = 'high'
+                                           WHERE message_id IN (SELECT id FROM messages WHERE report_id = ?)""",
+                                        (report_id,))
+                raised += 1
+        self.connection.commit()
+        return raised
 
     def exercise_messages(self, since: datetime) -> list[dict]:
         """Exercise traffic first heard since ``since``, by message: a digest split into items is

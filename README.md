@@ -76,6 +76,10 @@ of crime in one place, telling the same big story within a day (the same or a gr
 "multiple people", an active shooter) or naming the same small town (under 100,000 people,
 away from big cities) within 48 hours. Old cases (sentencings, anniversaries) and "another
 shooting" stay apart. Events split before 0.54.0 are merged this way once.
+Stories about one nationwide ground stop are one event ("Nationwide ground stop"), however
+worded and wherever placed, within a day of each other, and high urgency; a ground stop at
+one airport is that airport's event, and its ground stops more than 12 hours apart are
+separate episodes.
 Each event shows its sources, official confirmation and how far ahead radio reported it.
 
 Select an event to see what it is about. The panel beside the list (on the map page and

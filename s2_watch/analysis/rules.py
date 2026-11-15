@@ -147,7 +147,12 @@ FEED_RULES = (
         r"\blaw\s+enforcement\s+warning\b", r"\bchild\s+abduction\s+emergency\b", r"\bamber\s+alert\b",
         r"\bblue\s+alert\b", r"\bmissing\s+(?:and\s+)?endangered\b", r"\bsilver\s+alert\b", r"\bcivil\s+danger\s+warning\b")),
     Rule("Infrastructure", (), "high", (
-        r"\b911\s+(?:telephone\s+)?outage\b", r"\bnoaa\s+scale\s+(?:g[45]|r[345]|s[345])\b")),
+        r"\b911\s+(?:telephone\s+)?outage\b", r"\bnoaa\s+scale\s+(?:g[45]|r[345]|s[345])\b",
+        # A nationwide stoppage of air traffic, not one airport's weather stop.
+        r"\b(?:nationwide|national|countrywide)\s+ground\s+stops?\b",
+        r"\bground\s+stops?\b[^.]{0,60}\b(?:nationwide|all\s+(?:u\.?s\.?\s+)?(?:flights|airports|departures)|"
+        r"across\s+the\s+(?:country|u\.?s\.?|nation))\b",
+        r"\b(?:faa|flights?)\b[^.]{0,40}\b(?:grounds?|grounded|halts?|halted)\s+(?:all|every)\s+(?:u\.?s\.?\s+)?flights\b")),
     Rule("Infrastructure", (), "medium", (
         r"\bspace\s+weather\b", r"\bground\s+stop\b", r"\bairport\s+closed\b",
         r"\bknown\s+exploited\s+vulnerability\b", r"\bborder\s+crossing\s+(?:closed|temporarily\s+closed)\b")),
