@@ -135,6 +135,10 @@ class MissesView(QWidget):
         self.show_dismissed = QCheckBox("Show dismissed")
         self.show_dismissed.toggled.connect(self.refresh)
         self.status = QLabel()
+        self.older = QLabel()
+        self.older.setWordWrap(True)
+        self.older.setStyleSheet("color: #b26a00;")
+        self.older.setVisible(False)
         self.table = QTableWidget(0, len(self.COLUMNS))
         self.table.setHorizontalHeaderLabels(self.COLUMNS)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -171,6 +175,7 @@ class MissesView(QWidget):
             buttons.addWidget(button)
         layout = QVBoxLayout(self)
         layout.addLayout(top)
+        layout.addWidget(self.older)
         layout.addWidget(self.table)
         layout.addLayout(buttons)
         self._selection_changed()
@@ -200,6 +205,16 @@ class MissesView(QWidget):
                 if column in (2, len(values) - 1):
                     item.setToolTip(value)
                 self.table.setItem(row, column, item)
+        # Waiting ones older than the watch period aren't listed: say so, or the list looks cleared.
+        older = 0
+        if status == "new":
+            older = sum(1 for miss in self.store.possible_misses("new")
+                        if miss[1].received_at < since and not is_fragment(miss[1].raw_content)
+                        and in_coverage(miss[1], self._resolver))
+        self.older.setText(f"{older} older possible miss{'es' if older != 1 else ''} wait outside the watch period "
+                           f"({self.watch_hours()} h); choose a longer watch period to see "
+                           f"{'them' if older != 1 else 'it'}." if older else "")
+        self.older.setVisible(bool(older))
         dismissed = self.show_dismissed.isChecked()
         self.add_button.setVisible(True)
         self.dismiss_button.setVisible(not dismissed)

@@ -142,6 +142,18 @@ words in the same message still can), for every source; **Use again** undoes it.
 watch period is then checked again with the new words, as it is after adding a keyword
 from Possible Misses.
 
+## Sports stories
+
+News stories about sport use violent words for play ("Prolific Shooting Performance
+Helps Aggies to 120-82 Win", "Explosive offense powers Chiefs past Raiders"). In a news
+story with two signs of sport (a score, "win over", basketball, points, playoffs...) or
+from a sports outlet (a university's athletics site, ESPN, CBS Sports), the words
+shooting, shot, attack, blast, fire, explosive and the like don't make it news, unless
+the story also says real violence or a crime happened (police, a suspect, a victim,
+wounded, killed, charged, pleads guilty...). Radio messages are taken as written. Stored
+stories are re-checked once: on the operator's data, 55 basketball recaps listed as
+Crime became routine, and no real shooting.
+
 ## Exercise traffic
 
 Clear exercise markers ("EXERCISE EXERCISE EXERCISE", "THIS IS A DRILL", "exercise

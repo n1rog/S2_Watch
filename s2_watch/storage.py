@@ -1311,6 +1311,33 @@ class SQLiteStore:
                                 (key, utc_iso(datetime.now(timezone.utc))))
         self.connection.commit()
 
+    def make_routine(self, is_routine) -> int:
+        """Re-judge stored news stories (OSINT reports listed as news, not the operator's own
+        decisions): those ``is_routine(message)`` now calls routine become routine, their saved
+        analysis too, so reading them again keeps them so. The number changed."""
+        rows = self.connection.execute(
+            """SELECT r.id, m.id, m.source_application, m.raw_content, m.fields_json FROM reports r
+               JOIN messages m ON m.id = (SELECT MIN(id) FROM messages WHERE report_id = r.id)
+               WHERE r.newsworthy = 1 AND r.first_source = 'OSINT'
+                 AND NOT EXISTS (SELECT 1 FROM analysis_results a WHERE a.message_id = m.id AND a.analyzer = 'operator')"""
+        ).fetchall()
+        changed = 0
+        for report_id, message_id, application, raw, fields_json in rows:
+            try:
+                fields = {str(k): str(v) for k, v in json.loads(fields_json or "{}").items()}
+            except ValueError:
+                fields = {}
+            if not is_routine(Message(application, raw or "", fields=fields)):
+                continue
+            self.connection.execute("UPDATE reports SET newsworthy = 0, category = 'routine', urgency = 'low' WHERE id = ?",
+                                    (report_id,))
+            self.connection.execute(
+                """UPDATE analysis_results SET newsworthy = 0, category = 'routine', urgency = 'low'
+                   WHERE message_id IN (SELECT id FROM messages WHERE report_id = ?)""", (report_id,))
+            changed += 1
+        self.connection.commit()
+        return changed
+
     def exercise_messages(self, since: datetime) -> list[dict]:
         """Exercise traffic first heard since ``since``, by message: a digest split into items is
         one message. Each: key, title, when (latest), report_ids, event_ids, sender, source.

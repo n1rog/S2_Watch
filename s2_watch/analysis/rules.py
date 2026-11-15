@@ -41,6 +41,44 @@ class Rule:
         return found
 
 
+# Sports stories use violent words for play: "prolific shooting performance", "shot 52%",
+# "an explosive offense", "Wildcats attack the basket". In one, those words don't count unless
+# the story also says real violence happened ("shooting at a basketball game", police, a victim).
+_SPORTS = re.compile(
+    r"\b(?:basketball|football|baseball|softball|soccer|hockey|volleyball|lacrosse|wrestling|tennis|golf|"
+    r"athletics|ncaa|nba|wnba|nfl|nhl|mlb|mls|playoffs?|postseason|season\s+opener|tournament|championship|"
+    r"halftime|overtime|quarterback|touchdowns?|rebounds?|assists?|three[-\s]pointers?|3[-\s]pointers?|"
+    r"free\s+throws?|field\s+goals?|home\s+runs?|innings?|goalkeeper|scor(?:ed|ing)\s+\d+\s+points|"
+    r"\d+\s+points|(?:win|victory|loss|defeat)\s+(?:over|against|to)|"
+    r"\d{1,3}-\d{1,3}\s+(?:win|victory|loss|defeat|rout)|(?:beat|beats|tops|edges|routs|falls?\s+to)\s+\w+|"
+    r"\d{1,3}-\d{1,3}(?!\s*(?:inch|mph|ft|feet|foot|miles?|degrees|percent|%|acres|people|hours|days)))\b",
+    re.IGNORECASE)
+_SPORTS_ANYWHERE = re.compile(r"(?=(" + _SPORTS.pattern + r"))", re.IGNORECASE)
+_PLAY_WORDS = re.compile(r"^(?:shoot|shot|gun|fire|attack|blast|bomb|explos|kill|battle|strike|assault|ambush|"
+                         r"hostage|massacre|slaughter|war)", re.IGNORECASE)
+_REAL_VIOLENCE = re.compile(
+    r"\b(?:police|sheriff|deputies|officers?|suspects?|victims?|wounded|injur\w*|gunman|gunmen|gunfire|gunshots?|"
+    r"hospital\w*|arrest\w*|charged|homicide|fatal\w*|deadly|died|dead|deaths?|killed|slain|murder\w*|stabb\w*|"
+    r"manhunt|lockdown|evacuat\w*|plead\w*|pleads?|guilty|plea|charges?|jail\w*|prison|sentenc\w*|court|"
+    r"indict\w*|trial)\b",
+    re.IGNORECASE)
+
+
+_SPORTS_OUTLET = re.compile(r"athletic|sports|espn|\b(?:nba|wnba|nfl|nhl|mlb|ncaa|maxpreps)\b|bleacher|rivals\.com|"
+                            r"247sports|si\.com", re.IGNORECASE)
+
+
+def sports_play(text: str, outlet: str = "") -> bool:
+    """A sports story with no sign of real violence: its violent words are about play. Two
+    sports signs in the text, or a sports outlet (a university's athletics site, ESPN)."""
+    if _REAL_VIOLENCE.search(text):
+        return False
+    if outlet and _SPORTS_OUTLET.search(outlet):
+        return True
+    signs = {match.group(1).casefold() for match in _SPORTS_ANYWHERE.finditer(text)}   # overlapping
+    return len(signs) >= 2
+
+
 # Heat, cold and winter weather; readings alone ("20F GUD HERE") are not news.
 # Civil unrest. "Demonstration" alone is left out: it is mostly "for demonstration purposes".
 SEVERE_UNREST_PATTERNS = (
@@ -195,6 +233,9 @@ class RuleBasedNewsAnalyzer(NewsAnalyzer):
             for rule in self.rules
             for term in rule.matches(content, self.excluded.get(rule.category, frozenset()))
         ]
+        source = " ".join(message.fields.get(key, "") for key in ("outlet", "sender"))
+        if matches and message.source_application == "OSINT" and sports_play(message.raw_content, source):
+            matches = [(rule, term) for rule, term in matches if not _PLAY_WORDS.match(term)]
         if not matches:
             return AnalysisResult(False, "routine", "low", message.raw_content, 0.1)
         rule_by_priority = {"high": 3, "medium": 2, "low": 1}

@@ -115,6 +115,17 @@ class MonitorWorker(QObject):
             grouped += self.store.regroup_incidents(
                 since, lambda message, title: incident_marks(f"{readable_text(message)} {title}"))
             self.store.set_setting("migrations.incident_marks", "1")
+        # Once: sports stories taken for crime ("hot shooting night", before 0.61.6). The keyword
+        # rules judge news stories; saved results would otherwise be reused when they are read again.
+        if self.store.get_setting("migrations.sports_play") != "1":
+            from s2_watch.analysis.rules import RuleBasedNewsAnalyzer, sports_play
+
+            rules = RuleBasedNewsAnalyzer()
+            grouped += self.store.make_routine(
+                lambda message: sports_play(message.raw_content, " ".join(
+                    message.fields.get(key, "") for key in ("outlet", "sender")))
+                and not rules.analyze(message).newsworthy)
+            self.store.set_setting("migrations.sports_play", "1")
         # Once: events whose all-clear arrived before events could close (before 0.28).
         if self.store.get_setting("migrations.history_all_clear") != "1":
             grouped += self.store.close_events_from_history(since)

@@ -1148,6 +1148,8 @@ class MainWindow(QMainWindow):
         self._report_items.clear()
         self.map_view.clear_locations()
         self.connect_js8call()
+        if hasattr(self, "misses_view"):
+            self.misses_view.refresh()      # it lists the watch period's misses: refresh it now, not on the next click
 
     def map_rendering_changed(self, software: bool) -> None:
         self.store.set_setting("map.rendering", "software" if software else "hardware")
