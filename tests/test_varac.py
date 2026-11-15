@@ -85,3 +85,26 @@ def test_varac_is_a_source(main_window) -> None:
     assert "VarAC" in window.map_application_filters
     assert window.varac_adapter is not None and window.varac_adapter.application_name == "VarAC"
     assert any(form.application == "VarAC" for form in window.store.list_watch_forms())
+
+
+def test_all_varac_messages_is_switched_on_once(tmp_path: Path) -> None:
+    from dataclasses import replace
+
+    from s2_watch.default_forms import install_default_forms
+    from s2_watch.storage import SQLiteStore
+
+    store = SQLiteStore(tmp_path / "s2.db")
+    install_default_forms(store)
+    forms = {form.name: form for form in store.list_watch_forms()}
+    assert forms["All VarAC messages"].enabled and forms["All MagCommstat messages"].enabled
+    # 0.61.0 created it off, and the operator had turned MagCommstat off: VarAC goes on, MagCommstat stays off.
+    store.save_watch_form(replace(forms["All VarAC messages"], enabled=False))
+    store.save_watch_form(replace(forms["All MagCommstat messages"], enabled=False))
+    store.set_setting("forms.enabled_by_default_version", "1")
+    install_default_forms(store)
+    forms = {form.name: form for form in store.list_watch_forms()}
+    assert forms["All VarAC messages"].enabled and not forms["All MagCommstat messages"].enabled
+    # Turned off afterwards, it stays off.
+    store.save_watch_form(replace(forms["All VarAC messages"], enabled=False))
+    install_default_forms(store)
+    assert not {form.name: form for form in store.list_watch_forms()}["All VarAC messages"].enabled

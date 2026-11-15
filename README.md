@@ -412,9 +412,10 @@ period.
 
 S2 Watch creates an unfiltered default watch form for each supported
 application: JS8Call, MagCommstat, Commstat, FLMSG, JS8SuperSpotter, and VarAC.
-**All MagCommstat messages** is on from the start (and switched on once in
-existing installations): QSTs and StatReps are written as news, and one about a
-subject no category form knows would otherwise be dropped. The others start off.
+**All MagCommstat messages** and **All VarAC messages** are on from the start (and
+switched on once in existing installations): QSTs, StatReps and VarAC broadcasts are
+written as news, and one about a subject no category form knows would otherwise be
+dropped. The others start off.
 
 A watch form can also apply to **All applications**. S2 Watch adds one such form
 for each news category (Civil Unrest, Climate / Environment, Crime, Economy,
