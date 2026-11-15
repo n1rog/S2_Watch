@@ -166,7 +166,11 @@ event lists (the Concern column reads "Exercise"), a purple bar in the event pan
 ring and EX tag on map markers, tinted rows in the Reports list and Live Monitor, an
 "Exercise traffic" item in Needs Review, and a notice when it arrives. A purple
 **EXERCISE · n** button by the clock counts the open exercise events; click it to list them
-(the Events tab's **Exercise only** filter).
+(the Events tab's **Exercise only** filter). A digest marked as an exercise counts as one
+exercise message and is one Needs Review item, however many events its items make.
+
+The FLMSG file a report came in is shown in the event panel ("File: …") and in the
+Reports list's File column.
 
 ## Sender track records
 
@@ -687,6 +691,10 @@ entry such as `~/.local/share/applications/s2-watch.desktop` should set
 Digests such as weekly briefings, bulletins and news roundups ("MAGNET WEEKLY
 BRIEFING", "EmComm DocDrop News") are split into their items, each line or section that
 starts with a state ("MN — …", "MI/WI - …"), a heading ("CIVIL UNREST: …") or a bullet.
+Only a digest is split: one that calls itself one in its heading or file name (snapshot,
+bulletin, briefing, roundup, news, "PRIORITY ITEMS", "PERIOD 01-08 NOV", "ALL REGIONS"),
+or whose items name different states. One incident written as a list (a SITREP's
+numbered points) stays one report.
 Each item becomes its own report with its own category, location, summary and Official
 check, and shows which digest it came from ("— from “MAGNET WEEKLY BRIEFING …” (item 3
 of 22)"). The whole digest is kept in Live Monitor and History with the watch form

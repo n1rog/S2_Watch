@@ -75,3 +75,20 @@ def test_digest_items_are_placed_by_their_state_prefix() -> None:
     items = split_digest(Message("FLMSG", BRIEFING, fields={"filename": "a.k2s"}))
     labels = [[location.label for location in LocationResolver().resolve(item)] for item in items]
     assert labels[0] == ["Minnesota"] and labels[1] == ["Wisconsin"] and labels[3] == ["Ohio"]
+
+
+SITREP = ("MAGNET SITREP DE KT5DC\n1. POWER AND COMMS FAILURE HORSESHOE BAY TX SINCE 0600Z, 2 MILE RADIUS\n"
+          "2. FIRE STATION REPORTS 48 HR OUTAGE, CAUSE UNKNOWN INFRASTRUCTURE DAMAGE\n3. FERGUSON RD CLOSED N OF FM 2147\n"
+          "4. NEEDS: HEATING, REFRIGERATION, COOKING\n5. RUMOR: MARBLE FALLS LIMITED POWER, NOT VERIFIED")
+
+
+def test_one_incident_written_as_a_list_stays_one_report() -> None:
+    assert split_digest(Message("JS8Call", SITREP)) is None
+    # The same list, called a snapshot or bulletin, or spread over several states, is a digest.
+    assert len(split_digest(Message("JS8Call", SITREP.replace("MAGNET SITREP", "MAGNET WEEKLY SNAPSHOT")))) == 5
+    assert len(split_digest(Message("FLMSG", SITREP, fields={"filename": "MAGNET_S2_RR_WEEKLY_SNAPSHOT.b2s"}))) == 5
+    assert len(split_digest(Message("JS8Call", SITREP.replace("MAGNET SITREP", "PERIOD 01-08 NOV PRIORITY ITEMS")))) == 5
+    states = ("ROUNDUP OF THE DAY\n" if False else "") + "MN — Flooding in New Richland, 36 evacuated after 9 inches of rain\n" \
+        "WI — Baier, 83, arrested in 1995 Ruland homicide case after a new review\n" \
+        "IA — Bridge closed in Council Bluffs after a barge strike damaged a pier"
+    assert len(split_digest(Message("FLMSG", states))) == 3

@@ -377,6 +377,11 @@ class EventDetail(QWidget):
                          f"<a href='s2watch:fix-location/{report['report_id']}'>fix location</a>")
             if url:
                 parts.append(f"<br><a href='{e(url)}'>{e(url)}</a>")
+            files = report.get("files") or []
+            if files:
+                item = (report.get("fields") or {}).get("digest_item", "")
+                parts.append(f"<br><span style='color:gray'>{'Files' if len(files) > 1 else 'File'}: "
+                             f"{e(', '.join(files))}{f' (item {e(item)})' if item else ''}</span>")
             out.append("".join(parts) + "</p>")
         return "\n".join(out)
 

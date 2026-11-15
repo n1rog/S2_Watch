@@ -9,7 +9,7 @@ from __future__ import annotations
 import time
 from datetime import datetime, timedelta, timezone
 
-from PySide6.QtCore import QByteArray, QPoint, Qt, QTimer, Signal
+from PySide6.QtCore import QByteArray, QItemSelectionModel, QPoint, Qt, QTimer, Signal
 from PySide6.QtGui import QBrush, QColor, QFont, QPalette
 from s2_watch.focus import event_in_focus, has_focus
 from s2_watch.world import event_covered
@@ -311,10 +311,13 @@ class EventsTable(QTableWidget):
         for row in range(self.rowCount()):
             item = self.item(row, 0)
             if item is not None and item.data(self.EVENT_ROLE) == event_id:
+                self.setRowHidden(row, False)
                 if clear:
                     self.clearSelection()
-                self.setRowHidden(row, False)
-                self.selectRow(row)
+                    self.selectRow(row)
+                else:     # add to the selection (selectRow would replace it)
+                    flags = QItemSelectionModel.SelectionFlag.Select | QItemSelectionModel.SelectionFlag.Rows
+                    self.selectionModel().select(self.model().index(row, 0), flags)
                 if scroll:
                     self.scrollToItem(item)
                 return True

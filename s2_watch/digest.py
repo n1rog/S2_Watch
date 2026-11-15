@@ -5,7 +5,12 @@ states. Treated as one report it gets one category, one place and one official
 confirmation, each taken from a different item. Split, every item gets its own.
 
 Items start with a state prefix ("MN — …", "MI/WI - …"), a section heading
-("CIVIL UNREST: …"), or a bullet/number; other lines continue the previous item. FLMSG
+("CIVIL UNREST: …"), or a bullet/number; other lines continue the previous item.
+
+Only a digest is split: one that says so in its heading (snapshot, bulletin, briefing,
+roundup, news, "PRIORITY ITEMS", "PERIOD 01-08 NOV", "ALL REGIONS", or in its file name),
+or whose items name different states.
+A single incident written as a list (a SITREP's numbered points) stays one report. FLMSG
 custom forms keep the body in one field with line breaks written as a literal "\\n".
 """
 
@@ -24,6 +29,12 @@ _STATE_ITEM = re.compile(rf"^(?:{_STATES})(?:\s*/\s*(?:{_STATES}))*\s*[-—–:]
 _SECTION_ITEM = re.compile(r"^([A-Z][A-Z &/]{2,30}):\s+(\S.*)$")
 _BULLET_ITEM = re.compile(r"^(?:[-•*▪►]|\d{1,2}[.)])\s+(\S.*)$")
 _FORM_FIELD = re.compile(r"^L\d{2},(.*)$")
+# What a digest calls itself in its heading.
+_DIGEST_WORDS = re.compile(
+    r"\b(?:snapshot|bulletin|briefing|digest|round-?up|news(?:letter)?|weekly|period\s+\d+|all\s+regions"
+    r"|priority\s+items|key\s+items|highlights)\b",
+    re.IGNORECASE)
+_STATE_CODE = re.compile(rf"^({_STATES})\b")
 
 
 def _unescape(text: str) -> str:
@@ -36,6 +47,20 @@ def _digest_body(text: str) -> str:
         fields = [match.group(1) for line in text.split("\n") if (match := _FORM_FIELD.match(line))]
         return _unescape(max(fields, key=len)) if fields else ""
     return _unescape(text)
+
+
+def _is_digest(header: list[str], items, message: Message) -> bool:
+    """Several unrelated items, not one incident's points: the message calls itself a digest,
+    or its items are in different states."""
+    heading = " ".join(header + [message.fields.get("subject") or "",
+                                 (message.fields.get("filename") or "").replace("_", " ")])
+    if _DIGEST_WORDS.search(heading):
+        return True
+    if any("ALL REGIONS" in (section or "").upper() or "ALL REGIONS" in " ".join(lines[:1]).upper()
+           for section, lines in items):
+        return True
+    states = {match.group(1) for _section, lines in items if (match := _STATE_CODE.match(lines[0]))}
+    return len(states) >= 2
 
 
 def split_digest(message: Message) -> list[Message] | None:
@@ -61,7 +86,7 @@ def split_digest(message: Message) -> list[Message] | None:
             items[-1][1].append(line)
         else:
             header.append(line)
-    if len(items) < MIN_ITEMS:
+    if len(items) < MIN_ITEMS or not _is_digest(header, items, message):
         return None
     title = next((line for line in header if len(line) > 8), header[0] if header else "Digest")
     title = re.sub(r"^This is the\s+", "", title, flags=re.IGNORECASE).rstrip(".")[:90]

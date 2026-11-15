@@ -1305,6 +1305,27 @@ class SQLiteStore:
                                 (key, utc_iso(datetime.now(timezone.utc))))
         self.connection.commit()
 
+    def event_digests(self, event_ids) -> dict[int, tuple[str, str]]:
+        """event id -> (digest key, digest title) for events whose reports came from one digest's
+        items (a weekly snapshot split into its items); other events are left out."""
+        ids = [int(event_id) for event_id in event_ids]
+        found: dict[int, tuple[str, str]] = {}
+        for start in range(0, len(ids), 500):
+            chunk = ids[start:start + 500]
+            rows = self.connection.execute(
+                f"""SELECT r.event_id, m.fields_json FROM reports r JOIN messages m ON m.report_id = r.id
+                    WHERE r.event_id IN ({",".join("?" * len(chunk))}) AND m.fields_json LIKE '%"digest"%'""",
+                chunk).fetchall()
+            for event_id, fields_json in rows:
+                try:
+                    fields = json.loads(fields_json or "{}")
+                except ValueError:
+                    continue
+                if fields.get("digest") and event_id not in found:
+                    key = str(fields.get("message_id") or "").rsplit("#", 1)[0] or fields["digest"]
+                    found[int(event_id)] = (key, fields["digest"])
+        return found
+
     def separate_exercise(self, event_id: int) -> int | None:
         """An event holding both exercise and real reports is split: the exercise reports move to
         an event of their own (its id returned), so a drill never passes for, or hides, a real event."""
@@ -1422,7 +1443,21 @@ class SQLiteStore:
                 report["fields"] = json.loads(row[-1]) if row[-1] else {}
             except ValueError:
                 report["fields"] = {}
+            report["files"] = []
             reports.append(report)
+        # The files the copies came in (FLMSG messages), first one first.
+        by_id = {report["report_id"]: report for report in reports}
+        if by_id:
+            rows = self.connection.execute(
+                f"""SELECT report_id, fields_json FROM messages WHERE report_id IN ({",".join("?" * len(by_id))})
+                    AND fields_json LIKE '%"filename"%' ORDER BY id""", list(by_id)).fetchall()
+            for report_id, fields_json in rows:
+                try:
+                    name = json.loads(fields_json or "{}").get("filename") or ""
+                except ValueError:
+                    continue
+                if name and name not in by_id[report_id]["files"]:
+                    by_id[report_id]["files"].append(name)
         return reports
 
     def report_times(self, report_id: int) -> tuple[datetime | None, datetime | None]:
