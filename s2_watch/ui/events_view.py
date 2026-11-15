@@ -423,7 +423,11 @@ class EventsView(QWidget):
             events = [event for event in events if event.reports > 1]
         if self.hide_closed.isChecked():
             events = [event for event in events if event.closed_at is None]
-        if self.exercise_only.isChecked():
+        drill_on = self.store.get_setting("exercise.in_progress", "0") == "1"
+        self.exercise_only.setEnabled(drill_on)
+        if not drill_on:     # outside an exercise its traffic is hidden
+            events = [event for event in events if not event.exercise]
+        elif self.exercise_only.isChecked():
             events = [event for event in events if event.exercise]
         return events
 

@@ -341,6 +341,7 @@ class MainWindow(QMainWindow):
         search_history.clicked.connect(self.search_history)
         self.history = QListWidget()
         self.map_view = MapView()
+        self.map_view.set_show_exercise(self.exercise_in_progress())   # drill markers only during an exercise
         self.map_view._bridge.message_selected.connect(self.select_analysis_message)
         self.map_view._bridge.event_requested.connect(self.select_analysis_message)
         self.map_view._bridge.reports_requested.connect(self.show_marker_reports)
@@ -1195,7 +1196,8 @@ class MainWindow(QMainWindow):
     def refresh_map_events(self) -> None:
         since = datetime.now(timezone.utc) - timedelta(hours=int(self.review_duration.currentData()))
         self.map_events.set_events([event for event in self.store.events_since(since) if world.event_covered(event)
-                                    and not self.map_filter_hides(event.sources, event.category)],
+                                    and not self.map_filter_hides(event.sources, event.category)
+                                    and (event.exercise is False or self.exercise_in_progress())],
                                    self.focus_regions, limit=self.news_rows.value())
 
     def selected_event_reports(self) -> list[int]:
@@ -1306,46 +1308,41 @@ class MainWindow(QMainWindow):
                           lambda lat, lon: gazetteer.locate_point(lat, lon)[1])
 
     def update_exercise_marker(self, events=None, digest_of=None) -> None:
-        """The EXERCISE marker by the clock: how many exercise messages the watch period holds (a
-        digest split into several items counts once). Shown during an exercise, and whenever
-        exercise traffic came in: outside an exercise it is off the news lists, so it would go
-        unseen. ``events``, ``digest_of``: unused, kept for callers."""
+        """The EXERCISE marker by the clock, shown only during an exercise: how many exercise
+        messages the watch period holds (a digest split into items counts once). Outside an
+        exercise its traffic is hidden everywhere but Live Monitor and History, and so is this.
+        ``events``, ``digest_of``: unused, kept for callers."""
+        on = self.exercise_in_progress()
+        self.map_view.set_show_exercise(on)
         now = datetime.now(timezone.utc)
         self.exercise_messages = self.store.exercise_messages(
-            now - timedelta(hours=int(self.review_duration.currentData())))
+            now - timedelta(hours=int(self.review_duration.currentData()))) if on else []
         count = len(self.exercise_messages)
-        on = self.exercise_in_progress()
         text = f"EXERCISE · {count}" if count else "EXERCISE"
         changed = text != self.exercise_label.text()
         self.exercise_label.setText(text)
-        where = "their events" if on else "them in the Reports list (not news while Exercise in Progress is off)"
         self.exercise_label.setToolTip(
-            ("Exercise in progress: exercise traffic is handled as news, marked in purple. "
-             if on else "Exercise traffic received, but Exercise in Progress is off: it is kept off the news lists. ")
-            + (f"{count} exercise message{'s' if count != 1 else ''} in the watch period: click to show {where}."
-               if count else "No exercise traffic in the watch period."))
-        visible = on or bool(count)
-        if changed or visible == self.exercise_label.isHidden():
-            self.exercise_label.setVisible(visible)
+            "Exercise in progress: exercise traffic is handled as news, marked in purple. "
+            + (f"{count} exercise message{'s' if count != 1 else ''} in the watch period: click to list their events."
+               if count else "No exercise traffic in the watch period yet."))
+        if changed or on == self.exercise_label.isHidden():
+            self.exercise_label.setVisible(on)
             self.clock_corner.adjustSize()      # the menu bar keeps the corner's old size otherwise
             self.menuBar().setCornerWidget(self.clock_corner, Qt.Corner.TopRightCorner)
 
     def exercise_received(self, processed, report) -> None:
-        """New exercise traffic: a notice (kept under the bell), whether or not an exercise is on."""
+        """New exercise traffic during an exercise: a notice (kept under the bell). Outside one
+        it is hidden, so it isn't announced."""
+        if not self.exercise_in_progress():
+            return
         sender = processed.message.fields.get("sender") or processed.message.source_application
         summary = processed.result.summary if processed.result else " ".join(processed.message.raw_content.split())[:80]
         event_id = self.store.event_of_report(report.report_id) if report is not None else None
-        note = "" if self.exercise_in_progress() else " (Exercise in Progress is off: kept off the news lists)"
-        self.notify(f"Exercise traffic from {sender}: {summary}{note}", 15000, event_id=event_id)
+        self.notify(f"Exercise traffic from {sender}: {summary}", 15000, event_id=event_id)
         self.review_data_changed()
 
     def show_exercise_events(self, event_ids=None) -> None:
-        """Exercise traffic: during an exercise, the Events tab showing only exercise events
-        (``event_ids``: these selected); outside one, its reports in the Reports list."""
-        if not self.exercise_in_progress():
-            self.show_reports([report_id for group in getattr(self, "exercise_messages", [])
-                               for report_id in group["report_ids"]])
-            return
+        """The Events tab showing only exercise events (``event_ids``: these selected)."""
         self.tabs.setCurrentWidget(self.events_view)
         self.events_view.exercise_only.setChecked(True)
         ids = list(event_ids) if event_ids else [event_id for group in getattr(self, "exercise_messages", [])
@@ -1425,6 +1422,10 @@ class MainWindow(QMainWindow):
     def exercise_changed(self, on: bool) -> None:
         self.store.set_setting("exercise.in_progress", "1" if on else "0")
         self.update_exercise_marker()
+        self.apply_news_rows_limit()
+        self.refresh_map_events()
+        self.events_view.refresh()
+        self.review_data_changed()
         self.rescan_sources()      # exercise traffic joins (or leaves) the news lists and events
 
     def sender_grades(self) -> dict[str, str]:
@@ -1477,6 +1478,10 @@ class MainWindow(QMainWindow):
             message = first.data(Qt.ItemDataRole.UserRole + 1) if first is not None else None
             if isinstance(message, Message) and not world.message_covered(message, first.data(self.LOCATIONS_ROLE)):
                 self.analysis.setRowHidden(row, True)       # outside the coverage
+                continue
+            if isinstance(message, Message) and not self.exercise_in_progress() \
+                    and exercise_kind(message) == EXERCISE:
+                self.analysis.setRowHidden(row, True)       # exercise traffic, outside an exercise
                 continue
             if isinstance(message, Message) and self.map_filter_hides((message.source_application,),
                                                                       self.report_row_category(row)):
@@ -2789,8 +2794,8 @@ class MainWindow(QMainWindow):
         drills = [event.event_id for event in events if event.exercise]
         digest_of = self.store.event_digests(drills) if drills else {}
         self.update_exercise_marker()
-        # Outside an exercise its traffic has no events: Needs Review lists the messages instead.
-        quiet_drills = None if self.exercise_in_progress() else self.exercise_messages
+        # Outside an exercise its traffic is hidden: no exercise items at all.
+        quiet_drills = None if self.exercise_in_progress() else []
         return review_items(now, events, self.store.reviews_done(), alerted=self.alerted_events, digest_of=digest_of,
                             exercise_messages=quiet_drills,
                             proposals=self.store.proposed_assessments(),

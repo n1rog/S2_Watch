@@ -107,6 +107,7 @@ class MapView(QWidget):
         super().__init__(parent)
         self._locations: list[dict[str, object]] = []
         self._source_counts: dict[str, int] = {}     # markers kept per source application
+        self._show_exercise = True        # off outside an exercise: drill markers are hidden
         self._enabled_applications: set[str] | None = None
         self._enabled_kinds = {"station", "news", "region"}
         self._resolver = LocationResolver()
@@ -256,6 +257,7 @@ class MapView(QWidget):
     def add_message(self, message: Message, locations=None, dimmed: bool = False) -> None:
         """Add a message's markers; ``locations`` may be precomputed off the UI thread."""
         message_locations: list[dict[str, object]] = []
+        drill = exercise_kind(message) == EXERCISE      # a purple ring and an EX tag; hidden outside an exercise
         grid = message.fields.get("grid") or message.fields.get("gridsquare")
         station = maidenhead_to_coordinates(grid) if grid else None
         if station:
@@ -269,12 +271,12 @@ class MapView(QWidget):
                     "label": f"Station: {message.fields.get('sender', 'unknown')}",
                     "message": message.raw_content,
                     "message_id": str(id(message)),
+                    "exercise": drill,
                     "area": world.area_at(*station),
                 }
             )
         if locations is None:
             locations = self._resolver.resolve(message)
-        drill = exercise_kind(message) == EXERCISE      # a purple ring and an EX badge
         always = message.fields.get("type") in world.ALWAYS_COVERED_TYPES
         for location in locations:
             if station and (location.lat, location.lon) == station:
@@ -365,6 +367,12 @@ class MapView(QWidget):
             for location in self._visible_locations()
         ) or "No locations detected yet.")
 
+    def set_show_exercise(self, show: bool) -> None:
+        """Show exercise traffic's markers (during an exercise) or hide them (outside one)."""
+        if show != self._show_exercise:
+            self._show_exercise = show
+            self._render()
+
     def coverage_changed(self) -> None:
         """Show only the markers in the operator's coverage (Configuration → Coverage)."""
         self._render()
@@ -374,6 +382,7 @@ class MapView(QWidget):
             location for location in self._locations
             if (
                 world.covers(location.get("area"))
+                and (self._show_exercise or not location.get("exercise"))
                 and
                 (self._enabled_applications is None
                  or location["application"] in self._enabled_applications)

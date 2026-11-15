@@ -23,6 +23,7 @@ def add_exercise(store, text="**** EXERCIZE **** POWER AND COMMUNICATIONS FAILUR
 
 def test_an_exercise_event_is_badged_and_tinted_in_the_list(main_window) -> None:
     window = main_window()
+    window.store.set_setting("exercise.in_progress", "1")
     _message, _report, event_id = add_exercise(window.store)
     window.events_view.refresh()
     table = window.events_view.table
@@ -34,38 +35,46 @@ def test_an_exercise_event_is_badged_and_tinted_in_the_list(main_window) -> None
     assert [event.event_id for event in window.events_view.table.events] == [event_id]
 
 
-def test_the_clock_counts_exercise_events_and_lists_them(main_window) -> None:
+def test_the_clock_counts_exercise_messages_during_an_exercise(main_window) -> None:
     window = main_window()
-    window.store.set_setting("exercise.in_progress", "0")
-    window.update_exercise_marker()
-    assert window.exercise_label.isHidden()                 # no exercise, no traffic: nothing shown
+    window.store.set_setting("exercise.in_progress", "1")
     _message, _report, event_id = add_exercise(window.store)
     window.update_exercise_marker()
     assert not window.exercise_label.isHidden() and window.exercise_label.text() == "EXERCISE · 1"
-    assert "Exercise in Progress is off" in window.exercise_label.toolTip()
-    window.store.set_setting("exercise.in_progress", "1")          # during an exercise: its events
     window.exercise_label.click()
     assert window.tabs.currentWidget() is window.events_view and window.events_view.exercise_only.isChecked()
     assert window.events_view.detail.current.event_id == event_id
 
 
-def test_outside_an_exercise_its_traffic_is_still_counted_listed_and_shown(main_window) -> None:
+def test_outside_an_exercise_its_traffic_is_hidden_everywhere(main_window) -> None:
     from s2_watch.analysis.base import AnalysisResult as Result
+    from s2_watch.locating import ResolvedLocation
+    from s2_watch.monitor_worker import ProcessedMessage
 
     window = main_window()
-    window.store.set_setting("exercise.in_progress", "0")
-    message, report, _event_id = add_exercise(window.store)
-    window.store.connection.execute("UPDATE reports SET newsworthy = 0, category = 'routine' WHERE id = ?",
-                                    (report.report_id,))                # not news outside an exercise
-    window.store.connection.commit()
+    window.exercise_action.setChecked(True)
+    message, report, event_id = add_exercise(window.store)
+    window.exercise_action.setChecked(False)                     # Exercise in Progress off
+    window.update_exercise_marker()
+    assert window.exercise_label.isHidden()                      # no EXERCISE button
     window.review_view.refresh()
-    assert window.exercise_label.text() == "EXERCISE · 1"
-    [item] = [item for item in window.review_view.items if item.kind == "exercise"]
-    assert item.target == ("reports", (report.report_id,)) and "Exercise in Progress is off" in item.detail
-    window.insert_analysis_row(message, Result(False, "routine", "low", "EXERCISE: Power failure", 0.9, ()), report)
-    window.review_act(item, "primary")
-    assert window.tabs.currentWidget() is window.map_tab and window.news_mode == "reports"
-    assert window.selected_report_rows() == [(0, report.report_id)]
+    assert not [item for item in window.review_view.items if item.kind == "exercise"]
+    window.events_view.refresh()
+    assert event_id not in [event.event_id for event in window.events_view.table.events]
+    assert not window.events_view.exercise_only.isEnabled()
+    window.refresh_map_events()
+    assert event_id not in [event.event_id for event in window.map_events.events]
+    window.show_analysis(message, Result(False, "routine", "low", "EXERCISE: Power failure", 0.9, ()))
+    assert window.analysis.isRowHidden(0)                         # the Reports list
+    place = [ResolvedLocation("city", 30.54, -98.37, "Horseshoe Bay, TX", "TX", 6)]
+    window.map_view.add_message(message, place)
+    assert not [location for location in window.map_view._visible_locations() if location.get("exercise")]
+    notices = len(window.notices)
+    window.exercise_received(ProcessedMessage(message, None, [], report), report)
+    assert len(window.notices) == notices                        # not announced
+    window.exercise_action.setChecked(True)                      # back on: shown again
+    assert not window.analysis.isRowHidden(0) and not window.exercise_label.isHidden()
+    assert window.map_view._show_exercise              # (switching re-reads the sources, which redraws the map)
 
 
 def test_exercise_traffic_waits_in_needs_review_and_is_announced(main_window) -> None:

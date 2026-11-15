@@ -152,7 +152,9 @@ marks it real. Ordinary words don't count ("Exercise Normal Precautions", "milit
 drills"), and official and news feeds are never exercise traffic. Test traffic ("THIS IS
 A TEST", "test message") is never news.
 
-Exercise traffic is kept off the news lists, events and briefings. During an exercise,
+Outside an exercise, exercise traffic is hidden everywhere except Live Monitor and History:
+it is off the map, the Events and Reports lists, Needs Review, notices and briefings, and the
+EXERCISE button by the clock is not shown. During an exercise,
 turn on **Configuration → Exercise in Progress**: exercise traffic is then handled like real news, marked EXERCISE in the lists, the
 event panel, follow-up reports and briefings (subject prefixed, and EXERCISE EXERCISE
 EXERCISE at the top and bottom). Possible Misses skips exercise and test traffic.
@@ -161,16 +163,14 @@ Every item of a digest marked as an exercise is exercise traffic. Exercise and r
 traffic never share a report or an event, so an exercise copy of a real message stays
 separate.
 
-Exercise traffic is purple wherever it appears: tinted rows with an "EXERCISE ·" title in the
+During an exercise, exercise traffic is purple wherever it appears: tinted rows with an "EXERCISE ·" title in the
 event lists (the Concern column reads "Exercise"), a purple bar in the event panel, a purple
 ring and EX tag on map markers, tinted rows in the Reports list and Live Monitor, an
 "Exercise traffic" item in Needs Review, and a notice when it arrives. A purple
-**EXERCISE · n** button by the clock counts the exercise messages in the watch period, and
-shows whenever there are any, even with Exercise in Progress off. Click it: during an
-exercise it lists their events (the Events tab's **Exercise only** filter); outside one,
-when exercise traffic is routine and has no events, it selects the messages in the Reports
-list. A digest marked as an exercise counts as one exercise message and is one Needs
-Review item, however many items it has.
+**EXERCISE · n** button by the clock counts the exercise messages in the watch period;
+click it to list their events (the Events tab's **Exercise only** filter). A digest marked
+as an exercise counts as one exercise message and is one Needs Review item, however many
+items it has.
 
 The FLMSG file a report came in is shown in the event panel ("File: …") and in the
 Reports list's File column.
