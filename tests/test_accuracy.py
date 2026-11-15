@@ -36,6 +36,22 @@ def test_only_clear_markers_make_exercise_or_test_traffic() -> None:
     assert exercise_kind(Message("OSINT", "State Dept travel advisory: Kenya - Level 1: Exercise Normal Precautions")) == ""
 
 
+
+def test_misspelled_and_banner_markers_count() -> None:
+    # KT5DC's MAGNET SITREP: "**** EXERCIZE ****" first, "*** EXERCISE ***" last, in a FLMSG form
+    sitrep = ("<flmsg>4.0.24\n<customform>\n:mg:1114 CUSTOM_FORM,magnet_sitrep_V1.1.1.html\nL02,KT5DC\n"
+              "L13,**** EXERCIZE **** \\nPOWER AND COMMUNICATIONS FAILURE\\nWhen:  0600Z 261411\\n"
+              "*** EXERCISE ***\\n\\n\nL09,TX\n")
+    assert exercise_kind(radio(sitrep, "FLMSG")) == "exercise"
+    assert exercise_kind(radio("== EXCERCISE == WATER MAIN BREAK")) == "exercise"
+    assert exercise_kind(radio("--- DRILL --- SHELTER OPEN AT SCHOOL")) == "exercise"
+    assert exercise_kind(radio("EXERCIZE: TORNADO DAMAGE IN TULSA")) == "exercise"
+    assert exercise_kind(radio("MAGNET SITREP\nEXERCISE\nPOWER OUT IN ZONE 3")) == "exercise"
+    # The word inside ordinary text is still not a marker.
+    assert exercise_kind(radio("EXERCISE PRIORITY ITEMS: 1. ELECTION RESULTS", "FLMSG")) == ""
+    assert exercise_kind(radio("Hospitals ran a cyber exercise **** testing response")) == ""
+
+
 def test_exercise_traffic_is_news_only_during_an_exercise() -> None:
     message = radio("EXERCISE EXERCISE EXERCISE BRIDGE OUT ON RT 9")
     quiet = mark_exercise(message, RESULT, exercise_in_progress=False)

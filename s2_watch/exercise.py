@@ -24,13 +24,19 @@ BANNER = "EXERCISE EXERCISE EXERCISE"
 
 _NOT_REAL = re.compile(r"\b(?:not|no|non)[-\s]+real[-\s]?world\b", re.IGNORECASE)
 _REAL = re.compile(r"\breal[-\s]?world\b|\bno[-\s]+duff\b", re.IGNORECASE)
+# The word as operators type it under pressure: EXERCIZE, EXCERCISE, EXERSIZE...
+_WORD = r"(?:exercise|exercize|excercise|excercize|exersise|exersize|exer|drill)"
 _EXERCISE = re.compile(
     r"\b(exercise|exer|drill)\b[\s,.:;!/-]*\b\1\b"                       # EXERCISE EXERCISE (EXERCISE)
     r"|\bthis\s+is\s+(?:only\s+)?(?:an?\s+)?(?:exercise|drill)\b"
     r"|\b(?:exercise|drill)\s+(?:message|msg|traffic|only|inject|scenario|play|participants?)\b"
     r"|\bfor\s+(?:exercise|drill|training)\s+(?:purposes\s+)?only\b"
     r"|\b(?:simulated|notional)\s+(?:event|scenario|traffic|message|emergency|disaster|incident)\b"
-    r"|\b(?:startex|endex)\b",
+    r"|\b(?:startex|endex)\b"
+    # A banner: "*** EXERCISE ***", "== EXERCIZE ==", "--- DRILL ---"
+    rf"|(?:[*=#~]{{2,}}|-{{3,}})\s*\b{_WORD}\b\s*(?:[*=#~]{{2,}}|-{{3,}})"
+    # The word alone on its line (FLMSG forms write line breaks as a literal \n)
+    rf"|(?:^|\n|\\n)[^\w\n\\]*\b{_WORD}\b[^\w\n\\]*(?=$|\n|\\n)",
     re.IGNORECASE,
 )
 _TEST = re.compile(
@@ -40,7 +46,7 @@ _TEST = re.compile(
     re.IGNORECASE,
 )
 # The message itself starts with the word (after its routing): "EXERCISE: DAM FAILURE...".
-_LEADING = re.compile(r"^\W*(?:(exercise|drill)\s*[:\-–]|(test)\b)", re.IGNORECASE)
+_LEADING = re.compile(rf"^\W*(?:({_WORD})\s*[:\-–]|(test)\b)", re.IGNORECASE)
 
 
 def exercise_kind(message: Message) -> str:

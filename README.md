@@ -146,7 +146,8 @@ from Possible Misses.
 
 Clear exercise markers ("EXERCISE EXERCISE EXERCISE", "THIS IS A DRILL", "exercise
 message", "for exercise purposes only", "simulated emergency", STARTEX/ENDEX, a message
-that starts "EXERCISE:") mark radio traffic as exercise traffic; "real world" or "no duff"
+that starts "EXERCISE:", a banner such as "*** EXERCISE ***", the word alone on its line;
+common misspellings such as EXERCIZE count) mark radio traffic as exercise traffic; "real world" or "no duff"
 marks it real. Ordinary words don't count ("Exercise Normal Precautions", "military
 drills"), and official and news feeds are never exercise traffic. Test traffic ("THIS IS
 A TEST", "test message") is never news.
