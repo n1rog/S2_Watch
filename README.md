@@ -167,10 +167,11 @@ During an exercise, exercise traffic is purple wherever it appears: tinted rows 
 event lists (the Concern column reads "Exercise"), a purple bar in the event panel, a purple
 ring and EX tag on map markers, tinted rows in the Reports list and Live Monitor, an
 "Exercise traffic" item in Needs Review, and a notice when it arrives. A purple
-**EXERCISE · n** button by the clock counts the exercise messages in the watch period;
-click it to list their events (the Events tab's **Exercise only** filter). A digest marked
-as an exercise counts as one exercise message and is one Needs Review item, however many
-items it has.
+**EXERCISE · n** button by the clock counts the exercise events the Events tab holds (its
+period and filters); click it to list them (the Events tab's **Exercise only** filter). Its
+tooltip also gives the number of exercise messages: a digest's items are separate events,
+and a test with nothing to report has none. A digest marked as an exercise is one Needs
+Review item, however many items it has.
 
 The FLMSG file a report came in is shown in the event panel ("File: …") and in the
 Reports list's File column.

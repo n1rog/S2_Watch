@@ -128,7 +128,7 @@ def test_an_exercise_digest_is_one_message_however_many_events(main_window) -> N
     window.review_view.refresh()
     [item] = [item for item in window.review_view.items if item.kind == "exercise"]
     assert item.title.startswith("Exercise digest — ") and item.target[0] == "events" and set(item.target[1]) == set(ids)
-    assert window.exercise_label.text() == "EXERCISE · 1"           # one message, however many events
+    assert window.exercise_label.text() == "EXERCISE · 4"           # its events: what a click lists
     window.review_act(item, "primary")
     assert window.events_view.exercise_only.isChecked()
     assert set(window.events_view.table.selected_events()) == set(ids)
@@ -147,3 +147,31 @@ def test_the_file_name_is_shown_for_events_and_reports(main_window) -> None:
     window.show_analysis(named, result)
     column = window.ANALYSIS_COLUMNS.index("File")
     assert window.analysis.item(0, column).text() == "KT5DC-20261115-002234Z-10.k2s"
+
+
+def test_the_button_counts_the_exercise_events_a_click_lists(main_window) -> None:
+    from s2_watch.digest import split_digest
+    from tests.test_accuracy import SNAPSHOT
+
+    window = main_window()
+    store = window.store
+    store.set_setting("exercise.in_progress", "1")
+    add_exercise(store)                                   # one message, one event
+    digest = Message("FLMSG", SNAPSHOT.format(heading="EXERCISE "), received_at=NOW - timedelta(hours=1),
+                     fields={"filename": "MAGNET_S2_RR_WEEKLY_SNAPSHOT (copy).b2s"})
+    places = [Place(40.9, -73.8, "city", "NY", 2), Place(37.27, -107.01, "city", "CO", 8),
+              Place(38.9, -77.0, "city", "DC", 3), Place(37.4, -122.1, "city", "CA", 9)]
+    for index, (item, place) in enumerate(zip(split_digest(digest), places)):   # one message, four events
+        message_id = store.save_message(item, f"item{index}")
+        result = AnalysisResult(True, "Politics", "medium", item.raw_content[:40], 0.9, ())
+        report = store.assign_report(message_id, item, result, state=place.state, region=place.region)
+        store.assign_event(report.report_id, "Politics", set(), place, item.raw_content, "", key_terms(item.raw_content))
+    test = Message("JS8Call", "EXERCISE EXERCISE EXERCISE THIS IS A TEST OF THE MAGNET S2 SYSTEM",
+                   received_at=NOW - timedelta(hours=1))       # a test: a message with no event
+    message_id = store.save_message(test, "test")
+    store.assign_report(message_id, test, AnalysisResult(False, "routine", "low", "test", 0.9, ()))
+    window.events_view.refresh()
+    assert window.exercise_label.text() == "EXERCISE · 5"         # the events, not the 3 messages
+    assert "3 exercise messages" in window.exercise_label.toolTip()
+    window.exercise_label.click()
+    assert len(window.events_view.table.events) == 5

@@ -873,6 +873,8 @@ class MainWindow(QMainWindow):
                 self.map_tab = tab
         # Events: reports (radio and official) grouped by the happening they describe.
         self.events_view = EventsView(self.store, self.format_display_time)
+        self.events_view.refreshed.connect(lambda: self.update_exercise_marker()
+                                           if hasattr(self, "exercise_label") else None)   # it counts this tab's events
         self.events_view.show_on_map.connect(self.show_event_on_map)
         self.events_view.draft_briefing.connect(self.draft_briefing)
         self.connect_event_detail(self.events_view.detail)
@@ -1309,7 +1311,7 @@ class MainWindow(QMainWindow):
 
     def update_exercise_marker(self, events=None, digest_of=None) -> None:
         """The EXERCISE marker by the clock, shown only during an exercise: how many exercise
-        messages the watch period holds (a digest split into items counts once). Outside an
+        events the Events tab holds (its period and filters), the ones a click lists. Outside an
         exercise its traffic is hidden everywhere but Live Monitor and History, and so is this.
         ``events``, ``digest_of``: unused, kept for callers."""
         on = self.exercise_in_progress()
@@ -1317,14 +1319,18 @@ class MainWindow(QMainWindow):
         now = datetime.now(timezone.utc)
         self.exercise_messages = self.store.exercise_messages(
             now - timedelta(hours=int(self.review_duration.currentData()))) if on else []
-        count = len(self.exercise_messages)
+        drills = self.events_view.exercise_events() if on else []
+        count, messages = len(drills), len(self.exercise_messages)
         text = f"EXERCISE · {count}" if count else "EXERCISE"
         changed = text != self.exercise_label.text()
         self.exercise_label.setText(text)
         self.exercise_label.setToolTip(
             "Exercise in progress: exercise traffic is handled as news, marked in purple. "
-            + (f"{count} exercise message{'s' if count != 1 else ''} in the watch period: click to list their events."
-               if count else "No exercise traffic in the watch period yet."))
+            + (f"{count} exercise event{'s' if count != 1 else ''} in the Events tab "
+               f"({self.events_view.filter_description()}): click to list {'them' if count != 1 else 'it'}. "
+               if count else "No exercise events in the Events tab's period. ")
+            + (f"{messages} exercise message{'s' if messages != 1 else ''} in the watch period: a digest's items are "
+               "separate events, and a test with nothing to report has none." if messages else ""))
         if changed or on == self.exercise_label.isHidden():
             self.exercise_label.setVisible(on)
             self.clock_corner.adjustSize()      # the menu bar keeps the corner's old size otherwise
@@ -1345,8 +1351,7 @@ class MainWindow(QMainWindow):
         """The Events tab showing only exercise events (``event_ids``: these selected)."""
         self.tabs.setCurrentWidget(self.events_view)
         self.events_view.exercise_only.setChecked(True)
-        ids = list(event_ids) if event_ids else [event_id for group in getattr(self, "exercise_messages", [])
-                                                 for event_id in group["event_ids"]]
+        ids = list(event_ids) if event_ids else [event.event_id for event in self.events_view.exercise_events()]
         table = self.events_view.table
         if len(ids) == 1:
             self.open_event(ids[0])

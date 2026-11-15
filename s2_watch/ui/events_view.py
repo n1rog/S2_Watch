@@ -334,6 +334,7 @@ class EventsView(QWidget):
 
     show_on_map = Signal(object)      # [(lat, lon), ...]
     draft_briefing = Signal()
+    refreshed = Signal()              # the list was refilled (its period or filters may have changed)
 
     def __init__(self, store, format_time, parent=None) -> None:
         super().__init__(parent)
@@ -414,7 +415,12 @@ class EventsView(QWidget):
     def period_hours(self) -> int:
         return int(self.period.currentData())
 
-    def visible_events(self):
+    def exercise_events(self):
+        """The exercise events "Exercise only" would list: this tab's period and filters."""
+        events = self.visible_events(exercise_filter=False)
+        return [event for event in events if event.exercise]
+
+    def visible_events(self, exercise_filter: bool = True):
         since = datetime.now(timezone.utc) - timedelta(hours=self.period_hours())
         events = [event for event in self.store.events_since(since) if event_covered(event)]
         if self.focus_only.isChecked() and has_focus(self.focus_regions):
@@ -427,7 +433,7 @@ class EventsView(QWidget):
         self.exercise_only.setEnabled(drill_on)
         if not drill_on:     # outside an exercise its traffic is hidden
             events = [event for event in events if not event.exercise]
-        elif self.exercise_only.isChecked():
+        elif exercise_filter and self.exercise_only.isChecked():
             events = [event for event in events if event.exercise]
         return events
 
@@ -436,6 +442,7 @@ class EventsView(QWidget):
         self.table.set_events(events, self.focus_regions)
         self._show_count()
         self._selection_changed()
+        self.refreshed.emit()
 
     def _show_count(self) -> None:
         events = self.table.events
