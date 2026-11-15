@@ -12,6 +12,7 @@ DEFAULT_WATCH_FORMS = {
     "Commstat": "All Commstat messages",
     "FLMSG": "All FLMSG messages",
     "JS8SuperSpotter": "All JS8SuperSpotter messages",
+    "VarAC": "All VarAC messages",
     "APRS": "All APRS bulletins",
     "OSINT": "All OSINT reports",
 }

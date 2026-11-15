@@ -1,5 +1,5 @@
 <h1>Sources</h1>
-<p>S2 Watch reads six radio sources and about twenty official and open feeds. Radio sources are set under
+<p>S2 Watch reads seven radio sources and about twenty official and open feeds. Radio sources are set under
 <b>Configuration → Sources…</b>; the feeds are switched on and off under <b>Configuration → Watch Forms</b>.</p>
 
 <h2>Radio sources</h2>
@@ -14,6 +14,12 @@ stored messages and map pins. A pin sent over the air (<code>@MAGNET PIN RADIATI
 <i>PIN RADIATION EM93DN …</i>, placed at its grid square.</td><td>The database path, e.g.
 <code>~/MyApps/SpotterX/js8spotter.db</code>. SpotterX keeps a new database: if you move from JS8SuperSpotter, change the
 path, or the source goes quiet.</td></tr>
+<tr><td>VarAC</td><td>Its database (<code>VarAC.db</code>), read-only: broadcasts (to ALL, EMCOMM or a station), VarAC
+mail in the Inbox, and lines received in a QSO's chat. Automatic frames (the <code>&lt;EC&gt;</code> beacon,
+<code>«QF:…»</code> frequency changes, <code>&lt;SFRD&gt;</code>-style chat tags) are skipped. A sender is placed at the
+grid square of its latest CQ frame or VarAC contact.</td><td>The database path: VarAC's program folder, under Wine
+<code>~/.wine/drive_c/VarAC/VarAC.db</code>. Tick <b>All VarAC messages</b> under Watch Forms to keep every broadcast;
+otherwise only ones with news words are kept.</td></tr>
 <tr><td>APRS</td><td>Bulletins (BLN0–BLN9 and named groups) from APRS-IS, receive-only, from stations in your coverage</td>
 <td>Tick <b>Read APRS bulletins</b> and enter your call sign with an SSID, e.g. <code>N0ABC-13</code>. Servers refuse
 anonymous logins; nothing is sent to RF.</td></tr>

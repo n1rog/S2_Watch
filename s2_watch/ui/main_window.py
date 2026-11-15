@@ -81,6 +81,7 @@ from s2_watch.adapters.magcommstat_sqlite import MagCommstatSQLiteAdapter
 from s2_watch.adapters.commstat_sqlite import CommstatSQLiteAdapter
 from s2_watch.adapters.flmsg_files import FLMSGFileAdapter
 from s2_watch.adapters.js8superspotter_sqlite import JS8SuperSpotterSQLiteAdapter
+from s2_watch.adapters.varac_sqlite import VarACSQLiteAdapter
 from s2_watch.analysis.base import AnalysisResult
 from s2_watch.analysis.base import NewsAnalyzer
 from s2_watch.analysis.ollama import HybridNewsAnalyzer, OllamaNewsAnalyzer, draft_s2_assessment, readable_text
@@ -224,6 +225,9 @@ class MainWindow(QMainWindow):
                 str(Path.home() / "MyApps/SpotterX/js8spotter.db"),
             )
         )
+        self.varac_path = QLineEdit(self.store.get_setting("varac.database", str(Path.home() / ".wine/drive_c/VarAC/VarAC.db")))
+        self.varac_path.setToolTip("VarAC.db in VarAC's program folder (under Wine: ~/.wine/drive_c/VarAC/VarAC.db). "
+                                   "Read only: broadcasts, Inbox VarAC mail and incoming chat.")
         connect = QPushButton("Connect to monitored applications")
         connect.clicked.connect(self.connect_js8call)
         self.status = QLabel("Disconnected")
@@ -527,6 +531,7 @@ class MainWindow(QMainWindow):
         sources_layout.addRow("Commstat database", self.commstat_path)
         sources_layout.addRow("FLMSG message directory", self.flmsg_path)
         sources_layout.addRow("JS8SuperSpotter database", self.superspotter_path)
+        sources_layout.addRow("VarAC database", self.varac_path)
         sources_layout.addRow("Review existing feeder data from:", self.review_duration)
         callsign = self.store.get_setting("operator.callsign", "").strip().upper()
         self.aprs_enabled = QCheckBox("Read APRS bulletins from APRS-IS (internet, receive-only)")
@@ -932,6 +937,7 @@ class MainWindow(QMainWindow):
         self.commstat_adapter: CommstatSQLiteAdapter | None = None
         self.flmsg_adapter: FLMSGFileAdapter | None = None
         self.superspotter_adapter: JS8SuperSpotterSQLiteAdapter | None = None
+        self.varac_adapter: VarACSQLiteAdapter | None = None
         self.osint_adapter: OsintAdapter | None = None
         # Reading, matching, analysis and locating run on a background thread.
         self._monitor_forms: list[WatchForm] = []
@@ -1041,6 +1047,7 @@ class MainWindow(QMainWindow):
         self.store.set_setting("commstat.database", self.commstat_path.text().strip())
         self.store.set_setting("flmsg.directory", self.flmsg_path.text().strip())
         self.store.set_setting("js8superspotter.database", self.superspotter_path.text().strip())
+        self.store.set_setting("varac.database", self.varac_path.text().strip())
         self.create_adapters()
         self.rebuild_monitor()
         self.update_application_status()
@@ -1054,6 +1061,7 @@ class MainWindow(QMainWindow):
         self.commstat_adapter = CommstatSQLiteAdapter(self.commstat_path.text().strip(), lookback)
         self.flmsg_adapter = FLMSGFileAdapter(self.flmsg_path.text().strip(), lookback)
         self.superspotter_adapter = JS8SuperSpotterSQLiteAdapter(self.superspotter_path.text().strip(), lookback)
+        self.varac_adapter = VarACSQLiteAdapter(self.varac_path.text().strip(), lookback)
         self.aprs_adapter = (AprsIsAdapter(login=self.store.get_setting("aprs.login", ""))
                              if self.store.get_setting("aprs.enabled", "0") == "1" else None)
         self.analyst_adapter = AnalystAdapter(self.store.analyst_entries(datetime.now(timezone.utc) - lookback))
@@ -1580,6 +1588,8 @@ class MainWindow(QMainWindow):
                 adapters.append(self.flmsg_adapter)
             if self.superspotter_adapter:
                 adapters.append(self.superspotter_adapter)
+            if getattr(self, "varac_adapter", None):
+                adapters.append(self.varac_adapter)
             if self.osint_adapter:
                 adapters.append(self.osint_adapter)
             if getattr(self, "analyst_adapter", None):
@@ -1812,6 +1822,7 @@ class MainWindow(QMainWindow):
             ("Commstat", self.commstat_adapter),
             ("FLMSG", self.flmsg_adapter),
             ("JS8SuperSpotter", self.superspotter_adapter),
+            ("VarAC", getattr(self, "varac_adapter", None)),
             ("APRS", getattr(self, "aprs_adapter", None)),
             ("OSINT", self.osint_adapter),
         ):
@@ -1834,6 +1845,7 @@ class MainWindow(QMainWindow):
             "Commstat": self.commstat_adapter,
             "FLMSG": self.flmsg_adapter,
             "JS8SuperSpotter": self.superspotter_adapter,
+            "VarAC": getattr(self, "varac_adapter", None),
             "APRS": getattr(self, "aprs_adapter", None),
             "OSINT": self.osint_adapter,
         }

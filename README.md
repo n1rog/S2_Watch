@@ -411,7 +411,7 @@ from official confirmations; reports already saved stay until they leave the wat
 period.
 
 S2 Watch creates an unfiltered default watch form for each supported
-application: JS8Call, MagCommstat, Commstat, FLMSG, and JS8SuperSpotter.
+application: JS8Call, MagCommstat, Commstat, FLMSG, JS8SuperSpotter, and VarAC.
 **All MagCommstat messages** is on from the start (and switched on once in
 existing installations): QSTs and StatReps are written as news, and one about a
 subject no category form knows would otherwise be dropped. The others start off.
@@ -544,6 +544,13 @@ message directory, defaulting to `~/.nbems/ICS/messages`.
 JS8SuperSpotter integration reads its local SQLite database (SpotterX, its
 successor, uses the same layout at `~/MyApps/SpotterX/js8spotter.db`), including
 activity, brevity, StatRep, store-and-forward message, and map pin tables.
+
+VarAC integration reads VarAC's SQLite database read-only (`VarAC.db` in its program
+folder; under Wine `~/.wine/drive_c/VarAC/VarAC.db`): broadcasts, VarAC mail in the
+Inbox, and lines received in a QSO's chat. VarAC's automatic frames are skipped (the
+`<EC>` EmComm beacon, `«QF:…»` frequency changes, and chat lines that are only protocol
+tags such as `<SFRD>` or `de K7RIE <R-08>`). A sender's grid square comes from its
+latest CQ frame or its VarAC contact, so the station is placed on the map.
 
 Settings live in the **Configuration** menu: **Analysis Mode** and **Theme**
 are submenus you can switch directly, and **Watch Forms…**, **Display…**, and

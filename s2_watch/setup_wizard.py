@@ -50,6 +50,7 @@ def feeder_candidates() -> dict[str, list[Path]]:
         "js8superspotter.database": [home / "MyApps/SpotterX/js8spotter.db", home / "SpotterX/js8spotter.db",
                                      home / "MyApps/JS8SuperSpotter/js8spotter.db", home / "JS8SuperSpotter/js8spotter.db",
                                      local / "JS8SuperSpotter/js8spotter.db"],
+        "varac.database": [home / ".wine/drive_c/VarAC/VarAC.db", Path("C:/VarAC/VarAC.db"), home / "VarAC/VarAC.db"],
     }
 
 
@@ -61,7 +62,7 @@ def search_home(filenames: set[str], seconds: float = 8.0, max_depth: int = 5) -
     skip = {".cache", ".git", "node_modules", ".venv", "venv", "Library", "AppData", "snap", ".mozilla", ".config"}
     for directory, subdirectories, files in os.walk(root):
         depth = len(Path(directory).relative_to(root).parts)
-        subdirectories[:] = [d for d in subdirectories if d not in skip and not d.startswith(".") or d in (".local", ".nbems")]
+        subdirectories[:] = [d for d in subdirectories if d not in skip and not d.startswith(".") or d in (".local", ".nbems", ".wine")]
         if depth >= max_depth:
             subdirectories[:] = []
         for name in filenames & set(files):
@@ -159,6 +160,7 @@ class Wizard:
             ("commstat.database", "CommStat", "traffic.db3", False),
             ("flmsg.directory", "FLMSG (NBEMS)", "", True),
             ("js8superspotter.database", "JS8SuperSpotter", "js8spotter.db", False),
+            ("varac.database", "VarAC", "VarAC.db", False),
         ):
             existing = self.current(key)
             found = [str(path) for path in candidates[key] if (path.is_dir() if is_directory else path.is_file())]
@@ -166,7 +168,7 @@ class Wizard:
             if not suggestion and filename and self.yes(f"Search your home folder for {label}'s {filename}?", True):
                 if searched is None:
                     self.say("  Searching (up to a few seconds)...")
-                    searched = search_home({"traffic.db3", "js8spotter.db"})
+                    searched = search_home({"traffic.db3", "js8spotter.db", "VarAC.db"})
                 matches = [str(path) for path in searched.get(filename, [])]
                 if matches:
                     self.say("  Found: " + "; ".join(matches[:4]))
@@ -300,6 +302,7 @@ class Wizard:
         self.heading("Summary")
         labels = {"js8call.host": "JS8Call host", "js8call.port": "JS8Call port", "magcommstat.database": "MagCommstat",
                   "commstat.database": "CommStat", "flmsg.directory": "FLMSG", "js8superspotter.database": "JS8SuperSpotter",
+                  "varac.database": "VarAC",
                   "review.hours": "Review window (hours)", "focus.regions": "Focus regions", "analysis.mode": "Analysis",
                   "alerts.enabled": "Desktop alerts", "alerts.high_urgency_only": "High urgency only",
                   "display.time_zone": "Time zone", "ui.theme": "Theme", "reports.folder": "Reports folder"}
