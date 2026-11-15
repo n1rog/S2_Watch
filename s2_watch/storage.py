@@ -1299,6 +1299,9 @@ class SQLiteStore:
         # Kept 60 days: event and draft ids aren't reused, and nothing older is listed.
         since = utc_iso(datetime.now(timezone.utc) - timedelta(days=60))
         self.connection.execute("DELETE FROM review_done WHERE done_at < ?", (since,))
+        # Committed at once: an open DELETE holds the write lock, and the monitor's own
+        # connection then can't save a single message ("database is locked").
+        self.connection.commit()
         return {row[0] for row in self.connection.execute("SELECT key FROM review_done")}
 
     def accepted_assessment(self, event_id: int):

@@ -67,3 +67,16 @@ def test_a_report_draft_knows_its_event(tmp_path) -> None:
     _m, _r, report_id, event_id = add_event(store)
     draft_id = store.save_draft("report", "SUBJECT: Water main\nDTG: 261112-1800Z", report_id=report_id)
     assert store.get_draft(draft_id)["event_id"] == event_id
+
+
+def test_refreshing_the_review_list_leaves_the_database_writable(tmp_path) -> None:
+    import sqlite3
+
+    from s2_watch.storage import SQLiteStore
+
+    store = SQLiteStore(tmp_path / "s2.db")
+    store.review_done("new:1")
+    store.reviews_done()                       # what every Needs Review refresh calls
+    other = sqlite3.connect(tmp_path / "s2.db", timeout=0.1)   # the monitor's connection
+    other.execute("INSERT INTO settings(key, value) VALUES ('probe', '1')")
+    other.commit()
