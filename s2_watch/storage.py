@@ -1305,6 +1305,43 @@ class SQLiteStore:
                                 (key, utc_iso(datetime.now(timezone.utc))))
         self.connection.commit()
 
+    def exercise_messages(self, since: datetime) -> list[dict]:
+        """Exercise traffic first heard since ``since``, by message: a digest split into items is
+        one message. Each: key, title, when (latest), report_ids, event_ids, sender, source.
+        Found whether or not an exercise is in progress (outside one it is not news, so it has
+        no events, but it must still be noticed)."""
+        rows = self.connection.execute(
+            """SELECT r.id, r.first_seen, r.last_seen, r.event_id, r.sender, r.first_source, m.fields_json,
+                      COALESCE(a.summary, ''), m.raw_content
+               FROM reports r
+               JOIN messages m ON m.id = (SELECT MIN(id) FROM messages WHERE report_id = r.id)
+               LEFT JOIN analysis_results a ON a.id = (SELECT MAX(id) FROM analysis_results WHERE message_id = m.id)
+               WHERE r.exercise = 'exercise' AND r.first_seen >= ? ORDER BY r.first_seen""",
+            (utc_iso(since),)).fetchall()
+        groups: dict[str, dict] = {}
+        for report_id, first, last, event_id, sender, source, fields_json, summary, raw in rows:
+            try:
+                fields = json.loads(fields_json or "{}")
+            except ValueError:
+                fields = {}
+            if fields.get("digest"):
+                key = "digest:" + (str(fields.get("message_id") or "").rsplit("#", 1)[0] or fields["digest"])
+                name = fields["digest"]
+                if re.match(r"^(?:BEG|END)\s+FLMSG\b", name, re.IGNORECASE):   # saved before titles skipped it
+                    name = fields.get("filename") or name
+                title = f"Exercise digest — {name}"
+            else:
+                key = f"report:{report_id}"
+                title = summary or " ".join((raw or "").split())[:90]
+            group = groups.setdefault(key, {"key": key, "title": title, "when": datetime.fromisoformat(last),
+                                            "report_ids": [], "event_ids": [], "sender": sender or "",
+                                            "source": source or ""})
+            group["report_ids"].append(int(report_id))
+            if event_id is not None and int(event_id) not in group["event_ids"]:
+                group["event_ids"].append(int(event_id))
+            group["when"] = max(group["when"], datetime.fromisoformat(last))
+        return list(groups.values())
+
     def event_digests(self, event_ids) -> dict[int, tuple[str, str]]:
         """event id -> (digest key, digest title) for events whose reports came from one digest's
         items (a weekly snapshot split into its items); other events are left out."""

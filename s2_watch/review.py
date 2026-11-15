@@ -53,12 +53,15 @@ def exercise_groups(events, digest_of: dict | None = None) -> list[tuple[str, st
 
 
 def review_items(now: datetime, events, done: set[str], *, alerted=(), proposals=(), event_lookup=None,
-                 misses=(), drafts=(), concern_of=None, digest_of=None) -> list[ReviewItem]:
+                 misses=(), drafts=(), concern_of=None, digest_of=None, exercise_messages=None) -> list[ReviewItem]:
     """The items waiting, newest first. ``events``: recent EventSummary objects; ``alerted``:
     event ids a desktop alert was raised for; ``proposals``: event ids with an assessment to
     review; ``event_lookup(ids)``: their summaries; ``misses``: (key, message, result);
     ``drafts``: store.list_drafts(); ``concern_of(event)``: its Concern (s2_watch.concern);
-    ``digest_of``: event id -> (digest key, title), so a split exercise digest is listed once.
+    ``digest_of``: event id -> (digest key, title), so a split exercise digest is listed once;
+    ``exercise_messages``: store.exercise_messages() when no exercise is in progress (the traffic
+    has no events then, and is listed by message so it is still noticed); None during one,
+    when its events are listed.
     A "new event" is one at High concern first heard in the last day, or an alerted one at
     Elevated or above: high urgency alone would list every news story about a shooting."""
     if concern_of is None:
@@ -83,7 +86,8 @@ def review_items(now: datetime, events, done: set[str], *, alerted=(), proposals
         elif event.single_source(now):
             items.append(ReviewItem(f"single:{event.event_id}", "single", event.last_seen, event.title,
                                     f"one station, no official confirmation · {sources}", event.event_id))
-    drills = [event for event in events if event.exercise and event.closed_at is None and now - event.first_seen <= NEW_FOR]
+    drills = [event for event in events if event.exercise and event.closed_at is None
+              and now - event.first_seen <= NEW_FOR] if exercise_messages is None else []
     for key, title, members in exercise_groups(drills, digest_of):
         latest = max(member.last_seen for member in members)
         if len(members) == 1:
@@ -95,7 +99,15 @@ def review_items(now: datetime, events, done: set[str], *, alerted=(), proposals
             names = "; ".join(member.title for member in members)
             items.append(ReviewItem(f"exercise:{key}", "exercise", latest, f"Exercise digest — {title}",
                                     f"EXERCISE · one message, {len(members)} events: {names}",
-                                    tuple(member.event_id for member in members)))
+                                    ("events", tuple(member.event_id for member in members))))
+    for group in exercise_messages or ():
+        if now - group["when"] > NEW_FOR:
+            continue
+        reports = len(group["report_ids"])
+        items.append(ReviewItem(f"exercise:{group['key']}", "exercise", group["when"], group["title"],
+                                f"EXERCISE · {group['sender'] or group['source']}"
+                                + (f" · {reports} items" if reports > 1 else "")
+                                + " · Exercise in Progress is off: not news", ("reports", tuple(group["report_ids"]))))
     missing = [event_id for event_id in proposals if event_id not in by_id]
     if missing and event_lookup is not None:
         by_id.update({event.event_id: event for event in event_lookup(missing)})

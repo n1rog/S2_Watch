@@ -683,7 +683,7 @@ class MainWindow(QMainWindow):
         self.exercise_label.setText("EXERCISE")
         self.exercise_label.setStyleSheet(f"QToolButton {{ {EXERCISE_BADGE} }}")
         self.exercise_label.clicked.connect(self.show_exercise_events)
-        self.exercise_events: list = []
+        self.exercise_messages: list = []
         self.exercise_label.setVisible(self.exercise_in_progress())
         self.update_button = UpdateButton(self)
         # The notices: the last 20 status messages, so one missed while away isn't lost.
@@ -1306,28 +1306,24 @@ class MainWindow(QMainWindow):
                           lambda lat, lon: gazetteer.locate_point(lat, lon)[1])
 
     def update_exercise_marker(self, events=None, digest_of=None) -> None:
-        """The EXERCISE marker by the clock: how many exercise events the last 48 hours hold.
-        Shown during an exercise, and whenever exercise traffic came in (it is off the news
-        lists then, so it would go unseen)."""
-        if events is None:
-            now = datetime.now(timezone.utc)
-            events = [event for event in self.store.events_since(now - timedelta(hours=48)) if world.event_covered(event)]
-        self.exercise_events = [event for event in events if event.exercise and event.closed_at is None]
-        if digest_of is None and self.exercise_events:
-            digest_of = self.store.event_digests([event.event_id for event in self.exercise_events])
-        # Counted by message: a digest split into 7 events is one exercise message.
-        count = len(exercise_groups(self.exercise_events, digest_of))
-        events_count = len(self.exercise_events)
+        """The EXERCISE marker by the clock: how many exercise messages the watch period holds (a
+        digest split into several items counts once). Shown during an exercise, and whenever
+        exercise traffic came in: outside an exercise it is off the news lists, so it would go
+        unseen. ``events``, ``digest_of``: unused, kept for callers."""
+        now = datetime.now(timezone.utc)
+        self.exercise_messages = self.store.exercise_messages(
+            now - timedelta(hours=int(self.review_duration.currentData())))
+        count = len(self.exercise_messages)
         on = self.exercise_in_progress()
         text = f"EXERCISE · {count}" if count else "EXERCISE"
         changed = text != self.exercise_label.text()
         self.exercise_label.setText(text)
+        where = "their events" if on else "them in the Reports list (not news while Exercise in Progress is off)"
         self.exercise_label.setToolTip(
             ("Exercise in progress: exercise traffic is handled as news, marked in purple. "
              if on else "Exercise traffic received, but Exercise in Progress is off: it is kept off the news lists. ")
-            + (f"{count} exercise message{'s' if count != 1 else ''} in the last 48 hours"
-               + (f" ({events_count} events)" if events_count != count else "")
-               + f": click to list {'them' if events_count != 1 else 'it'}." if count else "No exercise events yet."))
+            + (f"{count} exercise message{'s' if count != 1 else ''} in the watch period: click to show {where}."
+               if count else "No exercise traffic in the watch period."))
         visible = on or bool(count)
         if changed or visible == self.exercise_label.isHidden():
             self.exercise_label.setVisible(visible)
@@ -1344,10 +1340,16 @@ class MainWindow(QMainWindow):
         self.review_data_changed()
 
     def show_exercise_events(self, event_ids=None) -> None:
-        """The Events tab, showing only exercise events (``event_ids``: these selected)."""
+        """Exercise traffic: during an exercise, the Events tab showing only exercise events
+        (``event_ids``: these selected); outside one, its reports in the Reports list."""
+        if not self.exercise_in_progress():
+            self.show_reports([report_id for group in getattr(self, "exercise_messages", [])
+                               for report_id in group["report_ids"]])
+            return
         self.tabs.setCurrentWidget(self.events_view)
         self.events_view.exercise_only.setChecked(True)
-        ids = list(event_ids) if event_ids else [event.event_id for event in self.exercise_events]
+        ids = list(event_ids) if event_ids else [event_id for group in getattr(self, "exercise_messages", [])
+                                                 for event_id in group["event_ids"]]
         table = self.events_view.table
         if len(ids) == 1:
             self.open_event(ids[0])
@@ -2778,8 +2780,11 @@ class MainWindow(QMainWindow):
         events = [event for event in self.store.events_since(now - timedelta(hours=48)) if world.event_covered(event)]
         drills = [event.event_id for event in events if event.exercise]
         digest_of = self.store.event_digests(drills) if drills else {}
-        self.update_exercise_marker(events, digest_of)
+        self.update_exercise_marker()
+        # Outside an exercise its traffic has no events: Needs Review lists the messages instead.
+        quiet_drills = None if self.exercise_in_progress() else self.exercise_messages
         return review_items(now, events, self.store.reviews_done(), alerted=self.alerted_events, digest_of=digest_of,
+                            exercise_messages=quiet_drills,
                             proposals=self.store.proposed_assessments(),
                             event_lookup=lambda ids: self.store.events_since(None, event_ids=ids),
                             misses=self.misses_view.current_misses(), drafts=self.store.list_drafts(),
@@ -2809,9 +2814,13 @@ class MainWindow(QMainWindow):
                 self.misses_view.dismiss_miss(item.target)
             else:
                 self.store.review_done(item.key)
-        elif item.kind == "exercise" and isinstance(item.target, tuple):     # a digest's events
+        elif item.kind == "exercise" and isinstance(item.target, tuple):     # several events, or reports
             self.store.review_done(item.key)
-            self.show_exercise_events(list(item.target))
+            what, ids = item.target
+            if what == "reports":
+                self.show_reports(list(ids))
+            else:
+                self.show_exercise_events(list(ids))
         elif item.kind in ("new", "single", "exercise"):
             self.store.review_done(item.key)
             self.open_event(item.target)

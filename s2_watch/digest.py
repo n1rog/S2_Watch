@@ -88,7 +88,9 @@ def split_digest(message: Message) -> list[Message] | None:
             header.append(line)
     if len(items) < MIN_ITEMS or not _is_digest(header, items, message):
         return None
-    title = next((line for line in header if len(line) > 8), header[0] if header else "Digest")
+    # Its title: the first real heading line, not FLMSG's "BEG FLMSG DE MAGNET S2" envelope.
+    titled = [line for line in header if not re.match(r"^(?:BEG|END)\s+FLMSG\b", line, re.IGNORECASE)]
+    title = next((line for line in titled if len(line) > 8), titled[0] if titled else "Digest")
     title = re.sub(r"^This is the\s+", "", title, flags=re.IGNORECASE).rstrip(".")[:90]
     parent_id = message.fields.get("message_id") or message.fields.get("filename") or message.received_at.isoformat()
     from s2_watch.exercise import exercise_kind

@@ -43,15 +43,36 @@ def test_the_clock_counts_exercise_events_and_lists_them(main_window) -> None:
     window.update_exercise_marker()
     assert not window.exercise_label.isHidden() and window.exercise_label.text() == "EXERCISE · 1"
     assert "Exercise in Progress is off" in window.exercise_label.toolTip()
+    window.store.set_setting("exercise.in_progress", "1")          # during an exercise: its events
     window.exercise_label.click()
     assert window.tabs.currentWidget() is window.events_view and window.events_view.exercise_only.isChecked()
     assert window.events_view.detail.current.event_id == event_id
+
+
+def test_outside_an_exercise_its_traffic_is_still_counted_listed_and_shown(main_window) -> None:
+    from s2_watch.analysis.base import AnalysisResult as Result
+
+    window = main_window()
+    window.store.set_setting("exercise.in_progress", "0")
+    message, report, _event_id = add_exercise(window.store)
+    window.store.connection.execute("UPDATE reports SET newsworthy = 0, category = 'routine' WHERE id = ?",
+                                    (report.report_id,))                # not news outside an exercise
+    window.store.connection.commit()
+    window.review_view.refresh()
+    assert window.exercise_label.text() == "EXERCISE · 1"
+    [item] = [item for item in window.review_view.items if item.kind == "exercise"]
+    assert item.target == ("reports", (report.report_id,)) and "Exercise in Progress is off" in item.detail
+    window.insert_analysis_row(message, Result(False, "routine", "low", "EXERCISE: Power failure", 0.9, ()), report)
+    window.review_act(item, "primary")
+    assert window.tabs.currentWidget() is window.map_tab and window.news_mode == "reports"
+    assert window.selected_report_rows() == [(0, report.report_id)]
 
 
 def test_exercise_traffic_waits_in_needs_review_and_is_announced(main_window) -> None:
     from s2_watch.monitor_worker import ProcessedMessage
 
     window = main_window()
+    window.store.set_setting("exercise.in_progress", "1")          # during an exercise: listed by event
     message, report, event_id = add_exercise(window.store)
     window.review_view.refresh()
     [item] = [item for item in window.review_view.items if item.kind == "exercise"]
@@ -81,6 +102,7 @@ def test_an_exercise_digest_is_one_message_however_many_events(main_window) -> N
 
     window = main_window()
     store = window.store
+    store.set_setting("exercise.in_progress", "1")
     digest = Message("FLMSG", SNAPSHOT.format(heading="EXERCISE "), received_at=NOW - timedelta(hours=1),
                      fields={"filename": "MAGNET_S2_RR_261108-1800Z_WEEKLY_SNAPSHOT.sig (copy).b2s"})
     places = [Place(40.9, -73.8, "city", "NY", 2), Place(37.27, -107.01, "city", "CO", 8),
@@ -96,8 +118,8 @@ def test_an_exercise_digest_is_one_message_however_many_events(main_window) -> N
     assert len(set(ids)) == 4
     window.review_view.refresh()
     [item] = [item for item in window.review_view.items if item.kind == "exercise"]
-    assert item.title.startswith("Exercise digest — ") and set(item.target) == set(ids)
-    assert window.exercise_label.text() == "EXERCISE · 1" and "(4 events)" in window.exercise_label.toolTip()
+    assert item.title.startswith("Exercise digest — ") and item.target[0] == "events" and set(item.target[1]) == set(ids)
+    assert window.exercise_label.text() == "EXERCISE · 1"           # one message, however many events
     window.review_act(item, "primary")
     assert window.events_view.exercise_only.isChecked()
     assert set(window.events_view.table.selected_events()) == set(ids)
