@@ -42,14 +42,64 @@ GDELT_INFRASTRUCTURE = ('("power outage" OR "power outages" OR "without power" O
 GDELT_PAUSE_S = 6
 
 
-def gdelt_url(topics: str = GDELT_TOPICS) -> str:
+# Air travel stopped: searched only when fetching missed news (the FAA's airport status covers live).
+GDELT_TRANSPORT = ('("ground stop" OR "flights grounded" OR "grounded flights" OR "airport closed" '
+                   'OR "airports closed" OR "air traffic control outage")')
+
+
+def gdelt_url(topics: str = GDELT_TOPICS, start: datetime | None = None, end: datetime | None = None) -> str:
     """U.S. news when the coverage is the United States alone; else English news from anywhere,
-    kept when it is about a covered area (Configuration → Coverage)."""
+    kept when it is about a covered area (Configuration → Coverage). The last 24 hours, or the
+    window from ``start`` to ``end`` (fetching missed news)."""
     us_only = world.COVERAGE == {"us"}
     query = f"{topics} {'sourcecountry:US ' if us_only else ''}sourcelang:english"
+    window = ({"startdatetime": _utc(start).strftime("%Y%m%d%H%M%S"), "enddatetime": _utc(end).strftime("%Y%m%d%H%M%S"),
+               "maxrecords": 250} if start and end else {"timespan": "24h", "maxrecords": 75 if us_only else 150})
     return "https://api.gdeltproject.org/api/v2/doc/doc?" + urllib.parse.urlencode(
-        {"query": query, "mode": "ArtList", "format": "json", "maxrecords": 75 if us_only else 150,
-         "timespan": "24h", "sort": "DateDesc"})
+        {"query": query, "mode": "ArtList", "format": "json", **window, "sort": "DateDesc"})
+
+
+BACKFILL_WINDOW = timedelta(hours=6)
+BACKFILL_SEARCHES = ((GDELT_TOPICS, False), (GDELT_INFRASTRUCTURE, True), (GDELT_TRANSPORT, False))
+
+
+def backfill_requests(start: datetime, end: datetime) -> int:
+    """How many GDELT requests fetching the news from ``start`` to ``end`` takes."""
+    windows = max(1, -(-int((end - start).total_seconds()) // int(BACKFILL_WINDOW.total_seconds())))
+    return windows * len(BACKFILL_SEARCHES)
+
+
+def fetch_gdelt_window(start: datetime, end: datetime, progress=None, stopped=None) -> list[Message]:
+    """The news GDELT holds from ``start`` to ``end`` (missed while S2 Watch wasn't saving), in
+    6-hour windows, each searched for unrest and violence, failing infrastructure and air travel
+    stopped. One request every 6 seconds, as GDELT asks; a refusal ("429", busy) ends the fetch
+    rather than pressing on. ``progress(done, total)`` after each request; ``stopped()`` True ends
+    it early. Raises only when nothing at all came back."""
+    total, done = backfill_requests(start, end), 0
+    found: dict[str, Message] = {}
+    cursor = start
+    error = None
+    while cursor < end and error is None:
+        window_end = min(end, cursor + BACKFILL_WINDOW)
+        for topics, infrastructure in BACKFILL_SEARCHES:
+            if stopped and stopped():
+                return list(found.values())
+            if done:
+                time.sleep(GDELT_PAUSE_S)
+            try:
+                for message in _gdelt_news(topics, infrastructure, cursor, window_end):
+                    message.fields["source"] = "GDELT news (fetched later)"
+                    found.setdefault(message.fields["message_id"], message)
+            except Exception as failure:   # busy or refused: stop, keep what came back
+                error = failure
+                break
+            done += 1
+            if progress:
+                progress(done, total)
+        cursor = window_end
+    if error is not None and not found:
+        raise error
+    return list(found.values())
 
 
 _RESOLVER = None
@@ -135,10 +185,11 @@ def fetch_gdelt() -> list[Message]:
     return messages + [message for message in infrastructure if message.fields["message_id"] not in seen]
 
 
-def _gdelt_news(topics: str, infrastructure: bool = False) -> list[Message]:
+def _gdelt_news(topics: str, infrastructure: bool = False, start: datetime | None = None,
+                end: datetime | None = None) -> list[Message]:
     from s2_watch.infrastructure import infrastructure_urgency
 
-    raw = _get(gdelt_url(topics)) or b"{}"
+    raw = _get(gdelt_url(topics, start, end)) or b"{}"
     try:
         data = json.loads(raw)
     except ValueError:   # GDELT explains a refusal in plain text ("Please limit requests to one every 5 seconds")
@@ -506,6 +557,20 @@ class OsintAdapter:
         with self._lock:
             messages, self._pending = self._pending, []
         return messages
+
+    def inject(self, messages: list[Message]) -> int:
+        """News fetched for a missed period: handled like any other on the next read, whatever
+        its age (the watch period limits what is shown, not what is saved). The number new."""
+        added = 0
+        with self._lock:
+            for message in messages:
+                identity = f"gdelt|{message.fields.get('message_id')}"
+                if identity in self._delivered:
+                    continue
+                self._delivered.add(identity)
+                self._pending.append(message)
+                added += 1
+        return added
 
     def close(self) -> None:
         self._stop.set()

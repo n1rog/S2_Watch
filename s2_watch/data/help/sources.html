@@ -89,6 +89,16 @@ without power in Tulsa</i> → low. <i>Thousands without power in Columbus, Ohio
 Washington Monument, Navy Yard and George Washington University, and neighbourhoods no other city has (Foggy Bottom, Dupont
 Circle, Adams Morgan, Anacostia, Logan Circle, Tenleytown, Congress Heights, the National Mall). “Washington” alone is still the state, and “12V DC” isn't a place.</p>
 
+<h2>Fetching missed news</h2>
+<p>When S2 Watch wasn't running or saving for a while, the news from that stretch is missing: most feeds only give what is current.
+<b>Tools → Fetch Missed News (GDELT)…</b> searches GDELT's news index, which keeps past days, for the stretch. It suggests the longest
+stretch of the last week with little news saved (under half the usual hourly amount); change <b>From</b> and <b>To</b> as needed, up to
+a week. Each 6-hour window is searched for unrest and violence, failing infrastructure, and air travel stopped (ground stops,
+grounded flights, closed airports), one request every 6 seconds as GDELT asks: a day and a half takes about 21 requests, two
+minutes. If GDELT says it is busy the fetch stops and keeps what came back; try the rest later. The stories found are
+analysed, grouped into events and counted in Metrics like live news. Radio traffic is read again at every start, so it needs no
+fetching; APRS-IS and JS8Call's live traffic can't be fetched later.</p>
+
 <h2>Coverage: which parts of the world</h2>
 <p><b>Configuration → Coverage</b> chooses the areas S2 Watch reports from: <b>United States</b> (the default), <b>North America</b>
 (Canada, Mexico, Greenland), <b>Central America and the Caribbean</b>, <b>South America</b>, <b>Europe</b>, <b>Africa</b>,

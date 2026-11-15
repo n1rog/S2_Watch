@@ -1362,6 +1362,31 @@ class SQLiteStore:
         self.connection.commit()
         return changed
 
+    def news_gap(self, now: datetime | None = None, days: int = 7, min_hours: int = 4) -> tuple[datetime, datetime] | None:
+        """The longest stretch of the last ``days`` in which news (OSINT) was saved at under half
+        its usual hourly rate: S2 Watch wasn't saving, or a feed was down. (start, end)
+        to the hour, or None when there is no stretch of ``min_hours`` or more."""
+        now = (now or datetime.now(timezone.utc)).replace(minute=0, second=0, microsecond=0)
+        start = now - timedelta(days=days)
+        counts = dict(self.connection.execute(
+            """SELECT substr(received_at, 1, 13), COUNT(*) FROM messages
+               WHERE source_application = 'OSINT' AND received_at >= ? GROUP BY 1""", (utc_iso(start),)).fetchall())
+        hours = [start + timedelta(hours=index) for index in range(days * 24)]
+        values = [counts.get(hour.strftime("%Y-%m-%dT%H"), 0) for hour in hours]
+        usual = sorted(values)[len(values) // 2]
+        if usual < 5:
+            return None          # too little news to tell a gap from a quiet spell
+        best, run_start = None, None
+        for index, value in enumerate(values + [usual]):
+            if value < usual / 2:
+                run_start = index if run_start is None else run_start
+                continue
+            if run_start is not None and index - run_start >= min_hours and \
+                    (best is None or index - run_start > best[1] - best[0]):
+                best = (run_start, index)
+            run_start = None
+        return (hours[best[0]], hours[best[0]] + timedelta(hours=best[1] - best[0])) if best else None
+
     def raise_to_high(self, is_high) -> int:
         """Once, after a rule change: stored news stories (OSINT, not the operator's decisions)
         that ``is_high(message)`` now calls high urgency become high, their saved analysis too."""

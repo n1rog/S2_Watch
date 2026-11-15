@@ -664,6 +664,7 @@ class MainWindow(QMainWindow):
         tools_menu.addAction("Sender Track Records…").triggered.connect(self.show_sender_records)
         tools_menu.addAction("Keyword Noise…").triggered.connect(self.show_keyword_noise)
         tools_menu.addAction("Metrics").triggered.connect(lambda: self.tabs.setCurrentWidget(self.metrics_view))
+        tools_menu.addAction("Fetch Missed News (GDELT)…").triggered.connect(self.fetch_missed_news)
         help_menu = self.menuBar().addMenu("Help")
         # Current date/time in the chosen format, top right, with a Local/Zulu switch.
         # Kept on self: PySide doesn't take ownership of a menu-bar corner widget.
@@ -2442,6 +2443,24 @@ class MainWindow(QMainWindow):
         self.update_model_examples()
         if keyword:
             self.add_operator_keyword(result.category, keyword)
+
+    def fetch_missed_news(self) -> None:
+        """Tools → Fetch Missed News: GDELT's news for a stretch S2 Watch didn't save."""
+        from s2_watch.ui.backfill_dialog import BackfillDialog
+
+        if self.osint_adapter is None or not self.osint_adapter.fetchers:
+            QMessageBox.information(self, "Fetch missed news", "The official and news feeds (OSINT) are off: turn them "
+                                    "on under Configuration → Watch Forms, then fetch the missed news.")
+            return
+
+        def deliver(messages) -> int:
+            added = self.osint_adapter.inject(messages)
+            if added:
+                self.notify(f"Fetched {added} missed news stories from GDELT; analysing and grouping them")
+            return added
+
+        self._backfill_dialog = BackfillDialog(self.store.news_gap(), deliver, self)
+        self._backfill_dialog.show()
 
     def show_event_on_map(self, points) -> None:
         self.tabs.setCurrentWidget(self.map_tab)

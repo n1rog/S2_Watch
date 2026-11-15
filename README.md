@@ -757,6 +757,14 @@ Reports and events inside it are in focus as well as those in any chosen regions
 come first in the lists and briefings, and alert like focus-region reports. The map draws
 the area as a dashed circle. Metrics and aircraft still use the regions.
 
+**Fetching missed news.** When S2 Watch wasn't running or saving for a while, **Tools →
+Fetch Missed News (GDELT)…** searches GDELT's news index for that stretch (most feeds
+only give what is current). It suggests the longest stretch of the last week with under
+half the usual news saved; each 6-hour window is searched for unrest and violence,
+failing infrastructure, and air travel stopped (ground stops, grounded flights), one
+request every 6 seconds, stopping if GDELT is busy. The stories are analysed, grouped and
+counted like live news.
+
 **OSINT** is a source alongside the radio applications, with its own status
 light and an "All OSINT reports" watch form. It collects free, keyless open and
 official sources on a background thread: US news about protests, riots, unrest,
