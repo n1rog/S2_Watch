@@ -688,8 +688,10 @@ Reading the monitored applications, matching watch forms, newsworthiness analysi
 (including Ollama), and working out map locations (including geocoding) all run on
 a background thread, so a large review-window backlog or a slow analyzer does not
 freeze the window; results appear in batches as they are processed. Live Monitor
-keeps the newest 2,000 rows and Newsworthiness the newest 1,000 on screen; every
-matched message is still saved and searchable in History. When a backlog produces
+keeps the newest 2,000 rows from each source application, the Reports list the newest
+1,000 from each, and the map the newest 500 markers from each, so OSINT's hundreds of
+stories a day never push a quiet radio source (VarAC, FLMSG, JS8Call) off the screen;
+every matched message is still saved and searchable in History. When a backlog produces
 more than three newsworthy messages at once, a single summary alert is shown.
 
 S2 Watch's icon (a radar scope with a highlighted contact) is in

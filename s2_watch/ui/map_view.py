@@ -10,6 +10,8 @@ from s2_watch import world
 from s2_watch.analysis.categories import NEWS_CATEGORIES
 from s2_watch.models import Message
 from s2_watch.exercise import COLOUR as EXERCISE_COLOUR, EXERCISE, exercise_kind
+
+MARKERS_PER_SOURCE = 500
 from s2_watch.geo import maidenhead_to_coordinates
 from s2_watch.locating import LocationResolver
 from s2_watch.overlays import only_listed_aircraft
@@ -104,6 +106,7 @@ class MapView(QWidget):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._locations: list[dict[str, object]] = []
+        self._source_counts: dict[str, int] = {}     # markers kept per source application
         self._enabled_applications: set[str] | None = None
         self._enabled_kinds = {"station", "news", "region"}
         self._resolver = LocationResolver()
@@ -298,8 +301,23 @@ class MapView(QWidget):
             location["key"] = next(self._location_keys)
         self._message_locations[id(message)] = message_locations
         self._locations.extend(message_locations)
-        if len(self._locations) > 500:
-            self._locations = self._locations[-500:]
+        # At most MARKERS_PER_SOURCE from each source, the oldest going first: OSINT's hundreds
+        # a day must not push a quiet radio source's markers off the map.
+        counts = self._source_counts
+        for location in message_locations:
+            counts[location["application"]] = counts.get(location["application"], 0) + 1
+        if any(count > MARKERS_PER_SOURCE for count in counts.values()):
+            drop = {application: count - MARKERS_PER_SOURCE for application, count in counts.items()
+                    if count > MARKERS_PER_SOURCE}
+            for application in drop:
+                counts[application] = MARKERS_PER_SOURCE
+            kept = []
+            for location in self._locations:         # oldest first
+                if drop.get(location["application"], 0) > 0:
+                    drop[location["application"]] -= 1
+                    continue
+                kept.append(location)
+            self._locations = kept
             retained = {id(location) for location in self._locations}
             self._message_locations = {
                 message_key: locations
@@ -310,6 +328,7 @@ class MapView(QWidget):
 
     def clear_locations(self) -> None:
         self._locations.clear()
+        self._source_counts.clear()
         self._message_locations.clear()
         self._render()
 

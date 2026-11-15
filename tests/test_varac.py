@@ -108,3 +108,53 @@ def test_all_varac_messages_is_switched_on_once(tmp_path: Path) -> None:
     store.save_watch_form(replace(forms["All VarAC messages"], enabled=False))
     install_default_forms(store)
     assert not {form.name: form for form in store.list_watch_forms()}["All VarAC messages"].enabled
+
+
+def test_a_busy_source_cannot_push_a_quiet_one_off_the_map_or_list(main_window) -> None:
+    from datetime import datetime, timezone
+
+    from s2_watch.analysis.base import AnalysisResult
+    from s2_watch.models import Message
+    from s2_watch.ui import map_view
+
+    window = main_window()
+    window.ANALYSIS_ROWS_LIMIT = 5
+    window.analysis.setSortingEnabled(False)          # as handle_batch does while inserting
+    map_view.MARKERS_PER_SOURCE = 5
+    try:
+        radio = Message("VarAC", "Greg checking in to CORAC net", received_at=datetime(2026, 11, 1, tzinfo=timezone.utc),
+                        fields={"grid": "FM09WA", "sender": "KY4UB"})
+        window.map_view.add_message(radio)
+        window.insert_analysis_row(radio, AnalysisResult(False, "routine", "low", "check-in", 0.5, ()))
+        for index in range(12):
+            news = Message("OSINT", f"Story {index}", received_at=datetime(2026, 11, 14, 0, index, tzinfo=timezone.utc),
+                           fields={"grid": "EM10"})
+            window.map_view.add_message(news)
+            window.insert_analysis_row(news, AnalysisResult(False, "routine", "low", f"story {index}", 0.5, ()))
+            window.trim_oldest_rows(window.analysis, window.ANALYSIS_ROWS_LIMIT)
+        applications = [location["application"] for location in window.map_view._locations]
+        assert applications.count("VarAC") == 1 and applications.count("OSINT") == 5
+        rows = [window.analysis.item(row, 1).text() for row in range(window.analysis.rowCount())]
+        assert rows.count("VarAC") == 1 and rows.count("OSINT") == 5
+    finally:
+        map_view.MARKERS_PER_SOURCE = 500
+
+
+def test_the_launch_list_holds_each_sources_latest(tmp_path) -> None:
+    from datetime import datetime, timedelta, timezone
+
+    from s2_watch.analysis.base import AnalysisResult
+    from s2_watch.models import Message
+    from s2_watch.storage import SQLiteStore
+
+    store = SQLiteStore(tmp_path / "s2.db")
+    now = datetime.now(timezone.utc)
+    for index in range(6):
+        for application, hours in (("OSINT", index), ("VarAC", 30 + index)):
+            message = Message(application, f"{application} {index}", received_at=now - timedelta(hours=hours))
+            message_id = store.save_message(message, f"{application}{index}")
+            result = AnalysisResult(False, "routine", "low", "x", 0.5, ())
+            store.save_analysis(message_id, result)
+            store.assign_report(message_id, message, result)
+    loaded = [message.source_application for _id, message, _result in store.recent_reports(now - timedelta(days=3), 3)]
+    assert loaded.count("OSINT") == 3 and loaded.count("VarAC") == 3

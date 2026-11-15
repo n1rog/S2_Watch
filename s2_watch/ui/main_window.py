@@ -1950,8 +1950,13 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def trim_oldest_rows(table: QTableWidget, limit: int) -> bool:
-        excess = table.rowCount() - limit
-        if excess <= 0:
+        """Keep at most ``limit`` rows from each source application (column 1), dropping the
+        oldest: a busy source (OSINT) can't push a quiet radio source's rows out."""
+        by_application: dict[str, list[int]] = {}
+        for row in range(table.rowCount()):
+            item = table.item(row, 1)
+            by_application.setdefault(item.text() if item is not None else "", []).append(row)
+        if all(len(rows) <= limit for rows in by_application.values()):
             return False
         def age_key(row):
             item = table.item(row, 0)
@@ -1960,8 +1965,11 @@ class MainWindow(QMainWindow):
             # Newsworthiness drops rest-of-U.S. reports before focus-region ones.
             priority = item.data(PriorityItem.SORT_ROLE)
             return str(priority if priority is not None else item.data(Qt.ItemDataRole.UserRole))
-        rows = sorted(range(table.rowCount()), key=age_key)
-        for row in sorted(rows[:excess], reverse=True):
+        doomed = []
+        for rows in by_application.values():
+            if len(rows) > limit:
+                doomed += sorted(rows, key=age_key)[:len(rows) - limit]
+        for row in sorted(doomed, reverse=True):
             table.removeRow(row)
         return True
 

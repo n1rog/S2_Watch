@@ -535,19 +535,25 @@ class SQLiteStore:
         return self._report_info(report_id, new_report=False)
 
     def recent_reports(self, since: datetime, limit: int = 1000) -> list[tuple[int, Message, AnalysisResult | None]]:
-        """Each report seen since ``since``, newest first, as its first saved copy and analysis.
+        """Each report seen since ``since``, newest first, as its first saved copy and analysis:
+        at most ``limit`` from each source application, so a busy one (OSINT, hundreds a day)
+        can't crowd a quiet radio source out of the list.
 
         This is what the Newsworthiness table and map show at launch, before (and whether
         or not) the sources are read again.
         """
         rows = self.connection.execute(
-            """SELECT r.id, m.source_application, m.form_name, m.raw_content, m.received_at, m.fields_json,
-                      a.newsworthy, a.category, a.urgency, a.summary, a.confidence, a.matched_terms
-               FROM reports r
-               JOIN messages m ON m.id = (SELECT MIN(id) FROM messages WHERE report_id = r.id)
-               LEFT JOIN analysis_results a ON a.message_id = m.id
-               WHERE r.last_seen >= ?
-               ORDER BY r.last_seen DESC LIMIT ?""",
+            """SELECT id, source_application, form_name, raw_content, received_at, fields_json,
+                      newsworthy, category, urgency, summary, confidence, matched_terms
+               FROM (SELECT r.id, m.source_application, m.form_name, m.raw_content, m.received_at, m.fields_json,
+                            a.newsworthy, a.category, a.urgency, a.summary, a.confidence, a.matched_terms, r.last_seen,
+                            ROW_NUMBER() OVER (PARTITION BY m.source_application ORDER BY r.last_seen DESC) AS place
+                     FROM reports r
+                     JOIN messages m ON m.id = (SELECT MIN(id) FROM messages WHERE report_id = r.id)
+                     LEFT JOIN analysis_results a ON a.message_id = m.id
+                     WHERE r.last_seen >= ?)
+               WHERE place <= ?
+               ORDER BY last_seen DESC""",
             (utc_iso(since), limit),
         ).fetchall()
         reports = []
