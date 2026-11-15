@@ -30,6 +30,12 @@ _NOT_REAL = re.compile(r"\b(?:not|no|non)[-\s]+real[-\s]?world\b", re.IGNORECASE
 _REAL = re.compile(r"\breal[-\s]?world\b|\bno[-\s]+duff\b", re.IGNORECASE)
 # The word as operators type it under pressure: EXERCIZE, EXCERCISE, EXERSIZE...
 _WORD = r"(?:exercise|exercize|excercise|excercize|exersise|exersize|exer|drill)"
+# Words that make a line-leading "exercise" ordinary English, not a marker.
+_ORDINARY = ("caution|care|normal|increased|extreme|great|due|good|common|sound|prudent|reasonable|your|their|his|her|"
+             "its|our|my|the|a|an|this|that|these|those|all|some|every|discretion|restraint|judge?ment|authority|power|"
+             "powers|options?|patience|vigilance|rights?|control|influence|jurisdiction|oversight|and|or|is|are|was|"
+             "were|can|may|will|helps?|programs?|class|classes|routines?|equipment|bikes?|regularly|daily|more|less|"
+             "of|for|in|at|on|to|with|by|from|science|physiology|habits?|time|tips?")
 _EXERCISE = re.compile(
     r"\b(exercise|exer|drill)\b[\s,.:;!/-]*\b\1\b"                       # EXERCISE EXERCISE (EXERCISE)
     r"|\bthis\s+is\s+(?:only\s+)?(?:an?\s+)?(?:exercise|drill)\b"
@@ -40,7 +46,10 @@ _EXERCISE = re.compile(
     # A banner: "*** EXERCISE ***", "== EXERCIZE ==", "--- DRILL ---"
     rf"|(?:[*=#~]{{2,}}|-{{3,}})\s*\b{_WORD}\b\s*(?:[*=#~]{{2,}}|-{{3,}})"
     # The word alone on its line (FLMSG forms write line breaks as a literal \n)
-    rf"|(?:^|\n|\\n)[^\w\n\\]*\b{_WORD}\b[^\w\n\\]*(?=$|\n|\\n)",
+    rf"|(?:^|\n|\\n)[^\w\n\\]*\b{_WORD}\b[^\w\n\\]*(?=$|\n|\\n)"
+    # A line led by the word: "EXERCISE PRIORITY ITEMS:", unless it is the verb or a topic
+    # ("Exercise caution", "Exercise normal precautions", "Exercise is good for you")
+    rf"|(?:^|\n|\\n)[^\w\n\\]*\b{_WORD}\b(?![ \t]+(?:{_ORDINARY})\b)(?=[ \t]+[a-z])",
     re.IGNORECASE,
 )
 _TEST = re.compile(
@@ -57,6 +66,9 @@ def exercise_kind(message: Message) -> str:
     """"exercise", "test", or "" for real traffic."""
     if message.source_application == "OSINT":
         return ""
+    inherited = message.fields.get("exercise")     # an item of a digest marked as a whole
+    if inherited in (EXERCISE, TEST):
+        return inherited
     from s2_watch.analysis.ollama import readable_text
 
     text = message.raw_content

@@ -1,5 +1,6 @@
 """Exercise traffic, events that close, and sender track records."""
 
+from dataclasses import replace
 from datetime import timedelta
 from pathlib import Path
 
@@ -48,7 +49,7 @@ def test_misspelled_and_banner_markers_count() -> None:
     assert exercise_kind(radio("EXERCIZE: TORNADO DAMAGE IN TULSA")) == "exercise"
     assert exercise_kind(radio("MAGNET SITREP\nEXERCISE\nPOWER OUT IN ZONE 3")) == "exercise"
     # The word inside ordinary text is still not a marker.
-    assert exercise_kind(radio("EXERCISE PRIORITY ITEMS: 1. ELECTION RESULTS", "FLMSG")) == ""
+    assert exercise_kind(radio("EXERCISE PRIORITY ITEMS: 1. ELECTION RESULTS", "FLMSG")) == "exercise"  # a line led by it
     assert exercise_kind(radio("Hospitals ran a cyber exercise **** testing response")) == ""
 
 
@@ -248,3 +249,53 @@ def test_the_status_column_moves_next_to_last_activity_once(tmp_path: Path) -> N
     table._save_header()
     again = EventsTable(str, store=store, state_key="events.map.header")
     assert again.horizontalHeader().visualIndex(again.COLUMNS.index("Status")) == 5
+
+
+SNAPSHOT = ("BEG FLMSG DE MAGNET S2\nDTG 261108-1800Z / UNCLAS OSINT / PERIOD 01-08 NOV 26\n"
+            "MAGCON L3 ELEVATED - TREND MIXED\n\n{heading}PRIORITY ITEMS:\n"
+            "1. ELECTION: DEMS WIN HOUSE AND SENATE. ELECTION DAY ISSUES ROUTINE (WESTCHESTER NY SCANNERS).\n"
+            "2. COLORADO FLOOD: SAN JUAN RIVER 16.81 FT PAGOSA SPRINGS, BRIDGE DAMAGE, DURANGO HOMES FLOODED.\n"
+            "3. MEASLES 5,182 CASES, MOST SINCE 1991.\n"
+            "4. CYBER: PATCH WORDPRESS 7.1.4, SONICWALL SSLVPN (MFA BYPASS), APPLE.\n"
+            "END FLMSG END FLMSG\n")
+
+
+def test_a_line_led_by_exercise_marks_the_digest_and_every_item() -> None:
+    from s2_watch.digest import split_digest
+
+    drill = radio(SNAPSHOT.format(heading="EXERCISE "), "FLMSG")
+    real = radio(SNAPSHOT.format(heading=""), "FLMSG")
+    assert exercise_kind(drill) == "exercise" and exercise_kind(real) == ""
+    assert {exercise_kind(item) for item in split_digest(drill)} == {"exercise"}
+    assert {exercise_kind(item) for item in split_digest(real)} == {""}
+    # The word leading an ordinary sentence is not a marker.
+    for line in ("EXERCISE CAUTION ON I-40 AFTER THE STORM", "Exercise normal precautions in Kenya",
+                 "EXERCISE IS GOOD FOR YOU, SAYS THE CLINIC", "Exercise your right to vote"):
+        assert exercise_kind(radio(line)) == "", line
+
+
+def test_a_drill_never_shares_an_event_with_real_traffic(tmp_path: Path) -> None:
+    store = SQLiteStore(tmp_path / "s2.db")
+    text = "COLORADO FLOOD: SAN JUAN RIVER 16.81 FT PAGOSA SPRINGS, BRIDGE DAMAGE"
+    place = Place(37.27, -107.01, "city", "CO", 8)
+    result = AnalysisResult(True, "Climate / Environment", "high", "Colorado flood", 0.9)
+
+    def report(message, key):
+        message_id = store.save_message(message, key)
+        info = store.assign_report(message_id, message, result, state="CO", region=8)
+        return message_id, info.report_id, store.assign_event(info.report_id, "Climate / Environment", {"flood"},
+                                                              place, text, "", key_terms(text))
+
+    _id, _real, real_event = report(radio(text, "FLMSG"), "real")
+    _id, _drill, drill_event = report(radio("EXERCISE: " + text, "FLMSG"), "drill")
+    assert drill_event != real_event                     # a new drill starts its own event
+    # A report first taken as real, then seen as a drill on a re-read, leaves the real event.
+    late = radio("BRIDGE DAMAGE AT PAGOSA SPRINGS: SAN JUAN RIVER FLOODING, ROADS CLOSED NEAR DURANGO", "FLMSG")
+    late_id, late_report, joined = report(late, "late")
+    assert joined == real_event
+    marked = replace(late, fields={"exercise": "exercise"})
+    store.assign_report(late_id, marked, result, state="CO", region=8)
+    moved = store.connection.execute("SELECT event_id FROM reports WHERE id = ?", (late_report,)).fetchone()[0]
+    assert moved not in (real_event, None)
+    events = {event.event_id: event for event in store.events_since(None, event_ids=[real_event, moved])}
+    assert not events[real_event].exercise and events[moved].exercise

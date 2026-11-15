@@ -146,8 +146,8 @@ from Possible Misses.
 
 Clear exercise markers ("EXERCISE EXERCISE EXERCISE", "THIS IS A DRILL", "exercise
 message", "for exercise purposes only", "simulated emergency", STARTEX/ENDEX, a message
-that starts "EXERCISE:", a banner such as "*** EXERCISE ***", the word alone on its line;
-common misspellings such as EXERCIZE count) mark radio traffic as exercise traffic; "real world" or "no duff"
+that starts "EXERCISE:", a banner such as "*** EXERCISE ***", the word alone on its line or leading
+a line such as "EXERCISE PRIORITY ITEMS:"; common misspellings such as EXERCIZE count) mark radio traffic as exercise traffic; "real world" or "no duff"
 marks it real. Ordinary words don't count ("Exercise Normal Precautions", "military
 drills"), and official and news feeds are never exercise traffic. Test traffic ("THIS IS
 A TEST", "test message") is never news.
@@ -156,6 +156,10 @@ Exercise traffic is kept off the news lists, events and briefings. During an exe
 turn on **Configuration → Exercise in Progress**: exercise traffic is then handled like real news, marked EXERCISE in the lists, the
 event panel, follow-up reports and briefings (subject prefixed, and EXERCISE EXERCISE
 EXERCISE at the top and bottom). Possible Misses skips exercise and test traffic.
+
+Every item of a digest marked as an exercise is exercise traffic. Exercise and real
+traffic never share a report or an event, so an exercise copy of a real message stays
+separate.
 
 Exercise traffic is purple wherever it appears: tinted rows with an "EXERCISE ·" title in the
 event lists (the Concern column reads "Exercise"), a purple bar in the event panel, a purple

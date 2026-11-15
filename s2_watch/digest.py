@@ -66,6 +66,9 @@ def split_digest(message: Message) -> list[Message] | None:
     title = next((line for line in header if len(line) > 8), header[0] if header else "Digest")
     title = re.sub(r"^This is the\s+", "", title, flags=re.IGNORECASE).rstrip(".")[:90]
     parent_id = message.fields.get("message_id") or message.fields.get("filename") or message.received_at.isoformat()
+    from s2_watch.exercise import exercise_kind
+
+    drill = exercise_kind(message)     # a digest marked EXERCISE marks every item
     parts = []
     for index, (section, lines) in enumerate(items, start=1):
         text = " ".join(lines)
@@ -77,6 +80,8 @@ def split_digest(message: Message) -> list[Message] | None:
         })
         if section:
             fields["section"] = section
+        if drill:
+            fields["exercise"] = drill
         parts.append(replace(message, raw_content=text, fields=fields))
     return parts
 

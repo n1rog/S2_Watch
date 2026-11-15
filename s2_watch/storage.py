@@ -410,6 +410,7 @@ class SQLiteStore:
         ).fetchone()
         if row and row[0] is not None:
             report_id = int(row[0])
+            before = self.connection.execute("SELECT exercise, event_id FROM reports WHERE id = ?", (report_id,)).fetchone()
             if result is not None:
                 # The report follows the latest analysis of its first copy (a later, better
                 # analyzer such as Ollama can find a rules match was routine chat).
@@ -420,13 +421,17 @@ class SQLiteStore:
                     (int(result.newsworthy), result.category, result.urgency, kind, stated_at, official, report_id,
                      report_id, message_id))
                 self.connection.commit()
+                if before is not None and before[1] is not None and (before[0] == "exercise") != (kind == "exercise"):
+                    self.separate_exercise(int(before[1]))     # newly seen as a drill (or as real)
             return self._report_info(report_id, new_report=False)
         text = report_text(message.raw_content)
         seen = message.received_at if message.received_at.tzinfo else message.received_at.replace(tzinfo=timezone.utc)
         low, high = utc_iso(seen - DUPLICATE_WINDOW), utc_iso(seen + DUPLICATE_WINDOW)
+        # An exercise copy of a message is never merged with real traffic, nor real with a drill.
         candidates = self.connection.execute(
-            "SELECT id, report_text FROM reports WHERE first_seen BETWEEN ? AND ? ORDER BY first_seen",
-            (low, high),
+            "SELECT id, report_text FROM reports WHERE first_seen BETWEEN ? AND ? AND (exercise = 'exercise') = ?"
+            " ORDER BY first_seen",
+            (low, high, int(kind == "exercise")),
         ).fetchall()
         match = next((rid for rid, other in candidates if other == text), None)
         if match is None:
@@ -800,10 +805,11 @@ class SQLiteStore:
         title = clean_title(title, place)
 
         row = self.connection.execute(
-            "SELECT event_id, first_seen, last_seen FROM reports WHERE id = ?", (report_id,)).fetchone()
+            "SELECT event_id, first_seen, last_seen, exercise FROM reports WHERE id = ?", (report_id,)).fetchone()
         if row is None:
             raise KeyError(report_id)
-        event_id, first_seen, last_seen = row
+        event_id, first_seen, last_seen, drill = row
+        drill = drill == "exercise"
         if event_id is not None:   # another copy of a report already placed: keep the event current
             self.connection.execute("UPDATE events SET last_seen = MAX(last_seen, ?) WHERE id = ?", (last_seen, event_id))
             self.connection.commit()
@@ -815,8 +821,11 @@ class SQLiteStore:
             """SELECT id, category, hazards, state, region, lat, lon, first_seen, last_seen, incident, terms, marks,
                       place_level FROM events
                WHERE category = ? AND ((last_seen >= ? AND first_seen <= ?)
-                                       OR (incident != '' AND incident = ? AND last_seen >= ?))""",
-            (category, utc_iso(seen - EVENT_GAP), utc_iso(seen + EVENT_GAP), incident, utc_iso(seen - INCIDENT_GAP)),
+                                       OR (incident != '' AND incident = ? AND last_seen >= ?))
+                 -- a drill never joins a real event, nor real traffic an exercise one
+                 AND EXISTS (SELECT 1 FROM reports x WHERE x.event_id = events.id AND x.exercise = 'exercise') = ?""",
+            (category, utc_iso(seen - EVENT_GAP), utc_iso(seen + EVENT_GAP), incident, utc_iso(seen - INCIDENT_GAP),
+             int(drill)),
         ).fetchall()
         candidates = [EventCandidate(row[0], row[1], {h for h in row[2].split(",") if h},
                                      Place(row[5], row[6], row[12], row[3], row[4]),
@@ -1183,11 +1192,12 @@ class SQLiteStore:
                 "reports": 0, "sources": [], "urgency": "low", "official": "", "radio": None,
                 "official_time": None, "lead": None, "statuses": [], "points": [], "placed": [],
                 "closed_at": datetime.fromisoformat(closed_at) if closed_at else None,
-                "close_reason": close_reason, "closed_by": closed_by, "exercise": False, "voices": set()})
+                "close_reason": close_reason, "closed_by": closed_by, "exercise": True, "voices": set()})
             event["reports"] += 1
             # Who said it: a station's call sign or an outlet's name (unknown senders each count).
             event["voices"].add((first_source == "OSINT", (sender or "").upper() or f"#{len(event['voices'])}:{seen}"))
-            event["exercise"] = event["exercise"] or exercise == "exercise"
+            # Exercise only when every report is: a real report in it must never look like a drill.
+            event["exercise"] = event["exercise"] and exercise == "exercise"
             for source in sources.split(","):
                 if source and source not in event["sources"]:
                     event["sources"].append(source)
@@ -1294,6 +1304,27 @@ class SQLiteStore:
         self.connection.execute("INSERT OR REPLACE INTO review_done(key, done_at) VALUES (?, ?)",
                                 (key, utc_iso(datetime.now(timezone.utc))))
         self.connection.commit()
+
+    def separate_exercise(self, event_id: int) -> int | None:
+        """An event holding both exercise and real reports is split: the exercise reports move to
+        an event of their own (its id returned), so a drill never passes for, or hides, a real event."""
+        flags = {row[0] == "exercise" for row in self.connection.execute(
+            "SELECT exercise FROM reports WHERE event_id = ?", (event_id,))}
+        if flags != {True, False}:
+            return None
+        columns = [row[1] for row in self.connection.execute("PRAGMA table_info(events)") if row[1] != "id"]
+        names = ", ".join(columns)
+        cursor = self.connection.execute(f"INSERT INTO events({names}) SELECT {names} FROM events WHERE id = ?", (event_id,))
+        drill_event = cursor.lastrowid
+        self.connection.execute("UPDATE reports SET event_id = ? WHERE event_id = ? AND exercise = 'exercise'",
+                                (drill_event, event_id))
+        for target in (event_id, drill_event):      # each keeps the times of its own reports
+            self.connection.execute(
+                """UPDATE events SET first_seen = (SELECT MIN(first_seen) FROM reports WHERE event_id = ?),
+                                     last_seen = (SELECT MAX(last_seen) FROM reports WHERE event_id = ?)
+                   WHERE id = ?""", (target, target, target))
+        self.connection.commit()
+        return drill_event
 
     def reviews_done(self) -> set[str]:
         # Kept 60 days: event and draft ids aren't reused, and nothing older is listed.
