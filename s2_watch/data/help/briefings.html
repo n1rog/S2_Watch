@@ -20,8 +20,13 @@ sent by itself. A time missed by more than 30 minutes (S2 Watch wasn't running) 
 <h2>The draft window</h2>
 <ol>
 <li><b>1. Full report</b>: the MAGNET S2 report. Write and edit here first. Lines in (parentheses) are prompts to replace.</li>
-<li><b>2. FLMSG</b>: upper-case text wrapped for radio, made from the full report as you edit, for an FLMSG form.</li>
-<li><b>3. JS8Call</b>: a short message from the report's fields, with a character count.</li>
+<li><b>2. FLMSG</b>: a condensed radio summary of the full report, <b>at most 1,500 characters</b>, upper-case and
+wrapped for an FLMSG form, made as you edit: the subject, DTG and precedence, the BLUF, then up to 3 situation items,
+2 assessment lines, 2 gaps, 2 guidance lines and 1 mitigation line (each shortened to its first sentences), and your
+call sign. Background, the source list and citation marks ([1], [W2]) stay in the full report; <i>MORE IN FULL
+REPORT</i> says when it holds more.</li>
+<li><b>3. JS8Call</b>: a short message, <b>at most 150 characters</b>: DTG, precedence, subject, and the BLUF's first
+sentence (or its first clause) when it fits, with a character count.</li>
 </ol>
 <p><b>Precedence</b>, above the tabs, is how quickly you must inform others about the event:</p>
 <table>
@@ -86,8 +91,11 @@ and paste it. Markdown is fine: headings, <b>bold</b>, lists and tables are kept
 JS8Call, Word and web-page versions to the reports folder, named after its title, and lists it on the Reports tab, linked
 to the event of the last packet you copied. Mark it sent there when it goes out.</li>
 </ol>
-<p>The FLMSG version is the report as plain upper-case text; the JS8Call message is its title and bottom line (the
-<b>BLUF</b>, or the first sentence).</p>
+<p>The FLMSG version is the same condensed summary (at most 1,500 characters); the JS8Call message (at most 150) is
+the DTG and precedence the report states, its title and, when they fit, its bottom line's first sentence or clause. A report
+copied from Claude's display rather than as Markdown works too: its first line is the title, its section names are read
+as headings, and its <i>DTG:</i> and <i>Precedence:</i> values are used. Keep the title short (about 40 characters)
+and the BLUF's first sentence short (about 70) so the JS8Call message carries both.</p>
 
 <h2>What the report holds</h2>
 <p>The routing table (Subject, Purpose, DTG, Reporting Period, Geographic Focus, Precedence, MagCon Status, Sources), then Summary (BLUF),

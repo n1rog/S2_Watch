@@ -1,0 +1,54 @@
+Bomb Threat at Kraft Heinz Plant, Columbia, Missouri
+
+BLUF: A bomb threat emptied the Kraft Heinz plant in Columbia, MO on 15 Nov; police say there is no public danger and no device has been reported. Police left the scene within about 2.5 hours. No source links this threat to the Peoria, IL bombing two days earlier.
+
+Precedence: RR – ROUTINE · DTG: 261116-0455Z · MagCon: 3 – ELEVATED · Geographic focus: Columbia, Missouri (Boone County)
+
+Background
+The Kraft Heinz plant, also called the Kraft Heinz/Oscar Mayer facility, is at 4600 Waco Road, Columbia, MO. [W1], [W2]
+Columbia police often handle bomb threats that turn out to be hoaxes. One example: a threat at the Conley Road Walmart in April 2026, where bomb technicians found no explosives. [W4]
+Two days earlier, on 13 Nov, the FBI confirmed that a real explosive device was found and made safe at the BioUrja ethanol plant in Peoria, IL. Most bomb threats are not legitimate; Peoria was the exception. [W5]
+Situation
+2340Z 15 Nov: The Columbia Police Department responded to a bomb threat at the Kraft Heinz factory in Columbia that occurred around 5:40 p.m. Sunday. [W1] 
+komu
+2340Z 15 Nov: The factory evacuated all workers, according to Lt. Anthony Bowne. [W1] 
+komu
+Evening of 15 Nov (Z time not given): Police blocked Waco Road where it meets Paris Road and asked the public to avoid the area. [W1]
+Evening of 15 Nov (Z time not given): Police said there was no danger to the public. [W1]
+0235Z 16 Nov: KOMU 8 reports the police request to avoid the area. [1]
+0409Z 16 Nov: KOMU 8 reports that police have left the factory after investigating. [2] The full story was not available, so it is unknown whether anything was found.
+0443Z 16 Nov: KRCG reports that the Columbia police investigation is ongoing. [3]
+Comments / Assessment
+Where sources agree: [1]–[3], [W1] and [W2] agree on the time (5:40 p.m. CST), the full evacuation, and the Waco Road / Paris Road closure.
+Conflicts: no conflicts found.
+Columbia Mall threat: KOMU also reports an unsubstantiated bomb threat at Columbia Mall on a Sunday morning. [W3] Its date is not confirmed, so this report does not treat it as part of this event.
+Peoria: no source connects this threat to Peoria. Two threats against Midwest plants in two days do not show a pattern on their own.
+Development	Likelihood
+The Kraft Heinz threat was a hoax, with no device present	Likely (55–80%). Basis: police said no public danger [W1], police left within about 2.5 hours [2], and local threats are usually hoaxes [W4].
+The Kraft Heinz plant reopens by its next scheduled shift	Not assessed. No source gives a reopening status.
+This threat is linked to the Peoria BioUrja device	Not assessed. No source reports a link.
+Intelligence Gaps
+How the threat was delivered: phone, email, or written.
+Whether a search found any device or suspicious item.
+Whether the plant has reopened and when workers returned.
+Whether a suspect has been identified.
+The date of the Columbia Mall threat, and whether it is related.
+Any link to the Peoria threat, which was delivered electronically. [W5]
+Mitigation Recommendations
+Plant and site operators: follow police direction and your site bomb-threat procedures. Record exactly how and when any threat arrives.
+Follow official Columbia Police Department channels for road reopenings and updates.
+Industrial and food-plant security staff: keep reporting threats to local police. Peoria shows that some threats are real.
+MAGNET Guidance
+Stations near Columbia, MO: avoid the East Waco Road / Paris Road area until police reopen it.
+Report only what you directly observe, such as police activity, road closures or reopenings, with location and Zulu time.
+Do not relay claims that this threat is tied to Peoria unless police or the FBI confirm a link.
+Tips: Columbia Police Department 573-874-7652, or Crime Stoppers 573-875-8477 to stay anonymous. [W3]
+Source List
+[1] KOMU 8 — Columbia police ask public to avoid area after bomb threat at Kraft Heinz factory (OSINT, 16 Nov 2026 0235Z)
+[2] KOMU 8 — Columbia police leave Kraft Heinz factory after investigating bomb threat (OSINT, 16 Nov 2026 0409Z)
+[3] KRCG — Columbia Police Investigate Bomb Threat at Kraft Heinz Factory (OSINT, 16 Nov 2026 0443Z)
+[W1] KOMU 8 — Columbia police ask public to avoid area after bomb threat at Kraft Heinz factory, 15 Nov 2026 — https://www.komu.com/news/columbia/columbia-police-ask-public-to-avoid-area-after-bomb-threat-at-kraft-heinz-factory/article_46cbb1e6-be82-4c84-b8dc-b11fe182e14f.html
+[W2] X posts (@ZachBitango, @JLRINVESTIGATES), 16 Nov 2026 — https://x.com/ZachBitango/status/2122164957202497829 · https://x.com/JLRINVESTIGATES/status/2122170662366171202
+[W3] KOMU 8 — Bomb threat at the Columbia Mall found to be unsubstantiated (date unconfirmed) — https://www.komu.com/news/bomb-threat-at-the-columbia-mall-found-to-be-unsubstantiated
+[W4] ABC17 News — Conley Road Walmart to reopen after all-clear, 23 Apr 2026 — https://abc17news.com/news/columbia/2026/04/23/conley-road-walmart-to-reopen-after-all-clear-customers-say-bomb-threat-led-to-evacuation/
+[W5] ABC News — Authorities investigate ‘credible’ unknown device threat at Illinois plant, 14 Nov 2026 — https://abcnews.com/US/peoria-police-urge-evacuations-after-reported-bomb-threat/story?id=138137440

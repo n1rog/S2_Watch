@@ -13,7 +13,8 @@ from PySide6.QtWidgets import (
     QToolButton, QVBoxLayout, QWidget,
 )
 
-from s2_watch.followup import flmsg_text
+from s2_watch.pasted_report import is_pasted, js8_line
+from s2_watch.radio_text import flmsg_for
 from s2_watch.ui.events_view import search_box
 
 KIND_LABELS = {"briefing": "Briefing", "report": "Report"}
@@ -213,7 +214,12 @@ class ReportsView(QWidget):
         if draft is None:
             return
         text = (self.store.get_draft(draft["id"]) or {}).get("text", "")
-        QGuiApplication.clipboard().setText(flmsg_text(text) if kind == "flmsg" or self.js8 is None else self.js8(text))
+        callsign = self.store.get_setting("operator.callsign", "")
+        if kind == "flmsg" or self.js8 is None:
+            radio = flmsg_for(text, callsign)          # the condensed summary, at most 1,500 characters
+        else:
+            radio = js8_line(text, callsign) if is_pasted(text) else self.js8(text)
+        QGuiApplication.clipboard().setText(radio)
 
     def _toggle_sent(self) -> None:
         draft = self.selected()

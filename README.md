@@ -280,8 +280,11 @@ changes until **Accept assessment**. When new reports arrive, a fresh assessment
 update beside the accepted one, with what changed (trend, probability levels, new gaps). The
 accepted assessment marks the event's trend in the lists (▲ escalating, ▬ stable, ▼ winding
 down, ? unclear), fills MAGNET drafts of the event, and is listed (trend, who, when, BLUF,
-probability lines) under COMMENTS / ASSESSMENT in shift briefings. The FLMSG and JS8Call
-versions are made from the same text. The MagCon status used is remembered for the next report.
+probability lines) under COMMENTS / ASSESSMENT in shift briefings. The FLMSG version is a
+condensed radio summary of at most 1,500 characters (subject, DTG, precedence, BLUF, then a
+share of the situation, assessment, gaps, guidance and mitigation, each shortened; no
+background, source list or citation marks), and the JS8Call message is at most 150
+characters (DTG, precedence, subject, and the BLUF's first sentence or clause when it fits). The MagCon status used is remembered for the next report.
 
 **Save** keeps the draft inside S2 Watch and writes every format, named
 `MAGNET_S2_TOPIC_YYMMDD-HHMMZ`, to the reports folder's subfolder for the UTC day: the full

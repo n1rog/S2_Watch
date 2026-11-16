@@ -628,10 +628,11 @@ class SQLiteStore:
         now = utc_iso(datetime.now(timezone.utc))
         subject, report_dtg = report.subject, report.dtg
         if not subject:
-            from s2_watch.pasted_report import is_pasted, magnet_dtg, title
+            from s2_watch.pasted_report import is_pasted, magnet_dtg, stated_dtg, title
 
-            if is_pasted(text):    # written elsewhere: its title, dated now
-                subject, report_dtg = title(text)[:120], report_dtg or magnet_dtg(datetime.now(timezone.utc))
+            if is_pasted(text):    # written elsewhere: its title, and the DTG it states (else now)
+                subject = title(text)[:120]
+                report_dtg = stated_dtg(text) or report_dtg or magnet_dtg(datetime.now(timezone.utc))
         if draft_id is not None and self.connection.execute("SELECT 1 FROM drafts WHERE id = ?", (draft_id,)).fetchone():
             self.connection.execute(
                 "UPDATE drafts SET subject = ?, dtg = ?, text = ?, updated_at = ?, origin = '' WHERE id = ?",

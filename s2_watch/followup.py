@@ -19,7 +19,7 @@ from s2_watch.models import Message
 
 MONTHS = ("JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC")
 FLMSG_WIDTH = 69
-JS8CALL_TARGET = 200          # characters: long enough for the essentials, short on the air
+JS8CALL_TARGET = 150          # characters at most: the essentials, short on the air
 # Characters that go out cleanly as JS8Call free text.
 JS8CALL_UNSAFE = re.compile(r"[^A-Z0-9 .,/?+\-@:()']")
 

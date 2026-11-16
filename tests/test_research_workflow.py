@@ -2,6 +2,7 @@
 finished report back in (Reports → New Report from Text…)."""
 
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from s2_watch.pasted_report import blocks, is_pasted, js8_line, plain_text, render_html, title, write_docx
 
@@ -34,7 +35,7 @@ def test_a_pasted_report_keeps_its_structure_in_every_format(tmp_path) -> None:
     plain = plain_text(REPORT)
     assert "**" not in plain and "#" not in plain.splitlines()[0] and "the FAA notice (https://www.faa.gov/newsroom)" in plain
     line = js8_line(REPORT, "n1rog")
-    assert line.startswith("MAGNET S2 NATIONWIDE FAA GROUND STOP") and line.endswith("DE N1ROG") and len(line) <= 200
+    assert line.startswith("MAGNET S2 NATIONWIDE FAA GROUND STOP") and line.endswith("DE N1ROG") and len(line) <= 150
     html = render_html(REPORT)
     assert "<h1>" in html and "<strong>BLUF:</strong>" in html and "<table>" in html and 'href="https://www.faa.gov/newsroom"' in html
     write_docx(REPORT, tmp_path / "r.docx")
@@ -93,3 +94,53 @@ def test_the_call_sign_is_set_in_the_sources_window(main_window) -> None:
     window.open_settings_dialog(window.sources_dialog)
     assert window.operator_callsign.text() == "N1ROG"
     window.sources_dialog.close()
+
+
+COPIED = (Path(__file__).parent / "data_copied_report.txt").read_text()   # copied from Claude's display, not Markdown
+
+
+def test_a_report_copied_from_a_chat_display_is_read_as_one() -> None:
+    from s2_watch.pasted_report import stated_dtg, stated_precedence
+
+    assert is_pasted(COPIED)
+    assert title(COPIED) == "Bomb Threat at Kraft Heinz Plant, Columbia, Missouri"
+    assert stated_dtg(COPIED) == "261116-0455Z" and stated_precedence(COPIED) == "RR - ROUTINE"
+    headings = [block.text for block in blocks(COPIED) if block.kind == "heading"]
+    assert headings[:3] == ["Background", "Situation", "Comments / Assessment"]
+    assert not any(block.text == "komu" for block in blocks(COPIED))         # a citation chip, not text
+
+
+def test_the_radio_versions_fit_their_limits() -> None:
+    from s2_watch.radio_text import FLMSG_LIMIT, flmsg_for
+
+    for text in (COPIED, REPORT):
+        flmsg = flmsg_for(text, "N1ROG")
+        assert len(flmsg) <= FLMSG_LIMIT == 1500 and flmsg.endswith("DE N1ROG\n")
+        assert all(line == line.upper() and len(line) <= 69 for line in flmsg.splitlines())
+        assert "[W" not in flmsg and "SOURCE LIST" not in flmsg and "BACKGROUND" not in flmsg
+        assert len(js8_line(text, "N1ROG")) <= 150
+    flmsg = flmsg_for(COPIED, "N1ROG")
+    for heading in ("BLUF:", "SITUATION:", "ASSESSMENT:", "GAPS:", "GUIDANCE:"):
+        assert heading in flmsg                       # every section gets a share
+    assert "MORE IN FULL REPORT" in flmsg
+    assert js8_line(COPIED, "N1ROG").startswith("MAGNET S2 261116-0455Z RR BOMB THREAT AT KRAFT HEINZ PLANT")
+
+
+def test_s2_watchs_own_reports_get_the_condensed_version_too(tmp_path) -> None:
+    from datetime import datetime, timedelta, timezone
+
+    from s2_watch.radio_text import flmsg_for
+    from s2_watch.s2_report import briefing_report, js8_report
+    from s2_watch.storage import SQLiteStore
+    from tests.test_navigation import add_event
+
+    store = SQLiteStore(tmp_path / "s2.db")
+    for index in range(12):
+        add_event(store, f"Water main break number {index} in Pickens floods Main Street, crews on scene",
+                  datetime.now(timezone.utc))
+    events = store.events_since(datetime.now(timezone.utc) - timedelta(days=1))
+    text = briefing_report(events, datetime.now(timezone.utc), 24, set())
+    assert len(text) > 1500
+    flmsg = flmsg_for(text, "N1ROG")
+    assert len(flmsg) <= 1500 and flmsg.startswith("MAGNET S2 - ")
+    assert len(js8_report(text, "N1ROG")) <= 150

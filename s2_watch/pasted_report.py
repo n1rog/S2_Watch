@@ -41,9 +41,37 @@ def magnet_dtg(when) -> str:
     return when.astimezone(timezone.utc).strftime("%y%m%d-%H%MZ")
 
 
+# Section names a report written elsewhere uses, as plain lines when copied from a chat's display
+# ("Situation", "Comments / Assessment"), so they are read as headings.
+SECTION_NAMES = re.compile(
+    r"^(?:summary(?:\s*\(bluf\))?|bluf|bottom\s+line(?:\s+up\s+front)?|background|situation|key\s+facts|timeline|"
+    r"comments(?:\s*/\s*assessment)?|assessment|analysis|probabilit(?:y|ies)|intelligence\s+gaps|gaps|"
+    r"mitigation(?:\s+recommendations)?|recommendations|magnet\s+guidance|guidance|source\s+list|sources|"
+    r"references)$", re.IGNORECASE)
+# A citation chip copied from a chat's display: a lone outlet or site name ("komu", "kmiz.com").
+_CHIP = re.compile(r"^[a-z0-9][a-z0-9.\-]{0,24}$")
+_DTG = re.compile(r"\bDTG\**\s*[:\-]?\s*\**\s*(\d{6}-\d{4}Z)", re.IGNORECASE)
+_PRECEDENCE = re.compile(r"\bPrecedence\**\s*[:\-]\s*\**\s*((?:FL|IM|PR|RR)\s*[–\-]\s*[A-Za-z]+)", re.IGNORECASE)
+
+
+def is_native(text: str) -> bool:
+    """An S2 Watch report or briefing (MAGNET header with a SUBJECT line), or a follow-up form."""
+    return bool(parse_report(text).fields.get("SUBJECT") or report_fields(text).get("SUBJECT"))
+
+
 def is_pasted(text: str) -> bool:
-    """A report written elsewhere: neither an S2 Watch MAGNET report nor a follow-up form."""
-    return bool(text.strip()) and not parse_report(text).sections and not report_fields(text).get("SUBJECT")
+    """A report written elsewhere (Markdown, or text copied from a chat): not one of S2 Watch's own."""
+    return bool(text.strip()) and not is_native(text)
+
+
+def stated_dtg(text: str) -> str:
+    found = _DTG.search(text)
+    return found.group(1).upper() if found else ""
+
+
+def stated_precedence(text: str) -> str:
+    found = _PRECEDENCE.search(text)
+    return re.sub(r"\s*[–\-]\s*", " - ", found.group(1)).upper() if found else ""
 
 
 def blocks(text: str) -> list[Block]:
@@ -73,7 +101,13 @@ def blocks(text: str) -> list[Block]:
         if not line:
             flush()
             continue
+        if _CHIP.match(line):
+            continue          # a citation chip from a chat's display, not text
         heading, bullet, numbered = _HEADING.match(line), _BULLET.match(line), _NUMBERED.match(line)
+        if not heading and SECTION_NAMES.match(line.strip("*:# ")):
+            flush()
+            out.append(Block("heading", line.strip("*:# "), 2))
+            continue
         if _RULE.match(line):
             flush()
             out.append(Block("rule"))
@@ -87,6 +121,11 @@ def blocks(text: str) -> list[Block]:
             flush()
             out.append(Block("numbered", numbered.group(2), int(numbered.group(1))))
         else:
+            # A line ending a sentence is its own paragraph (text copied from a chat's display puts
+            # each item on one line); a line that doesn't continues one (Markdown wrapped by hand).
+            if paragraph and re.search(r"[.!?:)\]\"”]$", paragraph[-1]):
+                out.append(Block("paragraph", " ".join(paragraph)))
+                paragraph.clear()
             paragraph.append(line)
     flush()
     return out
@@ -138,10 +177,31 @@ def plain_text(text: str) -> str:
 
 
 def title(text: str) -> str:
+    """The report's name: its opening "#" heading or line, not a section name or the BLUF."""
+    for raw in text.splitlines():
+        line = _plain_inline(raw.strip()).strip(" *#")
+        if not line or _CHIP.match(line):
+            continue
+        if SECTION_NAMES.match(line.strip(":")) or re.match(r"^(?:BLUF|bottom\s+line)\b", line, re.IGNORECASE):
+            break
+        return line[:160]
     found = next((block.text for block in blocks(text) if block.kind == "heading"), "")
-    if not found:
-        found = next((line.strip() for line in text.splitlines() if line.strip()), "")
     return _plain_inline(found).strip(" *#")
+
+
+def bluf_text(text: str) -> str:
+    """The whole bottom line: the "BLUF:" paragraph, or the paragraph under a BLUF/Summary heading."""
+    items = blocks(text)
+    for index, block in enumerate(items):
+        plain = _plain_inline(block.text)
+        found = re.match(r"^(?:BLUF|bottom\s+line(?:\s+up\s+front)?)\s*[:\-–—]\s*(.+)", plain, re.IGNORECASE)
+        if found:
+            return found.group(1)
+        if block.kind == "heading" and re.match(r"^(?:BLUF|bottom\s+line|summary)", plain, re.IGNORECASE):
+            following = next((item for item in items[index + 1:] if item.kind in ("paragraph", "bullet")), None)
+            if following:
+                return _plain_inline(following.text)
+    return ""
 
 
 def bottom_line(text: str) -> str:
@@ -162,15 +222,20 @@ def bottom_line(text: str) -> str:
 
 
 def js8_line(text: str, callsign: str = "") -> str:
-    """A short JS8Call message: the title, and the bottom line when it fits."""
-    head = f"MAGNET S2 {title(text)}".strip()
+    """A short JS8Call message (at most JS8CALL_TARGET characters): DTG, precedence, the title, and
+    the bottom line's first sentence, or its first clause, when it fits."""
+    precedence = stated_precedence(text).split(" ")[0]
+    head = " ".join(part for part in ("MAGNET S2", stated_dtg(text), precedence, title(text)) if part)
     tail = f" DE {callsign.upper()}" if callsign else ""
     first = bottom_line(text)
+    candidates = [first, re.split(r"\s*[;:—–]\s+|,\s+(?:and|but|while)\s+", first, maxsplit=1)[0]] if first else []
     out = head
-    if first and len(ascii_upper(f"{head}: {first}{tail}")) <= JS8CALL_TARGET:
-        out = f"{head}: {first}"
-    elif len(ascii_upper(head + tail)) > JS8CALL_TARGET:
-        out = head[:JS8CALL_TARGET - len(tail) - 3].rstrip() + "..."
+    for candidate in candidates:
+        if candidate and len(ascii_upper(f"{head}: {candidate}{tail}")) <= JS8CALL_TARGET:
+            out = f"{head}: {candidate.rstrip('.')}"
+            break
+    if len(ascii_upper(out + tail)) > JS8CALL_TARGET:
+        out = out[:JS8CALL_TARGET - len(tail) - 3].rsplit(" ", 1)[0] + "..."
     return JS8CALL_UNSAFE.sub("", ascii_upper(out + tail)).strip()
 
 
