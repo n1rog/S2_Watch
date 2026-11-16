@@ -586,7 +586,9 @@ latest CQ frame or its VarAC contact, so the station is placed on the map.
 Settings live in the **Configuration** menu: **Analysis Mode** and **Theme**
 are submenus you can switch directly, and **Watch Forms…**, **Display…**, and
 **Sources…** open settings windows that can stay open while you monitor. The
-window's status bar shows a one-line connection summary.
+window's status bar shows a one-line connection summary. **Sources…** also holds **Your
+call sign**, which signs reports, briefings, JS8Call messages, research packets and the
+assessments you accept (the draft window's "Your callsign" field sets the same one).
 
 All configured source adapters initialize automatically at launch. The
 **Configuration → Sources…** window shows a per-application status light: green indicates an

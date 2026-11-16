@@ -526,6 +526,13 @@ class MainWindow(QMainWindow):
         self.display_dialog = self.create_settings_dialog("Display", display_layout)
 
         sources_layout = QFormLayout()
+        # The operator's call sign: on reports and briefings (FROM, DE), research packets, accepted assessments.
+        self.operator_callsign = QLineEdit(self.store.get_setting("operator.callsign", "").strip().upper())
+        self.operator_callsign.setPlaceholderText("e.g. N0ABC")
+        self.operator_callsign.setToolTip("Your call sign: it signs your reports, briefings and JS8Call messages "
+                                          "(DE N0ABC), research packets and the assessments you accept")
+        self.operator_callsign.editingFinished.connect(self.operator_callsign_changed)
+        sources_layout.addRow("Your call sign", self.operator_callsign)
         sources_layout.addRow("JS8Call TCP host", self.host)
         sources_layout.addRow("JS8Call TCP port", self.port)
         sources_layout.addRow("MagCommstat database", self.magcommstat_path)
@@ -555,6 +562,7 @@ class MainWindow(QMainWindow):
         sources_layout.addRow(connect)
         sources_layout.addRow(status_group)
         self.sources_dialog = self.create_settings_dialog("Sources", sources_layout)
+        self.sources_dialog.finished.connect(lambda _result: self.operator_callsign_changed())
 
         configuration_menu = self.menuBar().addMenu("Configuration")
         analysis_menu = configuration_menu.addMenu("Analysis Mode")
@@ -1014,6 +1022,8 @@ class MainWindow(QMainWindow):
         return dialog
 
     def open_settings_dialog(self, dialog: QDialog) -> None:
+        if dialog is getattr(self, "sources_dialog", None):     # a draft window may have changed it since
+            self.operator_callsign.setText(self.store.get_setting("operator.callsign", "").strip().upper())
         dialog.show()
         dialog.raise_()
         dialog.activateWindow()
@@ -1046,7 +1056,15 @@ class MainWindow(QMainWindow):
             f"<p><b>Source code:</b> <a href='{REPOSITORY_URL}'>{REPOSITORY_URL}</a></p>",
         )
 
+    def operator_callsign_changed(self) -> None:
+        callsign = self.operator_callsign.text().strip().upper()
+        self.operator_callsign.setText(callsign)
+        if callsign != self.store.get_setting("operator.callsign", ""):
+            self.store.set_setting("operator.callsign", callsign)
+            self.notify(f"Call sign set to {callsign}" if callsign else "Call sign cleared")
+
     def connect_js8call(self) -> None:
+        self.operator_callsign_changed()
         self.store.set_setting("js8call.host", self.host.text().strip())
         self.store.set_setting("js8call.port", str(self.port.value()))
         self.store.set_setting("magcommstat.database", self.magcommstat_path.text().strip())

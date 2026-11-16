@@ -82,3 +82,14 @@ def test_the_bottom_line_is_not_cut_at_an_abbreviation() -> None:
     report = ("# Ground stop\n\n**BLUF:** A nationwide FAA ground stop halted U.S. departures for 3 hours. "
               "It is very likely not hostile.")
     assert bottom_line(report) == "A nationwide FAA ground stop halted U.S. departures for 3 hours."
+
+
+def test_the_call_sign_is_set_in_the_sources_window(main_window) -> None:
+    window = main_window()
+    window.operator_callsign.setText("n0abc ")
+    window.operator_callsign_changed()
+    assert window.store.get_setting("operator.callsign") == "N0ABC" and window.operator_callsign.text() == "N0ABC"
+    window.store.set_setting("operator.callsign", "N1ROG")          # changed in a draft window meanwhile
+    window.open_settings_dialog(window.sources_dialog)
+    assert window.operator_callsign.text() == "N1ROG"
+    window.sources_dialog.close()
