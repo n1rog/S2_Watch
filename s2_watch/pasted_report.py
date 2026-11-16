@@ -21,6 +21,8 @@ _BULLET = re.compile(r"^[-*•+]\s+(.*)$")
 _NUMBERED = re.compile(r"^(\d{1,3})[.)]\s+(.*)$")
 _RULE = re.compile(r"^(?:-{3,}|\*{3,}|_{3,})$")
 _TABLE_RULE = re.compile(r"^\|?\s*:?-{2,}:?\s*(?:\|\s*:?-{2,}:?\s*)*\|?$")
+# A sentence ends at . ! or ? after a lower-case word or a number, before a capital: not "U.S." or "D.C."
+_SENTENCE_END = re.compile(r"(?<=[a-z0-9)%][.!?])\s+(?=[A-Z0-9\"'(])")
 _INLINE = re.compile(r"\*\*(.+?)\*\*|__(.+?)__|\[([^\]]+)\]\((https?://[^)\s]+)\)|(https?://[^\s)<>]+)|`([^`]+)`")
 
 
@@ -150,13 +152,13 @@ def bottom_line(text: str) -> str:
         plain = _plain_inline(block.text)
         found = re.match(r"^(?:BLUF|bottom\s+line(?:\s+up\s+front)?)\s*[:\-–—]\s*(.+)", plain, re.IGNORECASE)
         if found:
-            return re.split(r"(?<=\.)\s", found.group(1), maxsplit=1)[0]
+            return _SENTENCE_END.split(found.group(1), maxsplit=1)[0]
         if block.kind == "heading" and re.match(r"^(?:BLUF|bottom\s+line|summary)", plain, re.IGNORECASE):
             following = next((item for item in items[index + 1:] if item.kind in ("paragraph", "bullet")), None)
             if following:
-                return re.split(r"(?<=\.)\s", _plain_inline(following.text), maxsplit=1)[0]
+                return _SENTENCE_END.split(_plain_inline(following.text), maxsplit=1)[0]
     first = next((block for block in items if block.kind == "paragraph"), None)
-    return re.split(r"(?<=\.)\s", _plain_inline(first.text), maxsplit=1)[0] if first else ""
+    return _SENTENCE_END.split(_plain_inline(first.text), maxsplit=1)[0] if first else ""
 
 
 def js8_line(text: str, callsign: str = "") -> str:

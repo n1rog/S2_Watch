@@ -74,3 +74,11 @@ def test_the_research_packet_numbers_the_reports_as_the_panel_does(main_window) 
     assert window.packet_event[0] == event_id
     dialog = window.new_report_from_text(text=REPORT, show=False)
     assert dialog.event_id == event_id and "Water main break" in dialog.windowTitle()
+
+
+def test_the_bottom_line_is_not_cut_at_an_abbreviation() -> None:
+    from s2_watch.pasted_report import bottom_line
+
+    report = ("# Ground stop\n\n**BLUF:** A nationwide FAA ground stop halted U.S. departures for 3 hours. "
+              "It is very likely not hostile.")
+    assert bottom_line(report) == "A nationwide FAA ground stop halted U.S. departures for 3 hours."
