@@ -649,6 +649,7 @@ class MainWindow(QMainWindow):
         # Reports: the daily work. Tools: the occasional ones.
         reports_menu = self.menuBar().addMenu("Reports")
         reports_menu.addAction("New Briefing…").triggered.connect(self.draft_briefing)
+        reports_menu.addAction("New Report from Text…").triggered.connect(self.new_report_from_text)
         self.assess_action = assess_action = reports_menu.addAction("AI Assessment of Selected Event")
         assess_action.setShortcut(QKeySequence("Ctrl+Shift+A"))
         assess_action.setToolTip("What the selected event's reports add up to, by the local AI (Help → Local AI)")
@@ -895,6 +896,7 @@ class MainWindow(QMainWindow):
         self.reports_view.open_requested.connect(self.open_saved_draft)
         self.reports_view.event_requested.connect(self.open_event)
         self.reports_view.draft_briefing.connect(self.draft_briefing)
+        self.reports_view.new_from_text.connect(self.new_report_from_text)
         self.reports_view.changed.connect(self.drafts_changed)
         tabs.insertTab(3, self.reports_view, "Reports")
         self.metrics_view = MetricsView(self.store)
@@ -1239,7 +1241,46 @@ class MainWindow(QMainWindow):
             menu.addAction("Open in Events tab").triggered.connect(
                 lambda: (self.tabs.setCurrentWidget(self.events_view), self.events_view.table.select_event(event_ids[0])))
         menu.addAction("Show its reports").triggered.connect(lambda: self.show_reports(report_ids))
+        if single:
+            menu.addAction("Copy research packet").triggered.connect(lambda: self.copy_research_packet(event_ids[0]))
         menu.exec(position)
+
+    def new_report_from_text(self, *_args, text: str = "", show: bool = True):
+        """A report written elsewhere (a Claude research conversation...), pasted in: Save writes its
+        FLMSG, JS8Call, Word and web-page versions and lists it in the Reports tab. It is linked to
+        the event of the last research packet copied. The dialog (shown unless ``show`` is False)."""
+        event_id, event_title = getattr(self, "packet_event", (None, ""))
+        dialog = FollowUpDialog(
+            None, self.store, self, ollama=None, text=text, js8=self._s2_js8,
+            title="New report" + (f" — {event_title}" if event_title else "") + ": paste the finished report",
+            file_prefix="MAGNET_S2", callsign=self.store.get_setting("operator.callsign", ""), export=True,
+            draft_kind="report", event_id=event_id)
+        dialog.mark.setVisible(False)
+        dialog.full.setPlaceholderText("Paste the finished report here (Markdown is fine: # headings, **bold**, "
+                                       "- lists, | tables |). Save writes every format to the reports folder.")
+        if show:
+            dialog.exec()
+            self.drafts_changed()
+        return dialog
+
+    def copy_research_packet(self, event_id: int) -> str:
+        """Copy the event's research packet to paste into a research conversation; a report pasted
+        back (Reports → New Report from Text…) is linked to this event. The packet."""
+        from s2_watch import __version__
+        from s2_watch.research_packet import research_packet
+
+        event = self.store.event_by_id(event_id)
+        if event is None:
+            return ""
+        reports = self.store.event_reports(event_id)
+        text = research_packet(event, reports, concern=self.event_concern(event),
+                               assessment=self.store.accepted_assessment(event_id),
+                               callsign=self.store.get_setting("operator.callsign", ""), version=__version__)
+        QApplication.clipboard().setText(text)
+        self.packet_event = (event_id, event.title)
+        self.notify(f"Research packet copied: {event.title}, {len(reports)} report{'s' if len(reports) != 1 else ''}. "
+                    "Paste it into your research conversation.", 10_000, event_id=event_id)
+        return text
 
     def selected_event_id(self) -> int | None:
         """The event selected in the Events tab (when shown) or in the list under the map."""
@@ -1381,6 +1422,7 @@ class MainWindow(QMainWindow):
         detail.mark.connect(lambda event_id, status: self.mark_reports(self.event_report_ids(event_id), status))
         detail.edit_note.connect(lambda event_id: self.edit_note(self.event_report_ids(event_id)))
         detail.show_reports.connect(lambda event_id: self.show_reports(self.event_report_ids(event_id)))
+        detail.research_packet.connect(self.copy_research_packet)
         detail.close_requested.connect(self.close_event)
         detail.fix_location.connect(self.fix_report_location)
         detail.reopen_requested.connect(self.reopen_event)

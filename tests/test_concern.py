@@ -61,7 +61,7 @@ def test_tools_are_in_their_own_menu(main_window) -> None:
     window = main_window()
     menus = {action.text(): [item.text() for item in action.menu().actions() if item.text()]
              for action in window.menuBar().actions() if action.menu()}
-    assert menus["Reports"] == ["New Briefing…", "AI Assessment of Selected Event", "Add Intelligence Entry…",
+    assert menus["Reports"] == ["New Briefing…", "New Report from Text…", "AI Assessment of Selected Event", "Add Intelligence Entry…",
                                 "Intelligence Entries…", "Reports Library"]
     assert menus["Tools"] == ["Sender Track Records…", "Keyword Noise…", "Metrics", "Fetch Missed News (GDELT)…"]
 

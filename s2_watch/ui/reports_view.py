@@ -29,6 +29,7 @@ class ReportsView(QWidget):
     open_requested = Signal(int)           # draft id
     event_requested = Signal(int)          # event id
     draft_briefing = Signal()
+    new_from_text = Signal()               # paste a report written elsewhere
     changed = Signal()                     # sent / deleted
 
     def __init__(self, store, format_time, js8=None, parent=None) -> None:
@@ -55,6 +56,11 @@ class ReportsView(QWidget):
         top.addWidget(self.search)
         top.addWidget(self.count)
         top.addStretch(1)
+        pasted = QPushButton("New from text…")
+        pasted.setToolTip("Paste a finished report written elsewhere (a Claude research conversation, a word processor): "
+                          "Save writes its FLMSG, JS8Call, Word and web-page versions and lists it here")
+        pasted.clicked.connect(self.new_from_text.emit)
+        top.addWidget(pasted)
         top.addWidget(briefing)
 
         self.table = QTableWidget(0, 7)

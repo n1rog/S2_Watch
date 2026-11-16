@@ -54,10 +54,16 @@ def write_text(path: Path, text: str, encoding: str = "utf-8") -> Path:
 
 def save_all(folder: Path, stem: str, full: str, flmsg: str, js8call: str, magnet: bool) -> list[Path]:
     """Every format of one report in ``folder``; the files written."""
+    from s2_watch import pasted_report
+
     written = [write_text(folder / f"{stem}.txt", full),
                write_text(folder / f"{stem}_FLMSG.txt", flmsg, "ascii"),
                write_text(folder / f"{stem}_JS8Call.txt", js8call, "ascii")]
-    if magnet:
+    if magnet and pasted_report.is_pasted(full):
+        # Written elsewhere (Markdown): its own headings, lists and tables, not the MAGNET layout.
+        written.append(write_atomic(folder / f"{stem}.docx", lambda temporary: pasted_report.write_docx(full, temporary)))
+        written.append(write_atomic(folder / f"{stem}.html", lambda temporary: pasted_report.write_html(full, temporary)))
+    elif magnet:
         from s2_watch.s2_docx import write_docx
         from s2_watch.s2_html import write_html
         from s2_watch.s2_report import parse_report

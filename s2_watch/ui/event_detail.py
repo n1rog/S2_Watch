@@ -48,6 +48,7 @@ class EventDetail(QWidget):
     mark = Signal(int, str)        # event id, status ("" clears)
     edit_note = Signal(int)
     show_reports = Signal(int)
+    research_packet = Signal(int)  # copy the event's research packet (event id)
     close_requested = Signal(int)
     fix_location = Signal(int)     # report id
     reopen_requested = Signal(int)
@@ -92,6 +93,10 @@ class EventDetail(QWidget):
         self.label_button.setMenu(menu)
         self.reports_button = QPushButton("Show its reports")
         self.reports_button.clicked.connect(lambda: self.current and self.show_reports.emit(self.current.event_id))
+        self.packet_button = QPushButton("Copy research packet")
+        self.packet_button.setToolTip("Copy everything S2 Watch knows about this event, its reports numbered as here, to "
+                                      "paste into a research conversation (Claude or another assistant)")
+        self.packet_button.clicked.connect(lambda: self.current and self.research_packet.emit(self.current.event_id))
         self.close_button = QPushButton("Close event…")
         self.close_button.setToolTip("It's over: show it as closed, and list it as resolved in briefings. "
                                      "A new report reopens it.")
@@ -105,7 +110,7 @@ class EventDetail(QWidget):
         buttons = QHBoxLayout()
         # The same order everywhere: AI assessment, Draft follow-up, Show on map, Close event.
         for button in (self.assess_button, self.draft_button, self.map_button, self.close_button, self.label_button,
-                       self.reports_button):
+                       self.reports_button, self.packet_button):
             buttons.addWidget(button)
         buttons.addStretch(1)
         layout = QVBoxLayout(self)
@@ -139,6 +144,7 @@ class EventDetail(QWidget):
         if event is None:
             self._shown_id = self._shown_html = None
         for button in (self.map_button, self.draft_button, self.assess_button, self.label_button, self.reports_button,
+                       self.packet_button,
                        self.close_button):
             button.setEnabled(event is not None)
         self.close_button.setText("Reopen event" if event is not None and event.closed_at is not None

@@ -225,6 +225,16 @@ with events labelled Of interest or Follow-up always shown.
 
 ## MAGNET S2 reports and briefings
 
+**Researching a report elsewhere.** S2 Watch can be the start and end of a report researched
+in a conversation with Claude (or another assistant). **Copy research packet** (the event
+panel, or right-click an event) copies everything S2 Watch knows about the event: its
+confirmation, concern level, accepted assessment and every report numbered as in the panel
+(sender, time, radio/official/news, place, link), with instructions to cite the reports by
+number and use estimative language. Paste it to start the research. The finished report,
+Markdown included, goes back in with **Reports → New Report from Text…**: **Save** writes
+its text, FLMSG, JS8Call, Word and web-page versions (headings, lists and tables kept) and
+lists it on the Reports tab, linked to the packet's event.
+
 Follow-up reports (right-click a report or event → **Draft follow-up report…**) and shift
 briefings (**Draft briefing…** on the Map, Events, Needs Review or Reports tab, or **Reports →
 New Briefing…**, all the same: each asks the period, since the last briefing by default, and

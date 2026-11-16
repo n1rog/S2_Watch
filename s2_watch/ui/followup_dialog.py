@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 
 from s2_watch.analysis.ollama import draft_assessment
 from s2_watch.followup import JS8CALL_TARGET, FollowUpFacts, dtg, flmsg_text, full_report, js8call_text
+from s2_watch.pasted_report import is_pasted, js8_line, magnet_dtg, plain_text, title
 from s2_watch import report_files
 from s2_watch.s2_report import PRECEDENCE_LEVELS, file_stem, parse_report
 
@@ -220,8 +221,12 @@ class FollowUpDialog(QDialog):
     def _derive(self) -> None:
         report = self.full.toPlainText()
         self._show_precedence(report)
-        self.flmsg.setPlainText(flmsg_text(report))
-        message = self.js8(report)
+        if is_pasted(report):     # written elsewhere (Markdown): plain text for radio, title and bottom line for JS8Call
+            self.flmsg.setPlainText(flmsg_text(plain_text(report)))
+            message = js8_line(report, self.callsign.text().strip())
+        else:
+            self.flmsg.setPlainText(flmsg_text(report))
+            message = self.js8(report)
         self.js8call.setPlainText(message)
         over = len(message) > JS8CALL_TARGET
         self.js8call_count.setText(f"{len(message)} characters" + (" — consider shortening the subject" if over else ""))
@@ -273,6 +278,8 @@ class FollowUpDialog(QDialog):
 
     def _stem(self) -> str:
         report = parse_report(self.full.toPlainText())
+        if is_pasted(self.full.toPlainText()):     # written elsewhere: named after its title, dated now
+            return file_stem(title(self.full.toPlainText()), magnet_dtg(datetime.now(timezone.utc)))
         if self.export or report.subject:
             return file_stem(report.subject, report.dtg)
         when = (self.facts.now or self.facts.message.received_at) if self.facts else datetime.now(timezone.utc)

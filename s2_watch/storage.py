@@ -626,17 +626,23 @@ class SQLiteStore:
 
         report = parse_report(text)
         now = utc_iso(datetime.now(timezone.utc))
+        subject, report_dtg = report.subject, report.dtg
+        if not subject:
+            from s2_watch.pasted_report import is_pasted, magnet_dtg, title
+
+            if is_pasted(text):    # written elsewhere: its title, dated now
+                subject, report_dtg = title(text)[:120], report_dtg or magnet_dtg(datetime.now(timezone.utc))
         if draft_id is not None and self.connection.execute("SELECT 1 FROM drafts WHERE id = ?", (draft_id,)).fetchone():
             self.connection.execute(
                 "UPDATE drafts SET subject = ?, dtg = ?, text = ?, updated_at = ?, origin = '' WHERE id = ?",
-                (report.subject, report.dtg, text, now, draft_id))   # edited: the operator's now
+                (subject, report_dtg, text, now, draft_id))   # edited: the operator's now
         else:
             if event_id is None and report_id is not None:
                 event_id = self.event_of_report(report_id)
             draft_id = self.connection.execute(
                 """INSERT INTO drafts(kind, subject, dtg, text, report_id, created_at, updated_at, event_id, origin)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (kind, report.subject, report.dtg, text, report_id, now, now, event_id, origin)).lastrowid
+                (kind, subject, report_dtg, text, report_id, now, now, event_id, origin)).lastrowid
         self.connection.commit()
         return int(draft_id)
 
